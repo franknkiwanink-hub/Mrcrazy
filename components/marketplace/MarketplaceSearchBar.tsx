@@ -7,7 +7,8 @@
 // dropdown — same scoring/highlight logic, just relocated into the
 // overlay. AI Search is untouched (matches the original's
 // mpAiSearchBtn/mpAiSearchPanel, unaffected by this change).
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import type { Listing } from "@/lib/listings";
 import SearchOverlay from "@/components/marketplace/SearchOverlay";
 
@@ -23,6 +24,18 @@ export default function MarketplaceSearchBar({
   onOpen: (listing: Listing) => void;
 }) {
   const [overlayOpen, setOverlayOpen] = useState(false);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // Opened via BottomNav's global search button (/marketplace?focusSearch=1)
+  // rather than tapping the search bar directly — same overlay either way.
+  useEffect(() => {
+    if (searchParams.get("focusSearch") === "1") {
+      setOverlayOpen(true);
+      router.replace(pathname);
+    }
+  }, [searchParams, router, pathname]);
 
   return (
     <div className="mp-search-wrap">
