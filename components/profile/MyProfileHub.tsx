@@ -14,6 +14,7 @@ import { useToast } from "@/lib/useToast";
 import { useLimits } from "@/lib/useLimits";
 import SellerBadges from "@/components/seller/SellerBadges";
 import { logout } from "@/lib/authActions";
+import { buildListingSlug } from "@/lib/slug";
 
 // Ports the PROFILE MODAL from Js/profile.js + Js/profile-early.js
 // (index.html lines 12099-12279 and 17189-18238) as a real routed page at
@@ -756,7 +757,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                           className="pm-listing-card pm-favorite-card"
                           key={f.id}
                           style={{ cursor: "pointer", position: "relative" }}
-                          onClick={() => router.push(`/listing/${f.listingId}`)}
+                          onClick={() => router.push(`/listing/${buildListingSlug(f.title, f.listingId)}`)}
                         >
                           <button
                             className="pm-favorite-remove-btn"
