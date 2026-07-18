@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getListingById } from "./getListing";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
 import { fmtPrice, type Listing } from "@/lib/listings";
+import { buildListingSlug } from "@/lib/slug";
 import ListingViewBeacon from "./ListingViewBeacon";
 import SimilarListingsStrip from "@/components/listing/SimilarListingsStrip";
 import AppListingBody from "@/components/listing/AppListingBody";
@@ -52,7 +53,7 @@ export async function generateMetadata({
   const title = `${listing.title || "Listing"} — Siterifty`;
   const description = buildDescription(listing);
   const baseUrl = getPublicBaseUrl();
-  const url = `${baseUrl}/listing/${listing.id}`;
+  const url = `${baseUrl}/listing/${buildListingSlug(listing.title, listing.id)}`;
 
   // og:image / twitter:image are no longer set manually here — the
   // sibling opengraph-image.tsx route generates a branded, per-listing
@@ -87,6 +88,17 @@ export default async function ListingDetailPage({
 
   if (!listing || !isPubliclyVisible(listing)) {
     notFound();
+  }
+
+  // Canonicalize: a legacy bare-id link, or a link whose title-slug
+  // prefix has gone stale after the listing was retitled, both still
+  // resolve correctly (getListingById only ever trusts the id suffix —
+  // see lib/slug.ts), but should permanently redirect to the current
+  // canonical slug so there's exactly one indexable URL per listing and
+  // shared links stay in sync with the listing's current title.
+  const canonicalSlug = buildListingSlug(listing.title, listing.id);
+  if (decodeURIComponent(id) !== canonicalSlug) {
+    redirect(`/listing/${canonicalSlug}`);
   }
 
   const type = listing.type || "website";
