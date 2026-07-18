@@ -61,15 +61,21 @@ const TRANSFER_METHODS: { value: string; label: string; sub?: string; featured?:
 ];
 
 // Per-slot aspect ratio requirement — mirrors LFM_SLOT_RATIOS exactly.
-type SlotSpec =
-  | { orientation?: undefined; w: number; h: number; label: string; role: string; caption: string; hint: string }
-  | { orientation: "landscape"; w?: undefined; h?: undefined; label: string; role: string; caption: string; hint: string };
+type SlotSpec = {
+  orientation: "portrait" | "landscape";
+  w: number | null;
+  h: number | null;
+  label: string;
+  role: string;
+  caption: string;
+  hint: string;
+};
 
 const SLOT_SPECS: SlotSpec[] = [
-  { w: 3, h: 4, label: "3:4 portrait", role: "portrait", caption: "Portrait 1 (shown on card)", hint: "3:4 ratio — e.g. 900×1200px" },
-  { w: 3, h: 4, label: "3:4 portrait", role: "portrait", caption: "Portrait 2 (gallery)", hint: "3:4 ratio — e.g. 900×1200px" },
-  { orientation: "landscape", label: "landscape", role: "landscape", caption: "Landscape 1 (shown on card)", hint: "wider than tall" },
-  { orientation: "landscape", label: "landscape", role: "landscape", caption: "Landscape 2 (gallery)", hint: "wider than tall" },
+  { orientation: "portrait", w: 3, h: 4, label: "3:4 portrait", role: "portrait", caption: "Portrait 1 (shown on card)", hint: "3:4 ratio — e.g. 900×1200px" },
+  { orientation: "portrait", w: 3, h: 4, label: "3:4 portrait", role: "portrait", caption: "Portrait 2 (gallery)", hint: "3:4 ratio — e.g. 900×1200px" },
+  { orientation: "landscape", w: null, h: null, label: "landscape", role: "landscape", caption: "Landscape 1 (shown on card)", hint: "wider than tall" },
+  { orientation: "landscape", w: null, h: null, label: "landscape", role: "landscape", caption: "Landscape 2 (gallery)", hint: "wider than tall" },
 ];
 const RATIO_TOLERANCE = 0.06;
 
@@ -345,7 +351,7 @@ export default function WebsiteListingForm() {
             }));
             return;
           }
-        } else if (spec.w && spec.h) {
+        } else if (spec.w != null && spec.h != null) {
           const actualRatio = img.naturalWidth / img.naturalHeight;
           const targetRatio = spec.w / spec.h;
           const diff = Math.abs(actualRatio - targetRatio) / targetRatio;
