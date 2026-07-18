@@ -96,7 +96,20 @@ export default function DisputePicker({ open, onClose }: { open: boolean; onClos
       const loaded: DisputableDeal[] = snap.docs
         .map((docSnap) => {
           const data = docSnap.data() as Record<string, unknown>;
-          return { ...(data as DisputableDeal), dealId: (data.dealId as string) || docSnap.id };
+          const deal: DisputableDeal = {
+            dealId: (data.dealId as string) || docSnap.id,
+            chatRoomId: (data.chatRoomId as string) || "",
+            listingTitle: data.listingTitle as string | undefined,
+            sellerUid: data.sellerUid as string | undefined,
+            buyerUid: data.buyerUid as string | undefined,
+            sellerName: data.sellerName as string | undefined,
+            buyerName: data.buyerName as string | undefined,
+            paymentStatus: data.paymentStatus as string | undefined,
+            escrowAmount: data.escrowAmount as number | null | undefined,
+            offerPrice: data.offerPrice as number | null | undefined,
+            listingPrice: data.listingPrice as number | null | undefined,
+          };
+          return deal;
         })
         // must have an active deal chat to dispute
         .filter((d) => d.chatRoomId);
