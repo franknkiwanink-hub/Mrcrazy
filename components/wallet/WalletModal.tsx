@@ -12,16 +12,21 @@ import AutoTopUpAddon from "@/components/wallet/AutoTopUpAddon";
 import AutoWithdrawAddon from "@/components/wallet/AutoWithdrawAddon";
 
 // Ports the WALLET MODAL from wallet.js (index.html lines 7026-8192) — all
-// 4 tabs. Deposit tab's Auto Top-Up addon and Withdraw tab's Auto
-// Withdrawal addon are collapsible disclosures nested inside those tabs
-// (matching the original's DOM placement — "was its own tab; now lives
-// inside Add Funds" per index.html's own comment), not separate top-level
-// tabs. Auto Send similarly lives inside SendTab.tsx itself. The balance
-// hero (shared across all tabs) uses the live AuthContext
-// profile.walletBalance for the headline number (same source Header/
-// NavDrawer already read) and useWalletSummary for the pending/escrow
-// breakdown, which isn't in the profile listener.
-const QUICK_AMOUNTS = [10, 25, 50, 100];
+// 4 tabs. Markup mirrors index.html's #walletModal structure 1:1 (same
+// ids/classes) so the #walletModal / .wallet-* rules in globals.css
+// (ported verbatim from styles/siterifty.css) actually apply — the
+// previous version reimplemented this shell with inline styles, which
+// left ~90% of that CSS block unused. Deposit tab's Auto Top-Up addon
+// and Withdraw tab's Auto Withdrawal addon are collapsible disclosures
+// nested inside those tabs (matching the original's DOM placement —
+// "was its own tab; now lives inside Add Funds" per index.html's own
+// comment), not separate top-level tabs. Auto Send similarly lives
+// inside SendTab.tsx itself. The balance hero (shared across all tabs)
+// uses the live AuthContext profile.walletBalance for the headline
+// number (same source Header/NavDrawer already read) and
+// useWalletSummary for the pending/escrow breakdown, which isn't in the
+// profile listener.
+const QUICK_AMOUNTS = [20, 50, 100, 250];
 
 export default function WalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { profile } = useAuth();
@@ -154,171 +159,172 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
   if (!open) return null;
 
   const balance = profile?.walletBalance ?? summary.walletBalance ?? 0;
+  const hasPending = summary.pendingBalance > 0;
+  const hasIncoming = summary.escrowIncoming > 0;
 
   return (
-    <div
-      id="walletModal"
-      className="active"
-      style={{ position: "fixed", inset: 0, zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.7)" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div style={{ background: "#141420", borderRadius: 16, width: "min(440px, 92vw)", maxHeight: "88vh", overflowY: "auto", color: "#fff" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "1.1rem 1.3rem", borderBottom: "1px solid #222" }}>
-          <h3 style={{ margin: 0, fontSize: "1.05rem" }}>Wallet</h3>
-          <button id="walletModalClose" onClick={onClose} style={{ background: "none", border: "none", color: "#888", fontSize: "1.4rem", cursor: "pointer", lineHeight: 1 }}>
-            &times;
+    <div id="walletModal" className="active">
+      <div id="walletModalInner">
+        <div id="walletModalHeader">
+          <div id="walletModalHeaderLeft">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a3e635" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="6" width="20" height="14" rx="2.5" />
+              <path d="M2 10h20" />
+              <path d="M17 15h.01" />
+            </svg>
+            <div>
+              <div id="walletModalTitle">Wallet</div>
+              <div id="walletModalSub">Manage your balance</div>
+            </div>
+          </div>
+          <button id="walletModalClose" aria-label="Close wallet" onClick={onClose}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
           </button>
         </div>
 
-        <div style={{ padding: "1.1rem 1.3rem 0.4rem" }}>
-          <div id="walletBalanceAmt" style={{ fontSize: "2rem", fontWeight: 800 }}>
-            ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          {summary.pendingBalance > 0 ? (
-            <div id="walletPendingRow" style={{ display: "flex", gap: 6, fontSize: "0.8rem", color: "#facc15", marginTop: 4 }}>
-              <span>Pending</span>
-              <span id="walletPendingAmt">${summary.pendingBalance.toFixed(2)}</span>
+        <div id="walletModalBody">
+          {/* Balance hero */}
+          <div id="walletBalanceCard">
+            <div id="walletBalanceLabel">Available balance</div>
+            <div id="walletBalanceAmt">
+              ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </div>
-          ) : null}
-          <div style={{ display: "flex", gap: "1rem", fontSize: "0.78rem", color: "#999", marginTop: 8, flexWrap: "wrap" }}>
-            <span>Withdrawable: <strong id="walletWithdrawableAmt" style={{ color: "#ddd" }}>${summary.withdrawableBalance.toFixed(2)}</strong></span>
-            <span>Escrow held: <strong id="walletEscrowHeldAmt" style={{ color: "#ddd" }}>${summary.escrowHeld.toFixed(2)}</strong></span>
-          </div>
-        </div>
+            <div id="walletPendingRow" style={hasPending ? undefined : { display: "none" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 6v6l4 2" strokeLinecap="round" />
+              </svg>
+              <span>
+                <span id="walletPendingAmt">${summary.pendingBalance.toFixed(2)}</span> pending withdrawal
+              </span>
+            </div>
 
-        <div style={{ display: "flex", gap: 4, padding: "0.9rem 1.3rem 0", borderBottom: "1px solid #222" }}>
-          {(["deposit", "withdraw", "send", "history"] as const).map((t) => (
-            <button
-              key={t}
-              className={`wallet-tab${tab === t ? " active" : ""}`}
-              onClick={() => setTab(t)}
-              style={{
-                background: "none",
-                border: "none",
-                padding: "0.5rem 0.7rem",
-                color: tab === t ? "#fff" : "#777",
-                borderBottom: tab === t ? "2px solid #fff" : "2px solid transparent",
-                fontWeight: 600,
-                fontSize: "0.85rem",
-                cursor: "pointer",
-                textTransform: "capitalize",
-              }}
-            >
-              {t === "deposit" ? "Add Funds" : t}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ padding: "1.2rem 1.3rem" }}>
-          {tab === "deposit" ? (
-            <div id="walletPanelDeposit" className="active">
-              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-                {QUICK_AMOUNTS.map((amt) => (
-                  <button
-                    key={amt}
-                    className={`wallet-quick-btn${amountInput === String(amt) ? " active" : ""}`}
-                    onClick={() => setAmountInput(String(amt))}
-                    style={{
-                      flex: 1,
-                      padding: "0.55rem 0",
-                      borderRadius: 8,
-                      border: amountInput === String(amt) ? "1px solid #fff" : "1px solid #333",
-                      background: amountInput === String(amt) ? "#fff" : "transparent",
-                      color: amountInput === String(amt) ? "#000" : "#ddd",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                    }}
-                  >
-                    ${amt}
-                  </button>
-                ))}
-              </div>
-              <div className="input-group">
-                <label>Custom amount (USD)</label>
-                <input
-                  id="walletDepositAmt"
-                  className="input-field"
-                  type="number"
-                  min={5}
-                  max={10000}
-                  step="0.01"
-                  placeholder="5.00 – 10,000.00"
-                  value={amountInput}
-                  onChange={(e) => setAmountInput(e.target.value)}
-                />
-                <span className="hint">Minimum $5, maximum $10,000 per deposit.</span>
-              </div>
-
-              <div id="walletPaypalBtnWrap" ref={paypalWrapRef} style={{ marginTop: 12, minHeight: 45 }} />
-
-              {msg.text ? (
-                <div
-                  id="walletDepositMsg"
-                  className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}
-                  style={{ marginTop: 10, fontSize: "0.85rem", color: msg.kind === "err" ? "#f87171" : msg.kind === "ok" ? "#a3e635" : "#aaa" }}
-                >
-                  {msg.text}
+            {/* Sub-balance breakdown grid */}
+            <div id="walletSubBalances">
+              <div className="wallet-subbal" id="walletSubWithdrawable">
+                <div className="wallet-subbal-icon wd">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                    <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                 </div>
-              ) : null}
+                <div className="wallet-subbal-mid">
+                  <div className="wallet-subbal-label">Withdrawable</div>
+                  <div className="wallet-subbal-amt" id="walletWithdrawableAmt">${summary.withdrawableBalance.toFixed(2)}</div>
+                </div>
+              </div>
+              <div className="wallet-subbal" id="walletSubEscrowHeld">
+                <div className="wallet-subbal-icon lk">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                    <rect x="4" y="10" width="16" height="10" rx="2" />
+                    <path d="M8 10V7a4 4 0 018 0v3" />
+                  </svg>
+                </div>
+                <div className="wallet-subbal-mid">
+                  <div className="wallet-subbal-label">In Escrow</div>
+                  <div className="wallet-subbal-amt" id="walletEscrowHeldAmt">${summary.escrowHeld.toFixed(2)}</div>
+                </div>
+              </div>
+              <div className="wallet-subbal" id="walletSubEscrowIncoming" style={hasIncoming ? undefined : { display: "none" }}>
+                <div className="wallet-subbal-icon inc">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                    <path d="M12 5v14M19 12l-7 7-7-7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <div className="wallet-subbal-mid">
+                  <div className="wallet-subbal-label">Incoming (Escrow)</div>
+                  <div className="wallet-subbal-amt" id="walletEscrowIncomingAmt">${summary.escrowIncoming.toFixed(2)}</div>
+                </div>
+              </div>
+            </div>
+            <div id="walletEscrowHint">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
+              </svg>
+              Only sale earnings, money received, and referral bonuses can be withdrawn. Deposited funds can be spent on Siterifty but not cashed out.
+            </div>
+          </div>
 
-              <hr className="detail-divider" style={{ margin: "1rem 0" }} />
-              <button
-                id="atuAddonToggle"
-                className={`wallet-addon-toggle${atuOpen ? " open" : ""}`}
-                aria-expanded={atuOpen}
-                onClick={() => setAtuOpen((o) => !o)}
-                style={{
-                  width: "100%",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  background: "none",
-                  border: "none",
-                  color: "#ddd",
-                  fontWeight: 700,
-                  fontSize: "0.85rem",
-                  cursor: "pointer",
-                  padding: "0.4rem 0",
-                }}
-              >
-                Auto Top-Up
-                <span style={{ transform: atuOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▾</span>
-              </button>
+          {/* Tabs */}
+          <div id="walletTabs">
+            <button className={`wallet-tab${tab === "deposit" ? " active" : ""}`} data-wtab="deposit" onClick={() => setTab("deposit")}>
+              Add Funds
+            </button>
+            <button className={`wallet-tab${tab === "withdraw" ? " active" : ""}`} data-wtab="withdraw" onClick={() => setTab("withdraw")}>
+              Withdraw
+            </button>
+            <button className={`wallet-tab${tab === "send" ? " active" : ""}`} data-wtab="send" onClick={() => setTab("send")}>
+              Send
+            </button>
+            <button className={`wallet-tab${tab === "history" ? " active" : ""}`} data-wtab="history" onClick={() => setTab("history")}>
+              History
+            </button>
+          </div>
+
+          {/* ── Deposit panel ── */}
+          <div className={`wallet-panel${tab === "deposit" ? " active" : ""}`} id="walletPanelDeposit">
+            <div className="wallet-field-label">Amount to add</div>
+            <div className="wallet-amount-input-wrap">
+              <span className="wallet-amount-currency">$</span>
+              <input
+                type="number"
+                id="walletDepositAmt"
+                inputMode="decimal"
+                placeholder="0.00"
+                min={5}
+                max={10000}
+                step="0.01"
+                value={amountInput}
+                onChange={(e) => setAmountInput(e.target.value)}
+              />
+            </div>
+            <div className="wallet-quick-amounts" id="walletQuickAmounts">
+              {QUICK_AMOUNTS.map((amt) => (
+                <button
+                  key={amt}
+                  type="button"
+                  className={`wallet-quick-btn${amountInput === String(amt) ? " active" : ""}`}
+                  data-amt={amt}
+                  onClick={() => setAmountInput(String(amt))}
+                >
+                  ${amt}
+                </button>
+              ))}
+            </div>
+            <div className="wallet-hint">Min $5 · Max $10,000 per deposit · Spendable instantly, not withdrawable</div>
+            {msg.text ? <div id="walletDepositMsg" className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}>{msg.text}</div> : <div id="walletDepositMsg" className="wallet-msg" />}
+            <div id="walletPaypalBtnWrap" ref={paypalWrapRef} />
+
+            {/* ── Auto Top-Up addon (was its own tab; now lives inside Add Funds) ── */}
+            <button type="button" className={`wallet-addon-toggle${atuOpen ? " open" : ""}`} id="atuAddonToggle" aria-expanded={atuOpen} onClick={() => setAtuOpen((o) => !o)}>
+              <span className="wallet-addon-toggle-left">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>Auto Top-Up</span>
+              </span>
+              <svg className="wallet-addon-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <div className={`wallet-addon-panel${atuOpen ? " open" : ""}`} id="walletPanelAutotopup">
               {atuOpen ? <AutoTopUpAddon /> : null}
             </div>
-          ) : tab === "withdraw" ? (
-            <>
-              <WithdrawTab withdrawable={summary.withdrawableBalance} onSuccess={refresh} />
-              <hr className="detail-divider" style={{ margin: "1rem 0" }} />
-              <button
-                id="awdAddonToggle"
-                className={`wallet-addon-toggle${awdOpen ? " open" : ""}`}
-                aria-expanded={awdOpen}
-                onClick={() => setAwdOpen((o) => !o)}
-                style={{
-                  width: "100%",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  background: "none",
-                  border: "none",
-                  color: "#ddd",
-                  fontWeight: 700,
-                  fontSize: "0.85rem",
-                  cursor: "pointer",
-                  padding: "0.4rem 0",
-                }}
-              >
-                Auto Withdrawal
-                <span style={{ transform: awdOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▾</span>
-              </button>
-              {awdOpen ? <AutoWithdrawAddon onEnabled={refresh} /> : null}
-            </>
-          ) : tab === "send" ? (
-            <SendTab balance={balance} onSuccess={refresh} />
-          ) : (
+          </div>
+
+          {/* ── Withdraw panel ── */}
+          <WithdrawTab active={tab === "withdraw"} withdrawable={summary.withdrawableBalance} onSuccess={refresh} awdOpen={awdOpen} onToggleAwd={() => setAwdOpen((o) => !o)} />
+
+          {/* ── Send panel ── */}
+          <SendTab active={tab === "send"} balance={balance} onSuccess={refresh} />
+
+          {/* ── History panel ── */}
+          <div className={`wallet-panel${tab === "history" ? " active" : ""}`} id="walletPanelHistory">
             <HistoryTab active={tab === "history"} />
-          )}
+          </div>
         </div>
       </div>
     </div>
