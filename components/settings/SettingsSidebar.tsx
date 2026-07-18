@@ -1,8 +1,6 @@
 "use client";
 
-import { signOut } from "firebase/auth";
-import { useState } from "react";
-import { auth } from "@/lib/firebase";
+import { useLogoutModal } from "@/components/layout/LogoutModalProvider";
 
 export type SettingsPanelId =
   | "account"
@@ -216,26 +214,10 @@ interface SettingsSidebarProps {
 }
 
 export default function SettingsSidebar({ activePanel, onSelectPanel, onRaiseDispute }: SettingsSidebarProps) {
-  const [confirmingLogout, setConfirmingLogout] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
-
-  // Ports __logoutWithConfirm: confirm modal, then signOut(auth), then a
-  // hard redirect home (a full reload, not client-side navigation — same
-  // as the original's window.location.href, so no in-memory state from
-  // this session lingers on screen).
-  async function handleLogout() {
-    setLoggingOut(true);
-    try {
-      await signOut(auth);
-    } catch {
-      // silent, matches original
-    }
-    window.location.href = window.location.origin + "/";
-  }
+  const { confirmLogout } = useLogoutModal();
 
   return (
-    <>
-      <nav className="settings-sidebar" id="settingsSidebar">
+    <nav className="settings-sidebar" id="settingsSidebar">
         {SECTIONS.map((section) => (
           <div key={section.label} style={{ display: "contents" }}>
             <span className="sidebar-section-label">{section.label}</span>
@@ -275,8 +257,7 @@ export default function SettingsSidebar({ activePanel, onSelectPanel, onRaiseDis
           <button
             className="sidebar-footer-btn logout"
             id="settingsLogoutBtn"
-            onClick={() => setConfirmingLogout(true)}
-            disabled={loggingOut}
+            onClick={() => confirmLogout()}
           >
             <svg viewBox="0 0 24 24">
               <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
@@ -287,38 +268,5 @@ export default function SettingsSidebar({ activePanel, onSelectPanel, onRaiseDis
           </button>
         </div>
       </nav>
-
-      {/* Logout confirm modal — ports logout-share.js's overlay/__confirmLogout */}
-      {confirmingLogout ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.7)",
-            zIndex: 10001,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-          onClick={() => !loggingOut && setConfirmingLogout(false)}
-        >
-          <div
-            style={{ background: "#141420", padding: 24, borderRadius: 12, color: "#fff", maxWidth: 360 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ marginTop: 0 }}>Sign out?</h3>
-            <p style={{ opacity: 0.7, fontSize: 14 }}>You&apos;ll need to sign back in to access your account.</p>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-              <button onClick={() => setConfirmingLogout(false)} disabled={loggingOut}>
-                Cancel
-              </button>
-              <button onClick={handleLogout} disabled={loggingOut}>
-                {loggingOut ? "Signing out…" : "Sign Out"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </>
   );
 }
