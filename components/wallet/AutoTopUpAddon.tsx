@@ -9,7 +9,9 @@ import { useLimits } from "@/lib/useLimits";
 // LIMITS.autoTopUp). FALLBACK_* match app/api/_lib/limits.js's
 // autoTopUp block exactly (minThreshold:1, maxThreshold:5000,
 // minAmount:5, maxAmount:10000) and are used only until that fetch
-// resolves.
+// resolves. Markup mirrors index.html's #atuCard structure
+// (.agent-toggle-card / .agent-sw / .wallet-amount-currency) so
+// globals.css's rules apply instead of duplicating the look inline.
 const FALLBACK_MIN_THRESHOLD = 1;
 const FALLBACK_MAX_THRESHOLD = 5000;
 const FALLBACK_MIN_AMOUNT = 5;
@@ -109,67 +111,69 @@ export default function AutoTopUpAddon() {
   }
 
   return (
-    <div style={{ padding: "0.8rem 0 0.2rem" }}>
-      <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: 4 }}>
-        <input id="atuToggle" type="checkbox" checked={enabled} onChange={(e) => handleToggle(e.target.checked)} />
-        <span style={{ fontWeight: 700, fontSize: "0.85rem" }}>Enable Auto Top-Up</span>
-      </label>
-      <p className="hint" style={{ margin: "0 0 8px" }}>
-        Automatically deposit funds from your saved PayPal method when your balance drops below a threshold.
-      </p>
+    <div>
+      <div className="agent-toggle-card" id="atuCard" style={{ cursor: "default" }}>
+        <div className="agent-toggle-icon" style={{ background: "rgba(163,230,53,.12)", color: "#a3e635" }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <div className="agent-toggle-meta">
+          <div className="agent-toggle-title">Auto Top-Up</div>
+          <div className="agent-toggle-desc">
+            Automatically add funds from your saved PayPal method whenever your balance drops below your threshold.
+          </div>
 
-      {!loaded ? null : !hasVault ? (
-        <div id="atuVaultHint" className="wallet-msg err" style={{ fontSize: "0.8rem", color: "#f87171", marginBottom: 8 }}>
+          <div id="atuExtra" className={`agent-toggle-extra${enabled ? " visible" : ""}`}>
+            <div className="agent-threshold-row">
+              <span className="agent-threshold-label">When balance drops below</span>
+              <span className="wallet-amount-currency" style={{ fontSize: 12 }}>$</span>
+              <input
+                id="atuThreshold"
+                className="agent-threshold-input"
+                type="number"
+                min={MIN_THRESHOLD}
+                max={MAX_THRESHOLD}
+                step="0.01"
+                value={threshold}
+                onChange={(e) => setThreshold(e.target.value)}
+                placeholder="25.00"
+              />
+            </div>
+            <div className="agent-threshold-row" style={{ marginTop: 8 }}>
+              <span className="agent-threshold-label">Top up by</span>
+              <span className="wallet-amount-currency" style={{ fontSize: 12 }}>$</span>
+              <input
+                id="atuAmount"
+                className="agent-threshold-input"
+                type="number"
+                min={MIN_AMOUNT}
+                max={MAX_AMOUNT}
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="50.00"
+              />
+            </div>
+          </div>
+        </div>
+        <label className="agent-sw">
+          <input id="atuToggle" type="checkbox" checked={enabled} onChange={(e) => handleToggle(e.target.checked)} />
+          <span className="agent-sw-track" />
+          <span className="agent-sw-thumb" />
+        </label>
+      </div>
+
+      {loaded && !hasVault ? (
+        <div id="atuVaultHint" style={{ marginTop: 14, fontSize: 11, lineHeight: 1.5, color: "rgba(255,255,255,.35)" }}>
           Make one PayPal deposit first so we have a saved payment method to auto-charge.
         </div>
       ) : null}
 
-      {enabled ? (
-        <div id="atuExtra" className="visible" style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-          <div className="input-group" style={{ flex: 1 }}>
-            <label>When balance drops below</label>
-            <input
-              id="atuThreshold"
-              className="input-field"
-              type="number"
-              min={MIN_THRESHOLD}
-              max={MAX_THRESHOLD}
-              step="0.01"
-              value={threshold}
-              onChange={(e) => setThreshold(e.target.value)}
-              placeholder="10.00"
-            />
-          </div>
-          <div className="input-group" style={{ flex: 1 }}>
-            <label>Top up by</label>
-            <input
-              id="atuAmount"
-              className="input-field"
-              type="number"
-              min={MIN_AMOUNT}
-              max={MAX_AMOUNT}
-              step="0.01"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="25.00"
-            />
-          </div>
-        </div>
-      ) : null}
-
-      <button id="atuSubmit" className="save-btn" style={{ width: "100%" }} onClick={handleSave} disabled={saving}>
-        <span>{saving ? "Saving…" : "Save Auto Top-Up Settings"}</span>
+      {msg.text ? <div id="atuMsg" className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}>{msg.text}</div> : <div id="atuMsg" className="wallet-msg" />}
+      <button className="wallet-submit-btn" id="atuSubmit" style={{ marginTop: 14 }} onClick={handleSave} disabled={saving}>
+        <span>{saving ? "Saving…" : "Save Settings"}</span>
       </button>
-
-      {msg.text ? (
-        <div
-          id="atuMsg"
-          className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}
-          style={{ marginTop: 10, fontSize: "0.85rem", color: msg.kind === "err" ? "#f87171" : msg.kind === "ok" ? "#a3e635" : "#aaa" }}
-        >
-          {msg.text}
-        </div>
-      ) : null}
     </div>
   );
 }
