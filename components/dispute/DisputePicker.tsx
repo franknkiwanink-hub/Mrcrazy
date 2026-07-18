@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { auth, db } from "@/lib/firebase";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports window.__openDisputePicker from Js/misc-modals.js (lines 153-331)
 // + the #srfDisputeOverlay markup (index.html lines 5384-5443). CSS
@@ -59,6 +60,7 @@ function statusLabel(status?: string): string {
 type LoadState = "loading" | "empty" | "error" | "ready";
 
 export default function DisputePicker({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useScrollLock(open);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [emptyTitle, setEmptyTitle] = useState("No deals yet");
   const [emptyMsg, setEmptyMsg] = useState(
