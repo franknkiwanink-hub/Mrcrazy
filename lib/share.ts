@@ -14,6 +14,8 @@
 // navigator APIs that don't exist server-side.
 "use client";
 
+import { buildListingSlug } from "@/lib/slug";
+
 // Deliberately NOT importing lib/server/adminDb's getPublicBaseUrl here
 // — that reads process.env directly and is meant for Server Components
 // only. Client code gets the correct origin for free via
@@ -25,12 +27,16 @@ function baseUrl(): string {
   return "https://siterifty.com";
 }
 
-export function listingShareUrl(listingId: string): string {
-  return `${baseUrl()}/listing/${encodeURIComponent(listingId)}`;
+export function listingShareUrl(listingId: string, title?: string): string {
+  return `${baseUrl()}/listing/${buildListingSlug(title, listingId)}`;
 }
 
-export function sellerShareUrl(uid: string): string {
-  return `${baseUrl()}/seller/${encodeURIComponent(uid)}`;
+// `username` is now the canonical /seller/[id] route segment (see
+// app/seller/[id]/page.tsx) — usernames are unique (enforced in
+// app/api/account/_handler.js's resolveUniqueUsername), so no id is
+// needed in the URL at all, unlike listings which can share a title.
+export function sellerShareUrl(username: string): string {
+  return `${baseUrl()}/seller/${encodeURIComponent(username)}`;
 }
 
 export interface ShareDestination {
