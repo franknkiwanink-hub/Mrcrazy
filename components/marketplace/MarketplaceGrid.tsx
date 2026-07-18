@@ -68,7 +68,7 @@ export default function MarketplaceGrid() {
   }, [loadMore]);
 
   return (
-    <div style={{ padding: "0 24px 80px" }}>
+    <div>
       <MarketplaceFilterBar
         typeFilter={filters.typeFilter}
         onTypeChange={filters.setTypeFilter}
