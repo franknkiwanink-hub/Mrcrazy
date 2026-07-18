@@ -6,7 +6,7 @@ import Header from "@/components/layout/Header";
 import NavDrawer from "@/components/layout/NavDrawer";
 import NavDrawerOverlay from "@/components/layout/NavDrawerOverlay";
 import { NavDrawerProvider } from "@/components/layout/NavDrawerProvider";
-import BottomNav from "@/components/layout/BottomNav";
+import HomeMarketplaceOnly from "@/components/layout/HomeMarketplaceOnly";
 import AnnouncementBar from "@/components/layout/AnnouncementBar";
 import BootOverlay from "@/components/layout/BootOverlay";
 import PushServiceWorkerRegister from "@/components/layout/PushServiceWorkerRegister";
@@ -19,11 +19,9 @@ import { AgentModalProvider } from "@/components/agent/AgentModalProvider";
 import { EditListingModalProvider } from "@/components/listing/EditListingModalProvider";
 import { PlansModalProvider } from "@/components/billing/PlansModalProvider";
 import { ThemeModalProvider } from "@/components/theme/ThemeModalProvider";
-import { LogoutModalProvider } from "@/components/layout/LogoutModalProvider";
 import NotificationsProvider from "@/components/notifications/NotificationsProvider";
 import SystemStatusProvider from "@/components/system/SystemStatusProvider";
 import WelcomeBackScreen from "@/components/system/WelcomeBackScreen";
-import FeedbackWidget from "@/components/support/FeedbackWidget";
 import { AiSupportChatModalProvider } from "@/components/support/AiSupportChatModalProvider";
 import { DealPopupProvider } from "@/components/deal/DealPopupProvider";
 import { DisputePickerProvider } from "@/components/dispute/DisputePickerProvider";
@@ -172,24 +170,17 @@ export default function RootLayout({
                 <DealPopupProvider>
                 <DisputePickerProvider>
                   <NavDrawerProvider>
-                  {/* LogoutModalProvider: used by the hamburger NavDrawer,
-                      SettingsSidebar, and MyProfileHub's Sign Out buttons —
-                      scoped here (innermost, alongside NavDrawerProvider)
-                      since NavDrawer is its own sibling in this tree and
-                      the other two consumers render under {children}. */}
-                  <LogoutModalProvider>
                     <Header />
                     <NavDrawerOverlay />
                     <NavDrawer />
                     <AnnouncementBar />
                     <main>{children}</main>
-                    <BottomNav />
-                    {/* Floating feedback launcher + modal — global,
-                        works signed-out (read-only) and signed-in
-                        (submit/vote). See its own file for the scoping
-                        note on scroll-lock/modal-coordination. */}
-                    <FeedbackWidget />
-                  </LogoutModalProvider>
+                    {/* BottomNav + the floating feedback launcher only
+                        belong on the two "browse" surfaces (Home,
+                        Marketplace) — see HomeMarketplaceOnly's own
+                        top comment for why they can't just stay
+                        globally mounted like in the original. */}
+                    <HomeMarketplaceOnly />
                   </NavDrawerProvider>
                 </DisputePickerProvider>
                 </DealPopupProvider>
