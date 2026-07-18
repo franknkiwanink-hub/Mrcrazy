@@ -9,7 +9,9 @@ import { useLimits } from "@/lib/useLimits";
 // LIMITS.autoWithdraw). FALLBACK_* match app/api/_lib/limits.js's
 // autoWithdraw block exactly (minThreshold:10, maxThreshold:10000,
 // minKeepBalance:0, maxKeepBalance:10000) and are used only until that
-// fetch resolves.
+// fetch resolves. Markup mirrors index.html's #awdCard structure
+// (.agent-toggle-card / .agent-sw / .wallet-method-card) so
+// globals.css's rules apply instead of duplicating the look inline.
 const FALLBACK_MIN_THRESHOLD = 10;
 const FALLBACK_MAX_THRESHOLD = 10000;
 const FALLBACK_MIN_KEEP = 0;
@@ -117,80 +119,41 @@ export default function AutoWithdrawAddon({ onEnabled }: { onEnabled: () => void
   }
 
   return (
-    <div style={{ padding: "0.8rem 0 0.2rem" }}>
-      <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", marginBottom: 4 }}>
-        <input
-          id="awdToggle"
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => {
-            setEnabled(e.target.checked);
-            setMsg({ text: "", kind: "" });
-          }}
-        />
-        <span style={{ fontWeight: 700, fontSize: "0.85rem" }}>Enable Auto Withdrawal</span>
-      </label>
-      <p className="hint" style={{ margin: "0 0 8px" }}>
-        Automatically withdraw funds above a threshold, keeping a set balance in your wallet.
-      </p>
+    <div>
+      <div className="agent-toggle-card" id="awdCard" style={{ cursor: "default" }}>
+        <div className="agent-toggle-icon" style={{ background: "rgba(163,230,53,.12)", color: "#a3e635" }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 5v14M5 12l7 7 7-7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <div className="agent-toggle-meta">
+          <div className="agent-toggle-title">Auto Withdrawal</div>
+          <div className="agent-toggle-desc">
+            Automatically cash out to your PayPal or bank once your withdrawable balance reaches your threshold.
+          </div>
 
-      {!loaded ? null : enabled ? (
-        <div id="awdExtra" className="visible">
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            {(["paypal", "bank"] as const).map((m) => (
-              <button
-                key={m}
-                className={`wallet-method-card${method === m ? " active" : ""}`}
-                data-awdmethod={m}
-                onClick={() => setMethod(m)}
-                style={{
-                  flex: 1,
-                  padding: "0.55rem",
-                  borderRadius: 8,
-                  border: method === m ? "1px solid #fff" : "1px solid #2a2a2a",
-                  background: method === m ? "rgba(255,255,255,0.08)" : "transparent",
-                  color: method === m ? "#fff" : "#999",
-                  fontWeight: 600,
-                  fontSize: "0.8rem",
-                  cursor: "pointer",
-                  textTransform: "capitalize",
-                }}
-              >
-                {m === "paypal" ? "PayPal" : "Bank Transfer"}
-              </button>
-            ))}
-          </div>
-          <div className="input-group" style={{ marginBottom: 10 }}>
-            <label>Payout Email</label>
-            <input
-              id="awdPaypalEmail"
-              className="input-field"
-              type="email"
-              value={paypalEmail}
-              onChange={(e) => setPaypalEmail(e.target.value)}
-              placeholder="you@example.com"
-            />
-          </div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-            <div className="input-group" style={{ flex: 1 }}>
-              <label>When withdrawable reaches</label>
+          <div id="awdExtra" className={`agent-toggle-extra${enabled ? " visible" : ""}`}>
+            <div className="agent-threshold-row">
+              <span className="agent-threshold-label">When withdrawable reaches</span>
+              <span className="wallet-amount-currency" style={{ fontSize: 12 }}>$</span>
               <input
                 id="awdThreshold"
-                className="input-field"
+                className="agent-threshold-input"
                 type="number"
                 min={MIN_THRESHOLD}
                 max={MAX_THRESHOLD}
                 step="0.01"
                 value={threshold}
                 onChange={(e) => setThreshold(e.target.value)}
-                placeholder="100.00"
+                placeholder="500.00"
               />
             </div>
-            <div className="input-group" style={{ flex: 1 }}>
-              <label>Keep in wallet</label>
+            <div className="agent-threshold-row" style={{ marginTop: 8 }}>
+              <span className="agent-threshold-label">Keep in wallet</span>
+              <span className="wallet-amount-currency" style={{ fontSize: 12 }}>$</span>
               <input
                 id="awdKeepBalance"
-                className="input-field"
+                className="agent-threshold-input"
                 type="number"
                 min={MIN_KEEP}
                 max={MAX_KEEP}
@@ -202,21 +165,60 @@ export default function AutoWithdrawAddon({ onEnabled }: { onEnabled: () => void
             </div>
           </div>
         </div>
-      ) : null}
+        <label className="agent-sw">
+          <input
+            id="awdToggle"
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => {
+              setEnabled(e.target.checked);
+              setMsg({ text: "", kind: "" });
+            }}
+          />
+          <span className="agent-sw-track" />
+          <span className="agent-sw-thumb" />
+        </label>
+      </div>
 
-      <button id="awdSubmit" className="save-btn" style={{ width: "100%" }} onClick={handleSave} disabled={saving}>
-        <span>{saving ? "Saving…" : "Save Auto Withdrawal Settings"}</span>
-      </button>
-
-      {msg.text ? (
-        <div
-          id="awdMsg"
-          className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}
-          style={{ marginTop: 10, fontSize: "0.85rem", color: msg.kind === "err" ? "#f87171" : msg.kind === "ok" ? "#a3e635" : "#aaa" }}
-        >
-          {msg.text}
+      {loaded && enabled ? (
+        <div id="awdExtra2" style={{ marginTop: 14 }}>
+          <div className="wallet-field-label">Payout method</div>
+          <div id="awdMethodGrid">
+            <button type="button" className={`wallet-method-card${method === "paypal" ? " active" : ""}`} data-awdmethod="paypal" onClick={() => setMethod("paypal")}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M7 5h8a4 4 0 010 8H9l-1 6H5l3-14z" />
+                <path d="M11 9h6a3.5 3.5 0 010 7h-4" />
+              </svg>
+              <span>PayPal</span>
+            </button>
+            <button type="button" className={`wallet-method-card${method === "bank" ? " active" : ""}`} data-awdmethod="bank" onClick={() => setMethod("bank")}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M3 10l9-6 9 6" />
+                <path d="M4 10v9h16v-9" />
+                <path d="M9 21v-6h6v6" />
+              </svg>
+              <span>Bank</span>
+            </button>
+          </div>
+          <div className="wallet-field-label" style={{ marginTop: 14 }}>Payout email</div>
+          <input
+            id="awdPaypalEmail"
+            className="wallet-text-input"
+            type="email"
+            value={paypalEmail}
+            onChange={(e) => setPaypalEmail(e.target.value)}
+            placeholder="you@example.com"
+          />
+          <div className="wallet-hint" style={{ marginTop: 8 }}>
+            Bank payouts route through PayPal's linked bank transfer — same email as your PayPal-linked account.
+          </div>
         </div>
       ) : null}
+
+      {msg.text ? <div id="awdMsg" className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}>{msg.text}</div> : <div id="awdMsg" className="wallet-msg" />}
+      <button className="wallet-submit-btn" id="awdSubmit" style={{ marginTop: 14 }} onClick={handleSave} disabled={saving}>
+        <span>{saving ? "Saving…" : "Save Settings"}</span>
+      </button>
     </div>
   );
 }
