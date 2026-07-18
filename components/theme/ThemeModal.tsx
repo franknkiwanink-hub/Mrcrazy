@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { applyTheme, persistTheme, type SiteTheme } from "@/components/theme/ThemeModalProvider";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the THEME PICKER MODAL's `.theme-grid` contents 1:1 from
 // index.html (11 image themes + 1 color swatch, in source order).
@@ -145,6 +146,7 @@ export default function ThemeModal({
   onClose: () => void;
   plan: string;
 }) {
+  useScrollLock(open);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
   const [nudge, setNudge] = useState(false);
