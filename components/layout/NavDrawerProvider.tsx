@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 interface NavDrawerContextValue {
   isOpen: boolean;
@@ -34,14 +35,7 @@ export function NavDrawerProvider({ children }: { children: ReactNode }) {
   }, []);
   const toggleNav = useCallback(() => setIsOpen((v) => !v), []);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [isOpen]);
+  useScrollLock(isOpen);
 
   return (
     <NavDrawerContext.Provider value={{ isOpen, openNav, closeNav, toggleNav, scrollBodyRef }}>
