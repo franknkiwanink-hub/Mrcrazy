@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the Autopilot Agent modal from Js/plans-boost.js (openAgentModal /
 // window.__openAgentModal, lines 336-776) + the #agentModal markup in
@@ -100,6 +101,7 @@ function tsAgo(date: Date): string {
 }
 
 export default function AgentModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useScrollLock(open);
   const { user } = useAuth();
   const router = useRouter();
 
