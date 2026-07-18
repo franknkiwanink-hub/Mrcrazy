@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import SellerBadges from "./SellerBadges";
 import { fetchSellerDealStats, type FullSeller, type SellerDealStats } from "@/lib/useSeller";
 import { useAuth } from "@/lib/AuthContext";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 const SOCIAL_DEFS = [
   {
@@ -54,6 +55,9 @@ export default function SellerDetailsOverlay({
   cachedStats: SellerDealStats | null;
   onClose: () => void;
 }) {
+  // Mounted only while open (parent conditionally renders this overlay),
+  // so the lock is unconditional here.
+  useScrollLock(true);
   const { user } = useAuth();
   const isOwn = user?.uid === seller.uid;
   const [stats, setStats] = useState<SellerDealStats | null>(cachedStats);
