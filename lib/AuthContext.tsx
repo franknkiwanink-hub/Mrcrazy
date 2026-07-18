@@ -109,5 +109,6 @@ export async function fetchUserProfileOnce(uid: string): Promise<UserProfile | n
     profilePic: data.profilePic || null,
     walletBalance: Number(data.walletBalance || 0),
     plan: data.plan || "free",
+    currency: data.currency || null,
   };
 }
