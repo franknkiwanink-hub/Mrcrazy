@@ -51,7 +51,18 @@ if (!admin.apps.length) {
   }
   admin.initializeApp({ credential });
 }
-const db = admin.firestore();
+// Lazy so `admin.firestore()` — which throws immediately if the credential
+// isn't a real cert/ADC credential — never runs at module-import time (e.g.
+// during `next build` page-data collection). It only runs the first time a
+// request handler actually touches `db`, by which point real env vars are
+// present in production.
+let _db;
+const db = new Proxy({}, {
+  get(_target, prop) {
+    if (!_db) _db = admin.firestore();
+    return _db[prop];
+  },
+});
 const FieldValue = admin.firestore.FieldValue;
 
 // ════════════════════════════════════════════════════════════════════════
