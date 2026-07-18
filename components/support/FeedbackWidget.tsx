@@ -6,11 +6,13 @@
 // feedback-* actions in app/api/aistudio/_handler.js. Mounted once in
 // app/layout.tsx, same tier as the other global overlays.
 //
-// Scroll-lock uses the shared useScrollLock hook (lib/useScrollLock.ts).
-// "Another modal is already open" suppression isn't ported from
-// window.__anyModalOpen — no shared modal-coordination registry exists
-// yet; low-risk today since nothing else currently triggers this widget
-// at the same time as another modal.
+// Scroll-lock and "another modal is already open" suppression aren't
+// ported from window.__srfLockScroll / window.__anyModalOpen — neither
+// exists as a real helper yet (that's the pending shared confirm-dialog/
+// modal-coordination work). This uses its own local scroll lock instead,
+// which is safe on its own but can double-lock if opened at the same
+// time as another modal; low-risk today since nothing else currently
+// triggers it. Revisit once that shared helper lands.
 //
 // Voting and submitting require sign-in (matches fbAuthedFetch in the
 // original); the board and archive are readable signed-out
@@ -18,7 +20,6 @@
 // users.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { auth } from "@/lib/firebase";
-import { useScrollLock } from "@/lib/useScrollLock";
 
 type Pane = "compose" | "board" | "working";
 
@@ -381,10 +382,15 @@ function FeedbackModal({
   archiveError: string;
   onRetryArchive: () => void;
 }) {
-  // Scroll lock — shared across every modal/overlay in the app (mounted
-  // only while open, see FeedbackWidget's conditional render, so this is
-  // unconditional here).
-  useScrollLock(true);
+  // Local scroll lock — see the top-of-file note on why this doesn't use
+  // a shared helper yet.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -397,56 +403,34 @@ function FeedbackModal({
   return (
     <div
       id="feedbackModal"
-      className="fb-modal active"
+      className="supp-modal supp-theme-feedback"
       role="dialog"
       aria-modal="true"
       aria-label="Feedback"
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 9995,
-        display: "flex",
-        alignItems: "flex-end",
-        justifyContent: "center",
-        background: "rgba(0,0,0,.6)",
-      }}
+      style={{ display: "block", position: "fixed", inset: 0, zIndex: 9996 }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 480,
-          maxHeight: "88vh",
-          overflowY: "auto",
-          background: "#0b0b12",
-          border: "1px solid rgba(255,255,255,.1)",
-          borderRadius: "18px 18px 0 0",
-          padding: "20px 18px 26px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: "#f0f0f5" }}>Feedback</div>
-          <button
-            id="fbCloseBtn"
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            style={{
-              background: "none",
-              border: "none",
-              color: "rgba(255,255,255,.5)",
-              cursor: "pointer",
-              padding: 4,
-            }}
-          >
-            <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
-              <line x1={18} y1={6} x2={6} y2={18} />
-              <line x1={6} y1={6} x2={18} y2={18} />
+      <div className="full-modal supp-shell">
+        <div className="modal-header supp-header">
+          <div className="brand">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
             </svg>
+            <h2>Feedback</h2>
+          </div>
+          <button className="cancel-btn" id="fbCloseBtn" type="button" aria-label="Close" onClick={onClose}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+            Close
           </button>
         </div>
+
+        <div className="supp-body">
 
         {countdown ? (
           <div className="fb-countdown">
@@ -607,6 +591,7 @@ function FeedbackModal({
             )}
           </div>
         ) : null}
+      </div>
       </div>
     </div>
   );
