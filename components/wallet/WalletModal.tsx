@@ -5,6 +5,7 @@ import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { loadPaypalSdk } from "@/lib/paypalSdk";
 import { useWalletSummary } from "@/lib/useWalletSummary";
+import { useScrollLock } from "@/lib/useScrollLock";
 import WithdrawTab from "@/components/wallet/WithdrawTab";
 import SendTab from "@/components/wallet/SendTab";
 import HistoryTab from "@/components/wallet/HistoryTab";
@@ -29,6 +30,7 @@ import AutoWithdrawAddon from "@/components/wallet/AutoWithdrawAddon";
 const QUICK_AMOUNTS = [20, 50, 100, 250];
 
 export default function WalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useScrollLock(open);
   const { profile } = useAuth();
   const { summary, refresh } = useWalletSummary();
   const [tab, setTab] = useState<"deposit" | "withdraw" | "send" | "history">("deposit");
