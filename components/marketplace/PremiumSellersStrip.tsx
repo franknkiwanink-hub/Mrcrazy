@@ -145,7 +145,7 @@ export default function PremiumSellersStrip() {
                   key={seller.uid}
                   className="mp-ts-card"
                   data-uid={seller.uid}
-                  onClick={() => router.push(`/seller/${encodeURIComponent(seller.uid)}`)}
+                  onClick={() => router.push(`/seller/${encodeURIComponent(seller.username || seller.uid)}`)}
                 >
                   <div className="mp-ts-av">{avatarInner}</div>
                   <div className="mp-ts-name">
