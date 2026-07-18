@@ -19,11 +19,51 @@
 // Server Components (page.tsx below, sitemap.ts).
 import { getAdminDb } from "@/lib/server/adminDb";
 import type { Listing } from "@/lib/listings";
+import { idFromListingSlug } from "@/lib/slug";
 
-export async function getListingById(id: string): Promise<Listing | null> {
+// Admin SDK Firestore Timestamps are class instances (Timestamp.prototype),
+// not plain objects — Next.js refuses to pass those from a Server
+// Component to a Client Component ("Only plain objects... can be passed").
+// This walks the listing data and converts any Timestamp-shaped value
+// (has both .toDate and .toMillis) to a plain ISO string, recursively,
+// so no matter which field holds one (createdAt, updatedAt, or any future
+// timestamp field added to a listing doc) it's always safe to serialize.
+// Arrays and nested objects (financials, tech, settings, etc.) are walked
+// too since a Timestamp could in principle live inside any of them.
+function serializeTimestamps<T>(value: T): T {
+  if (value === null || value === undefined) return value;
+  if (
+    typeof value === "object" &&
+    typeof (value as any).toDate === "function" &&
+    typeof (value as any).toMillis === "function"
+  ) {
+    return (value as any).toDate().toISOString() as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => serializeTimestamps(v)) as unknown as T;
+  }
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = serializeTimestamps(v);
+    }
+    return out as T;
+  }
+  return value;
+}
+
+// `segment` is the raw /listing/[id] route param — either the new
+// "title-slug-{id}" format or a legacy bare id. idFromListingSlug pulls
+// the real Firestore id out of either shape; the slug prefix itself is
+// never trusted for the lookup (see lib/slug.ts's header comment), only
+// used to make the URL readable.
+export async function getListingById(segment: string): Promise<Listing | null> {
+  if (!segment) return null;
+  const id = idFromListingSlug(segment);
   if (!id) return null;
   const db = getAdminDb();
   const snap = await db.collection("listings").doc(id).get();
   if (!snap.exists) return null;
-  return { id: snap.id, ...(snap.data() as Omit<Listing, "id">) };
+  const data = serializeTimestamps(snap.data()) as Omit<Listing, "id">;
+  return { id: snap.id, ...data };
 }
