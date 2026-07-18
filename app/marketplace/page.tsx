@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
 import MarketplaceGrid from "@/components/marketplace/MarketplaceGrid";
 
@@ -29,7 +30,9 @@ export function generateMetadata(): Metadata {
 export default function MarketplacePage() {
   return (
     <div style={{ marginTop: 92 }}>
-      <MarketplaceGrid />
+      <Suspense fallback={null}>
+        <MarketplaceGrid />
+      </Suspense>
     </div>
   );
 }
