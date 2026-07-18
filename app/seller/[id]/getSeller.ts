@@ -33,11 +33,30 @@ export interface SellerSeoProfile {
   joinedAt: Date | null;
 }
 
-export async function getSellerSeoProfile(uid: string): Promise<SellerSeoProfile | null> {
-  if (!uid) return null;
+// `segment` is the raw /seller/[id] route param. It's resolved as:
+//   1. A direct doc-id (uid) lookup first — cheap, and keeps every old
+//      /seller/{uid} link issued before usernames became the canonical
+//      route shape working forever with no redirect table to maintain.
+//   2. If that misses, treated as a username and resolved via the same
+//      usernameLower uniqueness index the signup flow already
+//      maintains (see app/api/account/_handler.js's resolveUniqueUsername),
+//      so the common case — someone visiting the canonical
+//      /seller/{username} URL — costs one indexed query.
+// Firestore auto-ids and usernames can never collide in practice (ids are
+// long random base62 strings; usernames are capped short human text), so
+// there's no ambiguity between the two lookup paths.
+export async function getSellerSeoProfile(segment: string): Promise<SellerSeoProfile | null> {
+  if (!segment) return null;
   const db = getAdminDb();
-  const snap = await db.collection("users").doc(uid).get();
-  if (!snap.exists) return null;
+
+  let snap = await db.collection("users").doc(segment).get();
+  if (!snap.exists) {
+    const lower = segment.toLowerCase();
+    const q = await db.collection("users").where("usernameLower", "==", lower).limit(1).get();
+    if (q.empty) return null;
+    snap = q.docs[0];
+  }
+  const uid = snap.id;
   const d = snap.data() || {};
 
   // Cheap count-only query — mirrors the `active` status filter used
