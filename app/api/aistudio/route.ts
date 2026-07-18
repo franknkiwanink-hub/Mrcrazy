@@ -10,6 +10,12 @@
 import legacyHandler from "./_handler";
 import { runLegacyHandler } from "../_lib/legacyAdapter";
 
+// Prevents Next.js from trying to statically evaluate/prerender this route
+// (and therefore import _handler.js and call admin.firestore()) during
+// `next build`'s page-data collection phase. This route only ever makes
+// sense as a live request handler.
+export const dynamic = "force-dynamic";
+
 export async function GET(request: Request) {
   return runLegacyHandler(request, legacyHandler);
 }
