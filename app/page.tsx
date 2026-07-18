@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Hero from "@/components/home/Hero";
 import MarketplaceGrid from "@/components/marketplace/MarketplaceGrid";
 
@@ -18,7 +19,9 @@ export default function HomePage() {
   return (
     <>
       <Hero />
-      <MarketplaceGrid />
+      <Suspense fallback={null}>
+        <MarketplaceGrid />
+      </Suspense>
     </>
   );
 }
