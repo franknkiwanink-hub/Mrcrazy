@@ -13,7 +13,8 @@ import { usePlansModal } from "@/components/billing/PlansModalProvider";
 import { useToast } from "@/lib/useToast";
 import { useLimits } from "@/lib/useLimits";
 import SellerBadges from "@/components/seller/SellerBadges";
-import { logout } from "@/lib/authActions";
+import { useLogoutModal } from "@/components/layout/LogoutModalProvider";
+import { useDisputePicker } from "@/components/dispute/DisputePickerProvider";
 import { buildListingSlug } from "@/lib/slug";
 
 // Ports the PROFILE MODAL from Js/profile.js + Js/profile-early.js
@@ -179,8 +180,8 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   const [deleting, setDeleting] = useState(false);
   const [cancelConfirming, setCancelConfirming] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [logoutConfirming, setLogoutConfirming] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false);
+  const { confirmLogout } = useLogoutModal();
+  const { openDisputePicker } = useDisputePicker();
 
   // Sync form fields whenever fresh profile data lands (initial load, or
   // after a successful save re-fetch) — same as pmRender re-populating
@@ -299,11 +300,6 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
     } finally {
       setCancelling(false);
     }
-  }
-
-  async function handleLogout() {
-    setLoggingOut(true);
-    await logout();
   }
 
   const planLabel = profile.plan.charAt(0).toUpperCase() + profile.plan.slice(1);
@@ -820,9 +816,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
               </button>
               <button
                 className="pm-bottom-btn pm-bottom-dispute"
-                onClick={() => {
-                  toast("The dispute picker isn't wired up yet.");
-                }}
+                onClick={openDisputePicker}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
@@ -832,7 +826,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                 Dispute
               </button>
             </div>
-            <button className="pm-bottom-btn pm-bottom-logout" style={{ width: "100%" }} onClick={() => setLogoutConfirming(true)}>
+            <button className="pm-bottom-btn pm-bottom-logout" style={{ width: "100%" }} onClick={() => confirmLogout()}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
                 <polyline points="16 17 21 12 16 7" />
@@ -865,17 +859,6 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
           busy={cancelling}
           onCancel={() => setCancelConfirming(false)}
           onConfirm={handleCancelPlan}
-        />
-      ) : null}
-
-      {logoutConfirming ? (
-        <ConfirmOverlay
-          title="Sign out?"
-          message="You'll need to sign back in to access your account."
-          confirmLabel="Sign Out"
-          busy={loggingOut}
-          onCancel={() => setLogoutConfirming(false)}
-          onConfirm={handleLogout}
         />
       ) : null}
 
