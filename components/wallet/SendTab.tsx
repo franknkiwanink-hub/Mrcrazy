@@ -11,15 +11,18 @@ import { useLimits } from "@/lib/useLimits";
 // now come from useLimits() (GET /api/limits, LIMITS.wallet).
 // FALLBACK_* match app/api/_lib/limits.js's wallet block exactly
 // (transferFee: 0.05, transferMin:1, transferMax:10000) and are used
-// only until that fetch resolves.
+// only until that fetch resolves. Markup mirrors index.html's
+// #walletPanelSend structure so globals.css's .wallet-* rules apply.
 const FALLBACK_TRANSFER_FEE_RATE = 0.05;
 const FALLBACK_TRANSFER_MIN = 1;
 const FALLBACK_TRANSFER_MAX = 10000;
 
 export default function SendTab({
+  active,
   balance,
   onSuccess,
 }: {
+  active: boolean;
   balance: number;
   onSuccess: () => void;
 }) {
@@ -85,104 +88,80 @@ export default function SendTab({
   }
 
   return (
-    <div id="walletPanelSend" className="active">
-      <div className="input-group" style={{ marginBottom: 4 }}>
-        <label>Recipient Email</label>
+    <div className={`wallet-panel${active ? " active" : ""}`} id="walletPanelSend">
+      <div className="wallet-field-label">Recipient's email</div>
+      <div className="wallet-input-status-wrap">
         <input
-          id="walletSendEmail"
-          className="input-field"
           type="email"
+          id="walletSendEmail"
+          className="wallet-text-input"
+          placeholder="friend@example.com"
+          autoComplete="off"
           value={email}
           onChange={(e) => {
             setEmail(e.target.value);
             onEmailChange(e.target.value);
           }}
-          placeholder="friend@example.com"
         />
+        <span className="wallet-input-status-icon" id="walletSendEmailStatus" />
       </div>
       <RecipientPreview status={status} recipient={recipient} errorMsg={errorMsg} />
 
-      <div className="input-group" style={{ margin: "10px 0" }}>
-        <label>Amount (USD)</label>
+      <div className="wallet-field-label" style={{ marginTop: 16 }}>Amount to send</div>
+      <div className="wallet-amount-input-wrap">
+        <span className="wallet-amount-currency">$</span>
         <input
-          id="walletSendAmt"
-          className="input-field"
           type="number"
+          id="walletSendAmt"
+          inputMode="decimal"
+          placeholder="0.00"
           min={TRANSFER_MIN}
           max={TRANSFER_MAX}
           step="0.01"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          placeholder={`${TRANSFER_MIN} – ${TRANSFER_MAX.toLocaleString()}`}
-        />
-        <span className="hint">Available: ${balance.toFixed(2)}</span>
-      </div>
-
-      <div className="input-group" style={{ marginBottom: 10 }}>
-        <label>Note (optional)</label>
-        <input
-          id="walletSendNote"
-          className="input-field"
-          type="text"
-          maxLength={200}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="What's this for?"
         />
       </div>
 
-      {showFee ? (
-        <div
-          id="walletSendFeeRow"
-          style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", color: "#aaa", padding: "0.5rem 0", borderTop: "1px solid #222", marginBottom: 10 }}
-        >
-          <span>
-            Fee (5%) <strong id="walletSendFee" style={{ color: "#ddd" }}>${fee.toFixed(2)}</strong>
-          </span>
-          <span>
-            Recipient gets <strong id="walletSendReceive" style={{ color: "#a3e635" }}>${receive.toFixed(2)}</strong>
-          </span>
-        </div>
-      ) : null}
+      <div className="wallet-field-label" style={{ marginTop: 16 }}>Note (optional)</div>
+      <input
+        type="text"
+        id="walletSendNote"
+        className="wallet-text-input"
+        placeholder="What's this for?"
+        maxLength={200}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
 
-      <button id="walletSendSubmit" className="save-btn" style={{ width: "100%" }} onClick={handleSubmit} disabled={submitting}>
+      <div className="wallet-fee-breakdown" id="walletSendFeeRow" style={showFee ? undefined : { display: "none" }}>
+        <div className="wallet-fee-line"><span id="walletSendFeeLabel">Transfer fee (5%)</span><span id="walletSendFee">${fee.toFixed(2)}</span></div>
+        <div className="wallet-fee-line total"><span>They'll receive</span><span id="walletSendReceive">${receive.toFixed(2)}</span></div>
+      </div>
+      {msg.text ? <div id="walletSendMsg" className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}>{msg.text}</div> : <div id="walletSendMsg" className="wallet-msg" />}
+      <button className="wallet-submit-btn" id="walletSendSubmit" onClick={handleSubmit} disabled={submitting}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+          <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+        </svg>
         <span>{submitting ? "Sending…" : "Send Money"}</span>
       </button>
 
-      {msg.text ? (
-        <div
-          id="walletSendMsg"
-          className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}
-          style={{ marginTop: 10, fontSize: "0.85rem", color: msg.kind === "err" ? "#f87171" : msg.kind === "ok" ? "#a3e635" : "#aaa" }}
-        >
-          {msg.text}
-        </div>
-      ) : null}
-
-      <hr className="detail-divider" style={{ margin: "1rem 0" }} />
-      <button
-        id="asendAddonToggle"
-        className={`wallet-addon-toggle${addonOpen ? " open" : ""}`}
-        aria-expanded={addonOpen}
-        onClick={() => setAddonOpen((o) => !o)}
-        style={{
-          width: "100%",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          background: "none",
-          border: "none",
-          color: "#ddd",
-          fontWeight: 700,
-          fontSize: "0.85rem",
-          cursor: "pointer",
-          padding: "0.4rem 0",
-        }}
-      >
-        Auto Send (recurring transfers)
-        <span style={{ transform: addonOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>▾</span>
+      {/* ── Auto Send addon (was its own tab; now lives inside Send) ── */}
+      <button type="button" className={`wallet-addon-toggle${addonOpen ? " open" : ""}`} id="asendAddonToggle" aria-expanded={addonOpen} onClick={() => setAddonOpen((o) => !o)}>
+        <span className="wallet-addon-toggle-left">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 6v6l4 2" strokeLinecap="round" />
+          </svg>
+          <span>Auto Send</span>
+        </span>
+        <svg className="wallet-addon-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </button>
-      {addonOpen ? <AutoSendAddon /> : null}
+      <div className={`wallet-addon-panel${addonOpen ? " open" : ""}`} id="walletPanelAutosend">
+        {addonOpen ? <AutoSendAddon /> : null}
+      </div>
     </div>
   );
 }
