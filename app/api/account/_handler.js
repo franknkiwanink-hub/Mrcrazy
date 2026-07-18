@@ -216,9 +216,21 @@ async function actionEnsureAccount(req, res) {
     // wallet fields here — those are only ever written by the PayPal
     // activation/cancellation/webhook handlers.
     const patch = {};
-    if (typeof username === 'string' && username.trim()) {
-      patch.username = username.trim();
-      patch.usernameLower = username.trim().toLowerCase().replace(/\s+/g, '_');
+    if (typeof username === 'string' && username.trim() && username.trim() !== (snap.data() || {}).username) {
+      // A username change must re-run the same uniqueness check signup
+      // does (resolveUniqueUsername) — this branch used to write
+      // whatever the caller sent straight to usernameLower with no
+      // check, which would let two accounts collide onto the same
+      // canonical /seller/{username} URL. Silently de-duplicating here
+      // (rather than erroring) matches signup's existing behavior.
+      const desiredBase = username.trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_.-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 15) || 'user';
+      const uniqueUname = await resolveUniqueUsername(db, desiredBase);
+      patch.username = uniqueUname;
+      patch.usernameLower = uniqueUname.toLowerCase().replace(/\s+/g, '_');
     }
     if (typeof profilePic === 'string' && profilePic.trim()) patch.profilePic = profilePic.trim();
     if (Object.keys(patch).length) await userRef.set(patch, { merge: true });
