@@ -5,6 +5,7 @@ import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { useWalletModal } from "@/components/wallet/WalletModalProvider";
 import { useLimits } from "@/lib/useLimits";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the Boost purchase modal from Js/sellers-transfer.js (index.html
 // lines 25383-25548 + #boostOverlay markup) — window.__openBoostModal.
@@ -60,6 +61,7 @@ export default function BoostModal({
   listingId: string | null;
   listing?: BoostListingData | null;
 }) {
+  useScrollLock(open);
   const { profile } = useAuth();
   const { openWallet } = useWalletModal();
   const { limits } = useLimits();
