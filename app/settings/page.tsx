@@ -99,8 +99,8 @@ function SettingsPageInner() {
   }
 
   return (
-    <div style={{ marginTop: 92, minHeight: "calc(100vh - 92px)", display: "flex" }}>
-      <div className="main-content" style={{ minHeight: "calc(100vh - 92px)" }}>
+    <div style={{ marginTop: 92, height: "calc(100vh - 92px)", display: "flex" }}>
+      <div className="main-content" style={{ height: "100%" }}>
         <SettingsSidebar
           activePanel={activePanel}
           onSelectPanel={setActivePanel}
