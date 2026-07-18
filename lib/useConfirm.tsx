@@ -26,6 +26,7 @@ interface PromptOptions {
   msg: string;
   inputPlaceholder?: string;
   confirmText?: string;
+  cancelText?: string;
 }
 
 interface AlertOptions {
@@ -98,7 +99,7 @@ export function useConfirm() {
             <input
               autoFocus
               type="text"
-              placeholder={(pending.opts as PromptOptions).inputPlaceholder || ""}
+              placeholder={pending.kind === "prompt" ? (pending.opts.inputPlaceholder || "") : ""}
               value={pending.value}
               onChange={(e) => setPending({ ...pending, value: e.target.value })}
               style={{ width: "100%", padding: "0.6rem 0.75rem", borderRadius: 8, background: "#0a0a0a", border: "1px solid #222", color: "#fff", fontSize: 13.5, marginBottom: 16, boxSizing: "border-box" }}
@@ -115,7 +116,7 @@ export function useConfirm() {
                 }}
                 style={{ padding: "0.5rem 1rem", borderRadius: 8, background: "transparent", border: "1px solid #333", color: "#aaa", fontSize: 13, cursor: "pointer" }}
               >
-                {(pending.opts as ConfirmOptions | PromptOptions).cancelText || "Cancel"}
+                {(pending.kind === "confirm" || pending.kind === "prompt") ? (pending.opts.cancelText || "Cancel") : "Cancel"}
               </button>
             ) : null}
             <button
@@ -127,7 +128,7 @@ export function useConfirm() {
               }}
               style={{ padding: "0.5rem 1.1rem", borderRadius: 8, background: color, border: "none", color: "#000", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
             >
-              {pending.kind === "alert" ? "OK" : (pending.opts as ConfirmOptions | PromptOptions).confirmText || "Confirm"}
+              {pending.kind === "alert" ? "OK" : (pending.opts.confirmText || "Confirm")}
             </button>
           </div>
         </div>
