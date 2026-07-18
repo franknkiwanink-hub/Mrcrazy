@@ -15,6 +15,7 @@ import {
 import { doc, deleteDoc, collection, getDocs, writeBatch, addDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import TransferDealModal from "./TransferDealModal";
+import { buildListingSlug } from "@/lib/slug";
 
 // Ports the deal chat panel from Js/inbox.js (lines 937-2774): sticky
 // item bar, escrow announcement bar + actions (pay/release/dispute),
@@ -583,7 +584,7 @@ function ItemBar({ room }: { room: { listingTitle: string; listingImage: string;
         <div id="dcpItemPrice">{price}</div>
       </div>
       {room.listingId ? (
-        <a id="dcpViewListingBtn" href={`/listing/${room.listingId}`} target="_blank" rel="noopener noreferrer">
+        <a id="dcpViewListingBtn" href={`/listing/${buildListingSlug(room.listingTitle, room.listingId)}`} target="_blank" rel="noopener noreferrer">
           View Listing
         </a>
       ) : null}
