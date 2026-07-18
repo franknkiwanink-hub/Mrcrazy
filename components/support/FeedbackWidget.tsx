@@ -403,216 +403,204 @@ function FeedbackModal({
   return (
     <div
       id="feedbackModal"
-      className="fb-modal active"
+      className="supp-modal supp-theme-feedback"
       role="dialog"
       aria-modal="true"
       aria-label="Feedback"
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 9995,
-        display: "flex",
-        alignItems: "flex-end",
-        justifyContent: "center",
-        background: "rgba(0,0,0,.6)",
-      }}
+      style={{ position: "fixed", inset: 0, zIndex: 9996 }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 480,
-          maxHeight: "88vh",
-          overflowY: "auto",
-          background: "#0b0b12",
-          border: "1px solid rgba(255,255,255,.1)",
-          borderRadius: "18px 18px 0 0",
-          padding: "20px 18px 26px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: "#f0f0f5" }}>Feedback</div>
-          <button
-            id="fbCloseBtn"
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            style={{
-              background: "none",
-              border: "none",
-              color: "rgba(255,255,255,.5)",
-              cursor: "pointer",
-              padding: 4,
-            }}
-          >
-            <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
+      <div className="full-modal supp-shell">
+        <div className="modal-header supp-header">
+          <div className="brand">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+            <h2>Feedback</h2>
+          </div>
+          <button className="cancel-btn" id="fbCloseBtn" type="button" aria-label="Close" onClick={onClose}>
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <line x1={18} y1={6} x2={6} y2={18} />
               <line x1={6} y1={6} x2={18} y2={18} />
             </svg>
+            Close
           </button>
         </div>
 
-        {countdown ? (
-          <div className="fb-countdown">
-            <div>
-              <div className="fb-countdown-label">Voting round ends in</div>
-              <div className="fb-countdown-clock" id="fbCountdownClock">
-                {countdown}
-              </div>
-            </div>
-            <div className="fb-countdown-sub">Top 3 ideas move to &quot;Working On&quot; each week.</div>
+        <div className="supp-body">
+          <div className="supp-hero supp-hero-sm">
+            <h2 className="supp-hero-title">
+              Help shape <span>what we build next</span>
+            </h2>
+            <p className="supp-hero-sub">
+              Suggest a change, or upvote something someone else already asked for. Similar suggestions get
+              grouped automatically — popular ones get reviewed first.
+            </p>
           </div>
-        ) : null}
 
-        <div className={`fb-explainer${explainerOpen ? "" : " fb-explainer-collapsed"}`}>
-          <div className="fb-explainer-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <circle cx={12} cy={12} r={10} />
-              <path d="M9.5 9a2.5 2.5 0 015 .5c0 1.5-2 2-2 3.5" />
-              <path d="M12 17h.01" />
-            </svg>
-            How this works
-          </div>
-          <ol>
-            <li>Submit an idea, or vote on existing ones below.</li>
-            <li>Every 7 days, the top 3 ideas by score move to &quot;Working On&quot;.</li>
-            <li>The board then clears and a new round starts.</li>
-          </ol>
-          <button className="fb-explainer-toggle" type="button" onClick={onToggleExplainer}>
-            {explainerOpen ? "Show less" : "Show more"}
-          </button>
-        </div>
-
-        <div className="fb-tabs">
-          <button
-            className={`fb-tab${pane === "compose" ? " fb-active" : ""}`}
-            type="button"
-            onClick={() => onShowPane("compose")}
-          >
-            Suggest
-          </button>
-          <button className={`fb-tab${pane === "board" ? " fb-active" : ""}`} type="button" onClick={() => onShowPane("board")}>
-            Vote
-          </button>
-          <button
-            className={`fb-tab${pane === "working" ? " fb-active" : ""}`}
-            type="button"
-            onClick={() => onShowPane("working")}
-          >
-            Working On
-          </button>
-        </div>
-
-        {pane === "compose" ? (
-          <div className="fb-compose">
-            <textarea
-              className="fb-textarea"
-              placeholder="What should we build or fix?"
-              value={text}
-              maxLength={500}
-              onChange={(e) => onTextChange(e.target.value)}
-            />
-            <div className="fb-char-count">{text.length}</div>
-            <button className="fb-submit-btn" type="button" disabled={submitting} onClick={onSubmit}>
-              {submitting ? "Sending…" : "Send suggestion"}
-            </button>
-            <div className={`fb-status${status.kind === "idle" ? "" : ` ${status.kind}`}`}>{status.msg}</div>
-          </div>
-        ) : null}
-
-        {pane === "board" ? (
-          <div className="fb-board">
-            {board === null ? (
-              <>
-                <div className="fb-board-skel" />
-                <div className="fb-board-skel" />
-                <div className="fb-board-skel" />
-              </>
-            ) : boardError ? (
-              <>
-                <div className="fb-board-empty">Couldn&apos;t load the board right now — try again in a bit.</div>
-                <button className="fb-submit-btn" type="button" onClick={onRetryBoard} style={{ marginTop: 10 }}>
-                  Retry
-                </button>
-              </>
-            ) : board.length === 0 ? (
-              <div className="fb-board-empty">No suggestions yet — be the first!</div>
-            ) : (
-              board.map((s, i) => (
-                <div className="fb-board-item" key={s.id}>
-                  <div className="fb-board-score-row">
-                    {i < 3 ? <span className="fb-board-rank">#{i + 1} — moves to &quot;working on&quot;</span> : <span />}
-                    <span className="fb-board-score">
-                      <span className="fb-board-score-n">
-                        {s.totalScore > 0 ? "+" : ""}
-                        {s.totalScore}
-                      </span>{" "}
-                      pts · {s.voteCount} vote{s.voteCount === 1 ? "" : "s"}
-                    </span>
-                  </div>
-                  <div className="fb-board-txt">{s.text}</div>
-                  <div className="fb-vote-row">
-                    {VOTE_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.score}
-                        className={`fb-vote-btn${s.myVote === opt.score ? " fb-vote-selected" : ""}`}
-                        data-score={opt.score}
-                        type="button"
-                        disabled={pendingVote === s.id}
-                        style={pendingVote === s.id ? { pointerEvents: "none" } : undefined}
-                        onClick={() => onVote(s.id, opt.score)}
-                      >
-                        <span className="fb-vote-label">{opt.label}</span>
-                        <span className="fb-vote-count">{(s.breakdown && s.breakdown[opt.key]) || 0}</span>
-                      </button>
-                    ))}
-                  </div>
+          {countdown ? (
+            <div className="fb-countdown">
+              <div>
+                <div className="fb-countdown-label">Voting round ends in</div>
+                <div className="fb-countdown-clock" id="fbCountdownClock">
+                  {countdown}
                 </div>
-              ))
-            )}
-          </div>
-        ) : null}
+              </div>
+              <div className="fb-countdown-sub">Top 3 ideas move to &quot;Working On&quot; each week.</div>
+            </div>
+          ) : null}
 
-        {pane === "working" ? (
-          <div className="fb-board">
-            {archive === null ? (
-              <>
-                <div className="fb-board-skel" />
-                <div className="fb-board-skel" />
-                <div className="fb-board-skel" />
-              </>
-            ) : archiveError ? (
-              <>
-                <div className="fb-board-empty">Couldn&apos;t load this right now — try again in a bit.</div>
-                <button className="fb-submit-btn" type="button" onClick={onRetryArchive} style={{ marginTop: 10 }}>
-                  Retry
-                </button>
-              </>
-            ) : archive.length === 0 ? (
-              <div className="fb-board-empty">Nothing here yet — check back after the first 7-day round ends!</div>
-            ) : (
-              groupArchiveByWeek(archive).map((week, wi) => (
-                <div key={wi}>
-                  <div className="fb-archive-week-label">{week.label}</div>
-                  {week.items.map((item, ii) => (
-                    <div className="fb-archive-item" key={ii}>
-                      <div className="fb-archive-badge">#{ii + 1}</div>
-                      <div>
-                        <div className="fb-archive-txt">{item.text}</div>
-                        <div className="fb-archive-score">
-                          Finished with {item.totalScore > 0 ? "+" : ""}
-                          {item.totalScore} pts · {item.voteCount} vote{item.voteCount === 1 ? "" : "s"}
+          <div className={`fb-explainer${explainerOpen ? "" : " fb-explainer-collapsed"}`}>
+            <div className="fb-explainer-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <circle cx={12} cy={12} r={10} />
+                <path d="M9.5 9a2.5 2.5 0 015 .5c0 1.5-2 2-2 3.5" />
+                <path d="M12 17h.01" />
+              </svg>
+              How this works
+            </div>
+            <ol>
+              <li>Submit an idea, or vote on existing ones below.</li>
+              <li>Every 7 days, the top 3 ideas by score move to &quot;Working On&quot;.</li>
+              <li>The board then clears and a new round starts.</li>
+            </ol>
+            <button className="fb-explainer-toggle" type="button" onClick={onToggleExplainer}>
+              {explainerOpen ? "Show less" : "Show more"}
+            </button>
+          </div>
+
+          <div className="fb-tabs">
+            <button
+              className={`fb-tab${pane === "compose" ? " fb-active" : ""}`}
+              type="button"
+              onClick={() => onShowPane("compose")}
+            >
+              Suggest
+            </button>
+            <button className={`fb-tab${pane === "board" ? " fb-active" : ""}`} type="button" onClick={() => onShowPane("board")}>
+              Vote
+            </button>
+            <button
+              className={`fb-tab${pane === "working" ? " fb-active" : ""}`}
+              type="button"
+              onClick={() => onShowPane("working")}
+            >
+              Working On
+            </button>
+          </div>
+
+          {pane === "compose" ? (
+            <div className="fb-compose">
+              <textarea
+                className="fb-textarea"
+                placeholder="What should we build or fix?"
+                value={text}
+                maxLength={500}
+                onChange={(e) => onTextChange(e.target.value)}
+              />
+              <div className="fb-char-count">{text.length}</div>
+              <button className="fb-submit-btn" type="button" disabled={submitting} onClick={onSubmit}>
+                {submitting ? "Sending…" : "Send suggestion"}
+              </button>
+              <div className={`fb-status${status.kind === "idle" ? "" : ` ${status.kind}`}`}>{status.msg}</div>
+            </div>
+          ) : null}
+
+          {pane === "board" ? (
+            <div className="fb-board">
+              {board === null ? (
+                <>
+                  <div className="fb-board-skel" />
+                  <div className="fb-board-skel" />
+                  <div className="fb-board-skel" />
+                </>
+              ) : boardError ? (
+                <>
+                  <div className="fb-board-empty">Couldn&apos;t load the board right now — try again in a bit.</div>
+                  <button className="fb-submit-btn" type="button" onClick={onRetryBoard} style={{ marginTop: 10 }}>
+                    Retry
+                  </button>
+                </>
+              ) : board.length === 0 ? (
+                <div className="fb-board-empty">No suggestions yet — be the first!</div>
+              ) : (
+                board.map((s, i) => (
+                  <div className="fb-board-item" key={s.id}>
+                    <div className="fb-board-score-row">
+                      {i < 3 ? <span className="fb-board-rank">#{i + 1} — moves to &quot;working on&quot;</span> : <span />}
+                      <span className="fb-board-score">
+                        <span className="fb-board-score-n">
+                          {s.totalScore > 0 ? "+" : ""}
+                          {s.totalScore}
+                        </span>{" "}
+                        pts · {s.voteCount} vote{s.voteCount === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <div className="fb-board-txt">{s.text}</div>
+                    <div className="fb-vote-row">
+                      {VOTE_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.score}
+                          className={`fb-vote-btn${s.myVote === opt.score ? " fb-vote-selected" : ""}`}
+                          data-score={opt.score}
+                          type="button"
+                          disabled={pendingVote === s.id}
+                          style={pendingVote === s.id ? { pointerEvents: "none" } : undefined}
+                          onClick={() => onVote(s.id, opt.score)}
+                        >
+                          <span className="fb-vote-label">{opt.label}</span>
+                          <span className="fb-vote-count">{(s.breakdown && s.breakdown[opt.key]) || 0}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
+
+          {pane === "working" ? (
+            <div className="fb-board">
+              {archive === null ? (
+                <>
+                  <div className="fb-board-skel" />
+                  <div className="fb-board-skel" />
+                  <div className="fb-board-skel" />
+                </>
+              ) : archiveError ? (
+                <>
+                  <div className="fb-board-empty">Couldn&apos;t load this right now — try again in a bit.</div>
+                  <button className="fb-submit-btn" type="button" onClick={onRetryArchive} style={{ marginTop: 10 }}>
+                    Retry
+                  </button>
+                </>
+              ) : archive.length === 0 ? (
+                <div className="fb-board-empty">Nothing here yet — check back after the first 7-day round ends!</div>
+              ) : (
+                groupArchiveByWeek(archive).map((week, wi) => (
+                  <div key={wi}>
+                    <div className="fb-archive-week-label">{week.label}</div>
+                    {week.items.map((item, ii) => (
+                      <div className="fb-archive-item" key={ii}>
+                        <div className="fb-archive-badge">#{ii + 1}</div>
+                        <div>
+                          <div className="fb-archive-txt">{item.text}</div>
+                          <div className="fb-archive-score">
+                            Finished with {item.totalScore > 0 ? "+" : ""}
+                            {item.totalScore} pts · {item.voteCount} vote{item.voteCount === 1 ? "" : "s"}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              ))
-            )}
-          </div>
-        ) : null}
+                    ))}
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
