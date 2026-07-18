@@ -17,6 +17,7 @@
 // access to verify `npm install` succeeds — see adminDb.ts's header comment.
 // Relying instead on the fact that this is only ever imported from
 // Server Components (page.tsx below, sitemap.ts).
+import { cache } from "react";
 import { getAdminDb } from "@/lib/server/adminDb";
 import type { Listing } from "@/lib/listings";
 import { idFromListingSlug } from "@/lib/slug";
@@ -57,7 +58,7 @@ function serializeTimestamps<T>(value: T): T {
 // the real Firestore id out of either shape; the slug prefix itself is
 // never trusted for the lookup (see lib/slug.ts's header comment), only
 // used to make the URL readable.
-export async function getListingById(segment: string): Promise<Listing | null> {
+export const getListingById = cache(async function getListingById(segment: string): Promise<Listing | null> {
   if (!segment) return null;
   const id = idFromListingSlug(segment);
   if (!id) return null;
@@ -66,4 +67,4 @@ export async function getListingById(segment: string): Promise<Listing | null> {
   if (!snap.exists) return null;
   const data = serializeTimestamps(snap.data()) as Omit<Listing, "id">;
   return { id: snap.id, ...data };
-}
+});
