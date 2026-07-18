@@ -6,7 +6,7 @@ import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useNavDrawer } from "@/components/layout/NavDrawerProvider";
 import { useNavListingsCount } from "@/lib/useNavListingsCount";
 import { useToast } from "@/lib/useToast";
-import { logout } from "@/lib/authActions";
+import { useLogoutModal } from "@/components/layout/LogoutModalProvider";
 import { useWalletModal } from "@/components/wallet/WalletModalProvider";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
 import { useThemeModal } from "@/components/theme/ThemeModalProvider";
@@ -34,6 +34,7 @@ export default function NavDrawer() {
   const { openWallet } = useWalletModal();
   const { openPlansModal } = usePlansModal();
   const { openThemePicker } = useThemeModal();
+  const { confirmLogout } = useLogoutModal();
   const router = useRouter();
   const isLoggedIn = !!user;
 
@@ -310,7 +311,7 @@ export default function NavDrawer() {
             id="navLogoutBtn"
             onClick={async () => {
               closeNav();
-              await logout();
+              await confirmLogout();
             }}
             style={{ marginTop: 2, color: "#f87171", opacity: 0.75 }}
           >
