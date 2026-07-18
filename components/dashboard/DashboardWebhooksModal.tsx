@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebase";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the "── Webhooks panel ──" section of Js/dashboard.js — a
 // lighter-weight list/add/delete/test UI than settings' WebhooksPanel
@@ -38,6 +39,7 @@ async function apiWebhooks<T = any>(action: string, extra?: Record<string, unkno
 }
 
 export default function DashboardWebhooksModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useScrollLock(open);
   const [webhooks, setWebhooks] = useState<DashboardWebhook[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [url, setUrl] = useState("");
