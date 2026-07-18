@@ -84,7 +84,7 @@ function WeeklyLimitBar({ cap, open, onToggle }: { cap: CapStatus | null; open: 
           <span className="lm-limit-arrow">▼</span>
         </div>
         {cap.plan !== "pro" && (
-          <button className="lm-btn-plan-upgrade" type="button" onClick={openPlansModal}>
+          <button className="lm-btn-plan-upgrade" type="button" onClick={() => openPlansModal()}>
             <svg viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="19" x2="12" y2="5" />
               <polyline points="6 11 12 5 18 11" />
