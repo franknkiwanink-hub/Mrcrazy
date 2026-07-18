@@ -104,9 +104,11 @@ export default function RootLayout({
         <div id="appThemeBg" aria-hidden="true" />
         <PushServiceWorkerRegister />
         <AuthProvider>
-          {/* Boot overlay — first thing rendered, removed only after auth
-              resolves once + a cooldown, same comment/positioning as the
-              original's index.html. */}
+          {/* Boot overlay — shows on top while auth resolves, but no
+              longer blocks the page: pointer-events are disabled on it
+              (see #appBootOverlay in globals.css) and its background is
+              translucent, so content underneath renders and is clickable
+              immediately instead of waiting behind it. */}
           <BootOverlay />
           {/* Maintenance-mode takeover + banned/suspended account
               overlay — both are full-screen, no-dismiss states that
