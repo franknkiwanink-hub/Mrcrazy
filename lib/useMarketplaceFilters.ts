@@ -32,23 +32,74 @@ export interface ActiveTag {
   clear: () => void;
 }
 
+// Module-level cache, same rationale as useFeed's feedCache: MarketplaceGrid
+// unmounts/remounts on navigation to/from /listing/[id] (a real route, not
+// a modal), so component-local useState alone loses the user's filter and
+// search selections on every "back" navigation. Persisting them here keeps
+// the marketplace feeling like it never left, matching the original's
+// single always-mounted overlay.
+interface FiltersCacheEntry {
+  typeFilter: ListingType | "all";
+  templateFilter: TemplateFilter;
+  priceMin: number;
+  priceMax: number | null;
+  searchQuery: string;
+}
+let filtersCache: FiltersCacheEntry | null = null;
+
 export function useMarketplaceFilters() {
-  const [typeFilter, setTypeFilter] = useState<ListingType | "all">("all");
-  const [templateFilter, setTemplateFilter] = useState<TemplateFilter>("all");
-  const [priceMin, setPriceMin] = useState(0);
-  const [priceMax, setPriceMax] = useState<number | null>(null);
+  const [typeFilter, setTypeFilterState] = useState<ListingType | "all">(filtersCache?.typeFilter ?? "all");
+  const [templateFilter, setTemplateFilterState] = useState<TemplateFilter>(filtersCache?.templateFilter ?? "all");
+  const [priceMin, setPriceMinState] = useState(filtersCache?.priceMin ?? 0);
+  const [priceMax, setPriceMaxState] = useState<number | null>(filtersCache?.priceMax ?? null);
   // Mirrors mpSearchQuery — trimmed/lowercased in the input handler, not
   // here, same as the original. Deliberately excluded from mpUpdateActiveTags
   // / activeTags below (confirmed: search never appears as an active-filter
   // chip in the original).
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQueryState] = useState(filtersCache?.searchQuery ?? "");
 
-  const clearType = useCallback(() => setTypeFilter("all"), []);
-  const clearTemplate = useCallback(() => setTemplateFilter("all"), []);
-  const clearPrice = useCallback(() => {
-    setPriceMin(0);
-    setPriceMax(null);
+  // Keep the cache in sync with every change so the next mount (after a
+  // navigate-away-and-back) rehydrates from the latest values.
+  const syncCache = useCallback((patch: Partial<FiltersCacheEntry>) => {
+    filtersCache = {
+      typeFilter: filtersCache?.typeFilter ?? "all",
+      templateFilter: filtersCache?.templateFilter ?? "all",
+      priceMin: filtersCache?.priceMin ?? 0,
+      priceMax: filtersCache?.priceMax ?? null,
+      searchQuery: filtersCache?.searchQuery ?? "",
+      ...patch,
+    };
   }, []);
+
+  const setTypeFilter = useCallback(
+    (v: ListingType | "all") => {
+      setTypeFilterState(v);
+      syncCache({ typeFilter: v });
+    },
+    [syncCache]
+  );
+  const setTemplateFilter = useCallback(
+    (v: TemplateFilter) => {
+      setTemplateFilterState(v);
+      syncCache({ templateFilter: v });
+    },
+    [syncCache]
+  );
+  const setSearchQuery = useCallback(
+    (v: string) => {
+      setSearchQueryState(v);
+      syncCache({ searchQuery: v });
+    },
+    [syncCache]
+  );
+
+  const clearType = useCallback(() => setTypeFilter("all"), [setTypeFilter]);
+  const clearTemplate = useCallback(() => setTemplateFilter("all"), [setTemplateFilter]);
+  const clearPrice = useCallback(() => {
+    setPriceMinState(0);
+    setPriceMaxState(null);
+    syncCache({ priceMin: 0, priceMax: null });
+  }, [syncCache]);
 
   const fmt = (n: number) =>
     Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -115,8 +166,9 @@ export function useMarketplaceFilters() {
     priceMin,
     priceMax,
     setPriceRange: (min: number, max: number | null) => {
-      setPriceMin(min);
-      setPriceMax(max);
+      setPriceMinState(min);
+      setPriceMaxState(max);
+      syncCache({ priceMin: min, priceMax: max });
     },
     searchQuery,
     setSearchQuery,
