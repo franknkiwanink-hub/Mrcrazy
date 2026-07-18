@@ -14,6 +14,7 @@ import AdSlot from "@/components/marketplace/AdSlot";
 import SellerPromoCard from "@/components/marketplace/SellerPromoCard";
 import AiPromoCard from "@/components/marketplace/AiPromoCard";
 import { buildListingSlug } from "@/lib/slug";
+import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 
 export default function MarketplaceGrid() {
   const filters = useMarketplaceFilters();
@@ -67,6 +68,14 @@ export default function MarketplaceGrid() {
     return () => observer.disconnect();
   }, [loadMore]);
 
+  // First-load state — same client-side fetch (useFeed) the old small
+  // in-grid spinner covered, now using the shared full-screen skeleton
+  // instead so it matches the loading treatment used everywhere else in
+  // the app (route navigation via app/loading.tsx).
+  if (loading) {
+    return <SiteriftyLoader />;
+  }
+
   return (
     <div>
       <MarketplaceFilterBar
@@ -88,20 +97,14 @@ export default function MarketplaceGrid() {
       <PremiumSellersStrip />
 
       <div className="mp-results">
-        Showing <strong id="mpResultCount">{loading ? "—" : filteredListings.length}</strong>
+        Showing <strong id="mpResultCount">{filteredListings.length}</strong>
       </div>
 
       <BoostedRow listings={filteredListings} onOpen={onOpen} onOpenSeller={onOpenSeller} />
 
       <div className="mp-grid-wrap">
         <div className="mp-grid" id="mpGrid">
-          {loading ? (
-            <div className="mp-state" id="mpLoading">
-              <div className="mp-spinner" />
-              <div className="mp-state-title">Loading listings…</div>
-              <div className="mp-state-desc">Fetching the latest from the marketplace</div>
-            </div>
-          ) : error ? (
+          {error ? (
             <div className="mp-state" id="mpError" style={{ display: "flex" }}>
               <svg viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8" />
