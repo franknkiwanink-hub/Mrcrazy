@@ -13,10 +13,6 @@
 // separate features tied to the listing forms / deal chat, not the
 // support panel itself.
 //
-// Scroll-lock: no shared lockScroll/unlockScroll helper exists yet
-// (same gap noted in FeedbackWidget.tsx), so this uses the same local
-// body-overflow lock that component already established.
-//
 // Entry point: this is mounted globally via AiSupportChatModalProvider,
 // same tier as BoostModalProvider/WalletModalProvider. It is NOT yet
 // wired into the inbox's "AI Support" row (that still routes to /help) —
@@ -25,6 +21,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { auth } from "@/lib/firebase";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 const ASP_WELCOME =
   "Hi! I'm the Siterifty AI Support assistant. Ask me anything about deals, your account, or type @username if you need to report someone.";
@@ -102,16 +99,8 @@ export default function AiSupportChatPanel({
     }
   }, [log, sending]);
 
-  // Local scroll lock — see the top-of-file note on why this doesn't use
-  // a shared helper yet.
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
+  // Scroll lock — shared across every modal/overlay in the app.
+  useScrollLock(open);
 
   useEffect(() => {
     if (!open) return;
