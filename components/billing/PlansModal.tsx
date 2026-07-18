@@ -5,6 +5,7 @@ import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { loadPaypalSdk } from "@/lib/paypalSdk";
 import { useLimits } from "@/lib/useLimits";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the PLANS MODAL from plans-boost.js (index.html lines
 // 22915-23678). PLAN_DATA below is a mix of two kinds of content:
@@ -104,6 +105,7 @@ export default function PlansModal({
   onClose: () => void;
   onSubscribed: (plan: PlanKey) => void;
 }) {
+  useScrollLock(open);
   const { profile } = useAuth();
   const currentPlan = (profile?.plan || "free") as string;
   const { limits } = useLimits();
@@ -255,59 +257,75 @@ export default function PlansModal({
     <div
       id="srfPlansOverlay"
       className="active"
+      style={{ position: "fixed", inset: 0, zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.75)" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="srf-plans-modal">
-        <div className="srf-plans-header">
-          <div className="srf-plans-brand">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <polyline points="9 22 9 12 15 12 15 22" />
-            </svg>
-            <h2>Upgrade Plan</h2>
-          </div>
-          <button className="srf-plans-close" id="srfPlansCloseBtn" onClick={onClose} aria-label="Close">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+      <div style={{ background: "#141420", borderRadius: 16, width: "min(460px, 92vw)", maxHeight: "88vh", overflowY: "auto", color: "#fff" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "1.1rem 1.3rem", borderBottom: "1px solid #222" }}>
+          <h3 style={{ margin: 0, fontSize: "1.05rem" }}>Plans &amp; Billing</h3>
+          <button id="srfPlansCloseBtn" onClick={onClose} style={{ background: "none", border: "none", color: "#888", fontSize: "1.4rem", cursor: "pointer", lineHeight: 1 }}>
+            &times;
           </button>
         </div>
 
-        <div className="srf-plans-tabs" id="srfPlansTabs">
+        <div id="srfPlansTabs" style={{ display: "flex", gap: 4, padding: "0.9rem 1.3rem 0" }}>
           {PLAN_ORDER.map((key) => (
             <button
               key={key}
               className={`srf-plan-tab${activePlan === key ? " active" : ""}`}
               data-plan={key}
               onClick={() => selectPlan(key)}
+              style={{
+                flex: 1,
+                padding: "0.5rem 0",
+                borderRadius: 8,
+                border: activePlan === key ? `1px solid ${PLANS[key].color}` : "1px solid #2a2a2a",
+                background: activePlan === key ? `${PLANS[key].color}22` : "transparent",
+                color: activePlan === key ? PLANS[key].color : "#999",
+                fontWeight: 700,
+                fontSize: "0.82rem",
+                cursor: "pointer",
+              }}
             >
               {PLANS[key].name}
-              {key === "growth" ? <span className="srf-plan-chip">popular</span> : null}
             </button>
           ))}
         </div>
 
-        <div className="srf-plans-body" id="srfPlansBody">
-          <div className="srf-plan-name">
+        <div id="srfPlansBody" style={{ padding: "1.2rem 1.3rem 0" }}>
+          <div className="srf-plan-name" style={{ fontWeight: 800, fontSize: "1.1rem", display: "flex", alignItems: "center", gap: 8 }}>
             {p.name}
-            {activePlan === "growth" ? <span className="srf-plan-chip">popular</span> : null}
+            {activePlan === "growth" ? (
+              <span className="srf-plan-chip" style={{ fontSize: "0.65rem", background: "#a3e635", color: "#000", padding: "2px 8px", borderRadius: 999, fontWeight: 700 }}>
+                popular
+              </span>
+            ) : null}
           </div>
-          <div className="srf-plan-price">
+          <div className="srf-plan-price" style={{ color: p.color, fontWeight: 800, fontSize: "1.8rem", margin: "0.3rem 0" }}>
             ${p.price}
-            <small>/month</small>
+            <small style={{ fontSize: "0.9rem", fontWeight: 500, opacity: 0.7 }}>/month</small>
           </div>
-          <p className="srf-plan-desc">{p.tagline}</p>
-          <div className="srf-plan-pills">
+          <p className="srf-plan-desc" style={{ color: "#aaa", fontSize: "0.85rem", margin: "0 0 0.7rem" }}>
+            {p.tagline}
+          </p>
+          <div className="srf-plan-pills" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: "0.9rem" }}>
             {p.pills.map((text) => (
-              <span key={text} className="srf-plan-pill" style={{ color: p.color, borderColor: `${p.color}55` }}>
+              <span
+                key={text}
+                className="srf-plan-pill"
+                style={{ color: p.color, border: `1px solid ${p.color}55`, borderRadius: 999, padding: "3px 10px", fontSize: "0.75rem", fontWeight: 600 }}
+              >
                 {text}
               </span>
             ))}
           </div>
-          <ul className="srf-plan-features">
+          <ul className="srf-plan-features" style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
             {p.features.map((f) => (
-              <li key={f.text} className={f.on ? "" : "is-dim"}>
+              <li
+                key={f.text}
+                className={f.on ? "" : "is-dim"}
+                style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.85rem", color: f.on ? "#eee" : "#555" }}
+              >
                 {f.on ? <CheckIcon /> : <XIcon />}
                 {f.text}
               </li>
@@ -315,37 +333,43 @@ export default function PlansModal({
           </ul>
         </div>
 
-        <div className="srf-plans-footer">
-          <div id="srfPlansFooterInner">
-            {isCurrentPlan ? (
-              <div className="srf-current-banner">✓ This is your current plan</div>
-            ) : (
-              <>
-                {showSubscribeBtn ? (
-                  <button
-                    id="srfSubscribeBtn"
-                    className="srf-subscribe-cta"
-                    style={{ background: p.color, color: "#000" }}
-                    onClick={() => {
-                      setShowSubscribeBtn(false);
-                      mountPaypalButton(activePlan);
-                    }}
-                  >
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                    </svg>
-                    Subscribe to {p.name}
-                  </button>
-                ) : null}
-                <div id="srfPlansPaypalContainer" ref={paypalContainerRef} />
-              </>
-            )}
-          </div>
-          <div className={`srf-plans-msg${msg.kind ? ` ${msg.kind}` : ""}`} id="srfPlansMsg">
-            {msg.text}
-          </div>
-          <p className="srf-plans-note">Secure payment via PayPal · Cancel anytime</p>
+        <div id="srfPlansFooterInner" style={{ padding: "1.2rem 1.3rem" }}>
+          {isCurrentPlan ? (
+            <div className="srf-current-banner" style={{ textAlign: "center", padding: "0.7rem", borderRadius: 8, background: "rgba(163,230,53,0.1)", color: "#a3e635", fontWeight: 700, fontSize: "0.85rem" }}>
+              ✓ This is your current plan
+            </div>
+          ) : (
+            <>
+              {showSubscribeBtn ? (
+                <button
+                  id="srfSubscribeBtn"
+                  className="srf-subscribe-cta"
+                  style={{ width: "100%", padding: "0.8rem", borderRadius: 999, border: "none", background: p.color, color: "#000", fontWeight: 700, fontSize: "0.9rem", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                  onClick={() => {
+                    setShowSubscribeBtn(false);
+                    mountPaypalButton(activePlan);
+                  }}
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                  Subscribe to {p.name}
+                </button>
+              ) : null}
+              <div id="srfPlansPaypalContainer" ref={paypalContainerRef} style={{ marginTop: showSubscribeBtn ? 0 : 8 }} />
+            </>
+          )}
+
+          {msg.text ? (
+            <div
+              id="srfPlansMsg"
+              className={`srf-plans-msg${msg.kind ? ` ${msg.kind}` : ""}`}
+              style={{ marginTop: 10, fontSize: "0.85rem", textAlign: "center", color: msg.kind === "err" ? "#f87171" : msg.kind === "ok" ? "#a3e635" : "#aaa" }}
+            >
+              {msg.text}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
