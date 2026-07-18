@@ -159,7 +159,7 @@ function SellerCard({ user, viewerUid }: { user: DirectoryUser; viewerUid?: stri
   const initial = (user.username || "?").trim().charAt(0).toUpperCase() || "?";
 
   return (
-    <div className="svm-profile-card" data-uid={user.uid} onClick={() => router.push(`/seller/${encodeURIComponent(user.uid)}`)}>
+    <div className="svm-profile-card" data-uid={user.uid} onClick={() => router.push(`/seller/${encodeURIComponent(user.username || user.uid)}`)}>
       <div className="svm-avatar">
         {user.profilePic && !imgFailed ? (
           <img src={user.profilePic} alt={user.username} loading="lazy" onError={() => setImgFailed(true)} />
