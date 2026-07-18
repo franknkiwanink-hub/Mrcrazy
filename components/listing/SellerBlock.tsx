@@ -35,7 +35,8 @@ export default function SellerBlock({ listing, accentColor }: { listing: Listing
       <div
         className="modal-seller-section"
         onClick={() => {
-          if (listing.ownerId) router.push(`/seller/${encodeURIComponent(listing.ownerId)}`);
+          const dest = seller?.username || listing.ownerId;
+          if (dest) router.push(`/seller/${encodeURIComponent(dest)}`);
         }}
       >
         <div className="seller-avatar">
