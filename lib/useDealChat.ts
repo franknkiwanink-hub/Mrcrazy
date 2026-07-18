@@ -295,11 +295,11 @@ export function useDealChat(chatRoomId: string) {
 
   // ── Send a text message (with AI scam guard) ──
   const sendMessage = useCallback(
-    async (text: string): Promise<{ blocked?: string } | void> => {
+    async (text: string): Promise<{ blocked?: string } | undefined> => {
       const trimmed = text.trim();
-      if (!trimmed || !chatRoomId || !room) return;
+      if (!trimmed || !chatRoomId || !room) return undefined;
       const user = auth.currentUser;
-      if (!user) return;
+      if (!user) return undefined;
 
       setSending(true);
       try {
@@ -349,6 +349,7 @@ export function useDealChat(chatRoomId: string) {
       } finally {
         setSending(false);
       }
+      return undefined;
     },
     [chatRoomId, room, syncThreads]
   );
