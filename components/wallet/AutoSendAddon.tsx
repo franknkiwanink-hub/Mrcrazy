@@ -7,11 +7,13 @@ import RecipientPreview from "@/components/wallet/RecipientPreview";
 import { useLimits } from "@/lib/useLimits";
 
 // Ports the AUTO SEND section from wallet.js (autosend-create/-list/
-// -cancel). Live interval options + transfer bounds now come from
-// useLimits() (GET /api/limits, LIMITS.autoSend.intervals /
-// LIMITS.wallet). FALLBACK_* match app/api/_lib/limits.js exactly
-// ([1,3,7,14,21,30] days, transferMin:1, transferMax:10000) and are
-// used only until that fetch resolves.
+// -cancel), including _asendScheduleRow's exact markup (.wallet-tx-row /
+// .wallet-tx-icon pending|neg / .asend-cancel-btn). Live interval
+// options + transfer bounds now come from useLimits() (GET
+// /api/limits, LIMITS.autoSend.intervals / LIMITS.wallet). FALLBACK_*
+// match app/api/_lib/limits.js exactly ([1,3,7,14,21,30] days,
+// transferMin:1, transferMax:10000) and are used only until that fetch
+// resolves.
 const FALLBACK_INTERVALS = [1, 3, 7, 14, 21, 30];
 const FALLBACK_TRANSFER_MIN = 1;
 const FALLBACK_TRANSFER_MAX = 10000;
@@ -134,13 +136,14 @@ export default function AutoSendAddon() {
   }
 
   return (
-    <div style={{ padding: "0.8rem 0 0.2rem" }}>
-      <div className="input-group" style={{ marginBottom: 4 }}>
-        <label>Recipient Email</label>
+    <div>
+      <div className="wallet-field-label">Recipient's email</div>
+      <div className="wallet-input-status-wrap">
         <input
           id="asendEmail"
-          className="input-field"
+          className="wallet-text-input"
           type="email"
+          autoComplete="off"
           value={email}
           onChange={(e) => {
             setEmail(e.target.value);
@@ -148,90 +151,73 @@ export default function AutoSendAddon() {
           }}
           placeholder="friend@example.com"
         />
+        <span className="wallet-input-status-icon" id="asendEmailStatus" />
       </div>
       <RecipientPreview status={status} recipient={recipient} errorMsg={errorMsg} />
 
-      <div style={{ display: "flex", gap: 8, margin: "10px 0" }}>
-        <div className="input-group" style={{ flex: 1 }}>
-          <label>Amount (USD)</label>
-          <input
-            id="asendAmt"
-            className="input-field"
-            type="number"
-            min={TRANSFER_MIN}
-            max={TRANSFER_MAX}
-            step="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="25.00"
-          />
-        </div>
-        <div className="input-group" style={{ flex: 1 }}>
-          <label>Every</label>
-          <select
-            id="asendInterval"
-            className="input-field"
-            value={interval}
-            onChange={(e) => setInterval_(Number(e.target.value))}
-          >
-            {INTERVALS.map((d) => (
-              <option key={d} value={d}>
-                {d} day{d !== 1 ? "s" : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div className="input-group" style={{ marginBottom: 10 }}>
-        <label>Note (optional)</label>
+      <div className="wallet-field-label" style={{ marginTop: 16 }}>Amount per send</div>
+      <div className="wallet-amount-input-wrap">
+        <span className="wallet-amount-currency">$</span>
         <input
-          id="asendNote"
-          className="input-field"
-          type="text"
-          maxLength={200}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="What's this for?"
+          id="asendAmt"
+          type="number"
+          inputMode="decimal"
+          min={TRANSFER_MIN}
+          max={TRANSFER_MAX}
+          step="0.01"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.00"
         />
       </div>
 
-      <button id="asendSubmit" className="save-btn" style={{ width: "100%" }} onClick={handleSubmit} disabled={submitting}>
+      <div className="wallet-field-label" style={{ marginTop: 16 }}>Repeat every</div>
+      <select id="asendInterval" className="wallet-text-input" value={interval} onChange={(e) => setInterval_(Number(e.target.value))}>
+        {INTERVALS.map((d) => (
+          <option key={d} value={d}>
+            {d} day{d !== 1 ? "s" : ""}
+          </option>
+        ))}
+      </select>
+
+      <div className="wallet-field-label" style={{ marginTop: 16 }}>Note (optional)</div>
+      <input
+        id="asendNote"
+        className="wallet-text-input"
+        type="text"
+        maxLength={200}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="What's this for?"
+      />
+
+      {msg.text ? <div id="asendMsg" className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}>{msg.text}</div> : <div id="asendMsg" className="wallet-msg" />}
+      <button className="wallet-submit-btn" id="asendSubmit" style={{ marginTop: 14 }} onClick={handleSubmit} disabled={submitting}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 6v6l4 2" strokeLinecap="round" />
+        </svg>
         <span>{submitting ? "Scheduling…" : "Schedule Auto Send"}</span>
       </button>
 
-      {msg.text ? (
-        <div
-          id="asendMsg"
-          className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}
-          style={{ marginTop: 10, fontSize: "0.85rem", color: msg.kind === "err" ? "#f87171" : msg.kind === "ok" ? "#a3e635" : "#aaa" }}
-        >
-          {msg.text}
-        </div>
-      ) : null}
-
-      <div id="asendList" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+      <div className="wallet-field-label" style={{ marginTop: 22 }}>Active schedules</div>
+      <div id="asendList">
         {schedules?.map((s) => {
           const cancelledOrDone = s.status !== "active";
           const next = s.nextRunAt ? new Date(s.nextRunAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—";
           return (
-            <div
-              key={s.id}
-              className="wallet-tx-row"
-              data-schedule-id={s.id}
-              style={{ display: "flex", alignItems: "center", gap: 10, padding: "0.5rem 0", borderBottom: "1px solid #1c1c1c" }}
-            >
-              <div className={`wallet-tx-icon ${cancelledOrDone ? "neg" : "pending"}`} style={{ width: 28, height: 28, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "#1c1c1c", flexShrink: 0 }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={cancelledOrDone ? "#f87171" : "#facc15"} strokeWidth="2.4">
+            <div key={s.id} className="wallet-tx-row" data-schedule-id={s.id}>
+              <div className={`wallet-tx-icon ${cancelledOrDone ? "neg" : "pending"}`}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
                   <circle cx="12" cy="12" r="10" />
                   <path d="M12 6v6l4 2" strokeLinecap="round" />
                 </svg>
               </div>
-              <div className="wallet-tx-mid" style={{ flex: 1, minWidth: 0 }}>
-                <div className="wallet-tx-label" style={{ fontSize: "0.82rem", fontWeight: 600 }}>
+              <div className="wallet-tx-mid">
+                <div className="wallet-tx-label">
                   ${Number(s.amount).toFixed(2)} to {s.recipientName} · every {s.intervalDays}d
                 </div>
-                <div className="wallet-tx-sub" style={{ fontSize: "0.72rem", color: "#888" }}>
+                <div className="wallet-tx-sub">
                   {cancelledOrDone ? "Cancelled" : `Next: ${next} · Sent ${s.runCount || 0}×`}
                 </div>
               </div>
@@ -241,7 +227,7 @@ export default function AutoSendAddon() {
                   data-schedule-id={s.id}
                   onClick={() => handleCancel(s.id)}
                   disabled={cancellingId === s.id}
-                  style={{ background: "none", border: "1px solid rgba(247,100,100,.3)", color: "#f76464", borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+                  style={{ background: "none", border: "1px solid rgba(247,100,100,.3)", color: "#f76464", borderRadius: 8, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
                 >
                   {cancellingId === s.id ? "Cancelling…" : "Cancel"}
                 </button>
@@ -250,8 +236,8 @@ export default function AutoSendAddon() {
           );
         })}
         {schedules && schedules.length === 0 ? (
-          <div id="asendEmpty" style={{ textAlign: "center", color: "#666", fontSize: "0.8rem", padding: "0.8rem 0" }}>
-            No auto sends scheduled.
+          <div id="asendEmpty" style={{ display: "block", textAlign: "center", padding: "18px 0", color: "rgba(255,255,255,.35)", fontSize: 12.5 }}>
+            No auto sends scheduled yet.
           </div>
         ) : null}
       </div>
