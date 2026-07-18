@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useScrollLock } from "@/lib/useScrollLock";
 import {
   loginWithEmail,
   signupWithEmail,
@@ -32,6 +33,7 @@ interface AuthModalProps {
 type Tab = "login" | "signup";
 
 export default function AuthModal({ open, onClose, onSignupComplete }: AuthModalProps) {
+  useScrollLock(open);
   const [tab, setTab] = useState<Tab>("login");
   const [oauthError, setOauthError] = useState("");
 
