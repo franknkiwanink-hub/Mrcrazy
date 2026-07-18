@@ -3,12 +3,15 @@
 import { useState } from "react";
 import { auth } from "@/lib/firebase";
 import { useLimits } from "@/lib/useLimits";
+import AutoWithdrawAddon from "@/components/wallet/AutoWithdrawAddon";
 
 // Ports the WITHDRAW section from wallet.js (payment method, scheduler,
 // fee breakdown, submit). Live bounds now come from useLimits() (GET
 // /api/limits, LIMITS.wallet). FALLBACK_* match app/api/_lib/limits.js's
 // wallet block exactly (withdrawMin:10, withdrawMax:10000, withdrawFee:0.05)
-// and are used only until that fetch resolves.
+// and are used only until that fetch resolves. Markup mirrors
+// index.html's #walletPanelWithdraw structure so globals.css's
+// .wallet-* rules apply.
 const FALLBACK_WITHDRAW_MIN = 10;
 const FALLBACK_WITHDRAW_MAX = 10000;
 const FALLBACK_WITHDRAW_FEE_RATE = 0.05;
@@ -21,11 +24,17 @@ function maxDateStr() {
 }
 
 export default function WithdrawTab({
+  active,
   withdrawable,
   onSuccess,
+  awdOpen,
+  onToggleAwd,
 }: {
+  active: boolean;
   withdrawable: number;
   onSuccess: () => void;
+  awdOpen: boolean;
+  onToggleAwd: () => void;
 }) {
   const [method, setMethod] = useState<"paypal" | "bank">("paypal");
   const [scheduleMode, setScheduleMode] = useState<"asap" | "scheduled">("asap");
@@ -116,173 +125,143 @@ export default function WithdrawTab({
   }
 
   return (
-    <div id="walletPanelWithdraw" className="active">
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        {(["paypal", "bank"] as const).map((m) => (
-          <button
-            key={m}
-            className={`wallet-method-card${method === m ? " active" : ""}`}
-            data-method={m}
-            onClick={() => setMethod(m)}
-            style={{
-              flex: 1,
-              padding: "0.6rem",
-              borderRadius: 8,
-              border: method === m ? "1px solid #fff" : "1px solid #2a2a2a",
-              background: method === m ? "rgba(255,255,255,0.08)" : "transparent",
-              color: method === m ? "#fff" : "#999",
-              fontWeight: 600,
-              fontSize: "0.82rem",
-              cursor: "pointer",
-              textTransform: "capitalize",
-            }}
-          >
-            {m === "paypal" ? "PayPal" : "Bank Transfer"}
-          </button>
-        ))}
+    <div className={`wallet-panel${active ? " active" : ""}`} id="walletPanelWithdraw">
+      <div id="walletWithdrawAvailBanner">
+        <span>Available to withdraw</span>
+        <strong id="walletWithdrawAvailAmt">${withdrawable.toFixed(2)}</strong>
       </div>
 
-      <div className="input-group" style={{ marginBottom: 10 }}>
-        <label>Amount (USD)</label>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            id="walletWithdrawAmt"
-            className="input-field"
-            type="number"
-            min={WITHDRAW_MIN}
-            max={WITHDRAW_MAX}
-            step="0.01"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder={`${WITHDRAW_MIN} – ${WITHDRAW_MAX.toLocaleString()}`}
-            style={{ flex: 1 }}
-          />
-          <button
-            id="walletWithdrawMaxBtn"
-            onClick={() => setAmount(withdrawable > 0 ? withdrawable.toFixed(2) : "")}
-            style={{
-              padding: "0 14px",
-              borderRadius: 8,
-              border: "1px solid #333",
-              background: "transparent",
-              color: "#ddd",
-              fontWeight: 700,
-              fontSize: "0.78rem",
-              cursor: "pointer",
-            }}
-          >
-            Max
-          </button>
-        </div>
-        <span className="hint">Withdrawable: ${withdrawable.toFixed(2)}</span>
-      </div>
-
-      <div className="input-group" style={{ marginBottom: 10, display: method === "paypal" ? "block" : "none" }}>
-        <label>PayPal Email</label>
+      <div className="wallet-field-label">Amount to withdraw</div>
+      <div className="wallet-amount-input-wrap">
+        <span className="wallet-amount-currency">$</span>
         <input
-          id="walletWithdrawEmail"
-          className="input-field"
+          type="number"
+          id="walletWithdrawAmt"
+          inputMode="decimal"
+          placeholder="0.00"
+          min={WITHDRAW_MIN}
+          max={WITHDRAW_MAX}
+          step="0.01"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        <button type="button" id="walletWithdrawMaxBtn" onClick={() => setAmount(withdrawable > 0 ? withdrawable.toFixed(2) : "")}>
+          Max
+        </button>
+      </div>
+
+      <div className="wallet-field-label" style={{ marginTop: 18 }}>Payment method</div>
+      <div id="walletMethodGrid">
+        <button type="button" className={`wallet-method-card${method === "paypal" ? " active" : ""}`} data-method="paypal" onClick={() => setMethod("paypal")}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M7 5h8a4 4 0 010 8H9l-1 6H5l3-14z" />
+            <path d="M11 9h6a3.5 3.5 0 010 7h-4" />
+          </svg>
+          <span>PayPal</span>
+        </button>
+        <button type="button" className={`wallet-method-card${method === "bank" ? " active" : ""}`} data-method="bank" onClick={() => setMethod("bank")}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M3 10l9-6 9 6" />
+            <path d="M4 10v9h16v-9" />
+            <path d="M9 21v-6h6v6" />
+          </svg>
+          <span>Bank</span>
+        </button>
+      </div>
+
+      <div id="walletMethodPaypalFields" style={method === "paypal" ? undefined : { display: "none" }}>
+        <div className="wallet-field-label" style={{ marginTop: 16 }}>PayPal email</div>
+        <input
           type="email"
+          id="walletWithdrawEmail"
+          className="wallet-text-input"
+          placeholder="you@example.com"
+          autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="your@paypal.com"
         />
       </div>
-      <div className="input-group" style={{ marginBottom: 10, display: method === "bank" ? "block" : "none" }}>
-        <label>Bank Payout Email</label>
+      <div id="walletMethodBankFields" style={method === "bank" ? undefined : { display: "none" }}>
+        <div className="wallet-field-label" style={{ marginTop: 16 }}>Bank account email on file</div>
         <input
-          id="walletWithdrawBankEmail"
-          className="input-field"
           type="email"
+          id="walletWithdrawBankEmail"
+          className="wallet-text-input"
+          placeholder="you@example.com"
+          autoComplete="email"
           value={bankEmail}
           onChange={(e) => setBankEmail(e.target.value)}
-          placeholder="you@example.com"
         />
+        <div className="wallet-hint" style={{ marginTop: 8 }}>Bank transfers route through PayPal's linked bank payout — same email as your PayPal-linked account.</div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-        {(["asap", "scheduled"] as const).map((mode) => (
-          <button
-            key={mode}
-            className={`wallet-schedule-chip${scheduleMode === mode ? " active" : ""}`}
-            data-when={mode}
-            onClick={() => setScheduleMode(mode)}
-            style={{
-              flex: 1,
-              padding: "0.45rem",
-              borderRadius: 999,
-              border: scheduleMode === mode ? "1px solid #fff" : "1px solid #2a2a2a",
-              background: scheduleMode === mode ? "#fff" : "transparent",
-              color: scheduleMode === mode ? "#000" : "#999",
-              fontWeight: 700,
-              fontSize: "0.78rem",
-              cursor: "pointer",
-            }}
-          >
-            {mode === "asap" ? "As soon as possible" : "Schedule for later"}
-          </button>
-        ))}
+      <div className="wallet-field-label" style={{ marginTop: 18 }}>When should we send it?</div>
+      <div id="walletScheduleRow">
+        <button type="button" className={`wallet-schedule-chip${scheduleMode === "asap" ? " active" : ""}`} data-when="asap" onClick={() => setScheduleMode("asap")}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+            <path d="M13 2L3 14h7l-1 8 11-14h-7l1-6z" />
+          </svg>
+          As soon as possible
+        </button>
+        <button type="button" className={`wallet-schedule-chip${scheduleMode === "scheduled" ? " active" : ""}`} data-when="scheduled" onClick={() => setScheduleMode("scheduled")}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+            <rect x="3" y="5" width="18" height="16" rx="2" />
+            <path d="M16 3v4M8 3v4M3 10h18" strokeLinecap="round" />
+          </svg>
+          Choose date &amp; time
+        </button>
+      </div>
+      <div id="walletScheduleFields" style={scheduleMode === "scheduled" ? undefined : { display: "none" }}>
+        <div className="wallet-schedule-inputs">
+          <div className="wallet-schedule-field">
+            <label htmlFor="walletScheduleDate">Date</label>
+            <input
+              type="date"
+              id="walletScheduleDate"
+              min={tomorrowStr()}
+              max={maxDateStr()}
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          </div>
+          <div className="wallet-schedule-field">
+            <label htmlFor="walletScheduleTime">Time</label>
+            <input type="time" id="walletScheduleTime" value={time} onChange={(e) => setTime(e.target.value)} />
+          </div>
+        </div>
+        <div className="wallet-hint">Payouts can be scheduled up to 90 days ahead. We'll process it automatically on that date.</div>
       </div>
 
-      {scheduleMode === "scheduled" ? (
-        <div id="walletScheduleFields" style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-          <input
-            id="walletScheduleDate"
-            className="input-field"
-            type="date"
-            min={tomorrowStr()}
-            max={maxDateStr()}
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            style={{ flex: 1 }}
-          />
-          <input
-            id="walletScheduleTime"
-            className="input-field"
-            type="time"
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-            style={{ flex: 1 }}
-          />
-        </div>
-      ) : null}
+      <div className="wallet-fee-breakdown" id="walletWithdrawFeeRow" style={showFee ? undefined : { display: "none" }}>
+        <div className="wallet-fee-line"><span>Withdrawal amount</span><span id="walletWithdrawGross">${amt ? amt.toFixed(2) : "0.00"}</span></div>
+        <div className="wallet-fee-line"><span id="walletWithdrawFeeLabel">Processing fee (5%)</span><span id="walletWithdrawFee">${fee.toFixed(2)}</span></div>
+        <div className="wallet-fee-line total"><span>You'll receive</span><span id="walletWithdrawReceive">${receive.toFixed(2)}</span></div>
+      </div>
 
-      {showFee ? (
-        <div
-          id="walletWithdrawFeeRow"
-          style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", color: "#aaa", padding: "0.5rem 0", borderTop: "1px solid #222", marginBottom: 10 }}
-        >
-          <span>
-            Gross <strong id="walletWithdrawGross" style={{ color: "#ddd" }}>${amt.toFixed(2)}</strong>
-          </span>
-          <span>
-            Fee (5%) <strong id="walletWithdrawFee" style={{ color: "#ddd" }}>${fee.toFixed(2)}</strong>
-          </span>
-          <span>
-            You get <strong id="walletWithdrawReceive" style={{ color: "#a3e635" }}>${receive.toFixed(2)}</strong>
-          </span>
-        </div>
-      ) : null}
-
-      <button
-        id="walletWithdrawSubmit"
-        className="save-btn"
-        style={{ width: "100%" }}
-        onClick={handleSubmit}
-        disabled={submitting}
-      >
+      <div className="wallet-hint" id="walletWithdrawHint">Min ${WITHDRAW_MIN} · Max ${WITHDRAW_MAX.toLocaleString()} · PayPal: 1–3 business days · Bank: 3–5 business days</div>
+      {msg.text ? <div id="walletWithdrawMsg" className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}>{msg.text}</div> : <div id="walletWithdrawMsg" className="wallet-msg" />}
+      <button className="wallet-submit-btn" id="walletWithdrawSubmit" onClick={handleSubmit} disabled={submitting}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+          <path d="M12 5v14M5 12l7 7 7-7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
         <span>{submitting ? "Processing…" : "Request Withdrawal"}</span>
       </button>
 
-      {msg.text ? (
-        <div
-          id="walletWithdrawMsg"
-          className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}
-          style={{ marginTop: 10, fontSize: "0.85rem", color: msg.kind === "err" ? "#f87171" : msg.kind === "ok" ? "#a3e635" : "#aaa" }}
-        >
-          {msg.text}
-        </div>
-      ) : null}
+      {/* ── Auto Withdrawal addon ── */}
+      <button type="button" className={`wallet-addon-toggle${awdOpen ? " open" : ""}`} id="awdAddonToggle" aria-expanded={awdOpen} onClick={onToggleAwd}>
+        <span className="wallet-addon-toggle-left">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 5v14M5 12l7 7 7-7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span>Auto Withdrawal</span>
+        </span>
+        <svg className="wallet-addon-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      <div className={`wallet-addon-panel${awdOpen ? " open" : ""}`} id="walletPanelAutowithdraw">
+        {awdOpen ? <AutoWithdrawAddon onEnabled={onSuccess} /> : null}
+      </div>
     </div>
   );
 }
