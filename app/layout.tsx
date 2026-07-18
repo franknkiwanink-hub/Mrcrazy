@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
 import "./globals.css";
@@ -6,7 +6,7 @@ import Header from "@/components/layout/Header";
 import NavDrawer from "@/components/layout/NavDrawer";
 import NavDrawerOverlay from "@/components/layout/NavDrawerOverlay";
 import { NavDrawerProvider } from "@/components/layout/NavDrawerProvider";
-import BottomNav from "@/components/layout/BottomNav";
+import HomeMarketplaceOnly from "@/components/layout/HomeMarketplaceOnly";
 import AnnouncementBar from "@/components/layout/AnnouncementBar";
 import BootOverlay from "@/components/layout/BootOverlay";
 import PushServiceWorkerRegister from "@/components/layout/PushServiceWorkerRegister";
@@ -22,7 +22,6 @@ import { ThemeModalProvider } from "@/components/theme/ThemeModalProvider";
 import NotificationsProvider from "@/components/notifications/NotificationsProvider";
 import SystemStatusProvider from "@/components/system/SystemStatusProvider";
 import WelcomeBackScreen from "@/components/system/WelcomeBackScreen";
-import FeedbackWidget from "@/components/support/FeedbackWidget";
 import { AiSupportChatModalProvider } from "@/components/support/AiSupportChatModalProvider";
 import { DealPopupProvider } from "@/components/deal/DealPopupProvider";
 import { DisputePickerProvider } from "@/components/dispute/DisputePickerProvider";
@@ -41,6 +40,17 @@ const SITE_TITLE =
   "Siterifty — Buy & Sell Websites, Apps & Games for Indie & Small Developers";
 const SITE_DESCRIPTION =
   "Siterifty is a secure, escrow-protected marketplace built for indie and small developers buying and selling websites, apps, and games. Browse profitable listings or list your own — safe, verified deals from start to finish.";
+
+// Original index.html sets this explicitly via <meta name="viewport"
+// content="width=device-width, initial-scale=1.0">. Next.js doesn't
+// reliably inject an equivalent default on its own — without this export
+// some mobile browsers fall back to a desktop-width viewport (~980px)
+// and scale the whole page down to fit, which looks like everything
+// rendered correctly but narrower/zoomed-out than the original.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(getPublicBaseUrl()),
@@ -104,11 +114,9 @@ export default function RootLayout({
         <div id="appThemeBg" aria-hidden="true" />
         <PushServiceWorkerRegister />
         <AuthProvider>
-          {/* Boot overlay — shows on top while auth resolves, but no
-              longer blocks the page: pointer-events are disabled on it
-              (see #appBootOverlay in globals.css) and its background is
-              translucent, so content underneath renders and is clickable
-              immediately instead of waiting behind it. */}
+          {/* Boot overlay — first thing rendered, removed only after auth
+              resolves once + a cooldown, same comment/positioning as the
+              original's index.html. */}
           <BootOverlay />
           {/* Maintenance-mode takeover + banned/suspended account
               overlay — both are full-screen, no-dismiss states that
@@ -167,12 +175,12 @@ export default function RootLayout({
                     <NavDrawer />
                     <AnnouncementBar />
                     <main>{children}</main>
-                    <BottomNav />
-                    {/* Floating feedback launcher + modal — global,
-                        works signed-out (read-only) and signed-in
-                        (submit/vote). See its own file for the scoping
-                        note on scroll-lock/modal-coordination. */}
-                    <FeedbackWidget />
+                    {/* BottomNav + the floating feedback launcher only
+                        belong on the two "browse" surfaces (Home,
+                        Marketplace) — see HomeMarketplaceOnly's own
+                        top comment for why they can't just stay
+                        globally mounted like in the original. */}
+                    <HomeMarketplaceOnly />
                   </NavDrawerProvider>
                 </DisputePickerProvider>
                 </DealPopupProvider>
