@@ -13,6 +13,7 @@ import BoostedRow from "@/components/marketplace/BoostedRow";
 import AdSlot from "@/components/marketplace/AdSlot";
 import SellerPromoCard from "@/components/marketplace/SellerPromoCard";
 import AiPromoCard from "@/components/marketplace/AiPromoCard";
+import { buildListingSlug } from "@/lib/slug";
 
 export default function MarketplaceGrid() {
   const filters = useMarketplaceFilters();
@@ -20,7 +21,7 @@ export default function MarketplaceGrid() {
   const { listings, loading, loadingMore, error, exhausted, loadMore, reset } = useFeed({ pageSize: 24, type });
   const router = useRouter();
   const onOpen = (listing: Listing) => {
-    if (listing?.id) router.push(`/listing/${encodeURIComponent(listing.id)}`);
+    if (listing?.id) router.push(`/listing/${buildListingSlug(listing.title, listing.id)}`);
   };
   // Seller profile page now exists (app/seller/[id]/page.tsx) — cards
   // navigate straight there, same as onOpen does for listings. Signature
