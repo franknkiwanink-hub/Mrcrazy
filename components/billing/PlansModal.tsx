@@ -105,7 +105,6 @@ export default function PlansModal({
   onClose: () => void;
   onSubscribed: (plan: PlanKey) => void;
 }) {
-  useScrollLock(open);
   const { profile } = useAuth();
   const currentPlan = (profile?.plan || "free") as string;
   const { limits } = useLimits();
@@ -132,6 +131,10 @@ export default function PlansModal({
 
   const paypalContainerRef = useRef<HTMLDivElement>(null);
   const buttonsRef = useRef<any>(null);
+
+  // Scroll lock — shared across every modal/overlay in the app (mounted
+  // only while open; guarded internally by `open`).
+  useScrollLock(open);
 
   // Ports openPlansModal's preselect/default-tab logic.
   useEffect(() => {
