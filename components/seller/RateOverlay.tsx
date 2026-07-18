@@ -4,6 +4,7 @@ import { useState } from "react";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the Rate Seller overlay (spRateOverlay) from marketplace.js:
 // 1-5 star picker with hover preview, optional review text, one review
@@ -20,6 +21,9 @@ export default function RateOverlay({
   onClose: () => void;
   onSubmitted: (starValSubmitted: number, isNewReview: boolean) => void;
 }) {
+  // Mounted only while open (parent conditionally renders this overlay),
+  // so the lock is unconditional here.
+  useScrollLock(true);
   const { user, profile } = useAuth();
   const { openAuthModal } = useAuthModal();
   const [hoverVal, setHoverVal] = useState(0);
