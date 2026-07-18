@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Fixed 15% platform fee — mirrors DONATION_FEE_RATE in paypal.js. Used
 // here only for the live "seller receives" preview as the donor types;
@@ -71,6 +72,9 @@ export default function DonateOverlay({
   sellerName: string;
   onClose: () => void;
 }) {
+  // Mounted only while open (parent renders `{donateOpen && <DonateOverlay/>}`),
+  // so the lock is unconditional here.
+  useScrollLock(true);
   const { user, profile } = useAuth();
   const { openAuthModal } = useAuthModal();
   const [summary, setSummary] = useState<DonationsSummary | null>(donateCache.get(sellerUid) || null);
