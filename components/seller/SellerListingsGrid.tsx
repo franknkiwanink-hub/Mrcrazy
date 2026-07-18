@@ -3,6 +3,7 @@
 import { useMemo, useState, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import type { SellerListing } from "@/lib/useSeller";
+import { buildListingSlug } from "@/lib/slug";
 
 type FilterType = "all" | "website" | "game" | "app";
 
@@ -125,7 +126,7 @@ export default function SellerListingsGrid({ listings }: { listings: SellerListi
             const thumb = l.images?.[2] || l.imageCover || l.images?.[0] || "https://placehold.co/400x225/111/444?text=Listing";
             const priceTxt = typeof l.financials?.price === "number" ? `$${l.financials.price.toLocaleString()}` : "Make offer";
             return (
-              <div className="sp-listing-card" key={l.id} onClick={() => router.push(`/listing/${l.id}`)}>
+              <div className="sp-listing-card" key={l.id} onClick={() => router.push(`/listing/${buildListingSlug(l.title, l.id)}`)}>
                 <div className="sp-listing-thumb">
                   <img
                     src={thumb}
