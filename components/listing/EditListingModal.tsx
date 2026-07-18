@@ -31,6 +31,7 @@ import React, { useEffect, useState } from "react";
 import { fetchListingById, updateListing, type Listing } from "@/lib/listings";
 import { useAuth } from "@/lib/AuthContext";
 import { useLimits } from "@/lib/useLimits";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 const IMGUR_CLIENT_ID = "891e5bb4aa94282";
 
@@ -94,6 +95,7 @@ export default function EditListingModal({
   onSaved?: (listing: Listing) => void;
   onDeleted?: (listingId: string) => void;
 }) {
+  useScrollLock(open);
   const { user } = useAuth();
   const { limits } = useLimits();
 
