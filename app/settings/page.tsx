@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import SettingsSidebar, { type SettingsPanelId } from "@/components/settings/SettingsSidebar";
 import { useSettingsState } from "@/lib/useSettingsState";
@@ -54,6 +54,41 @@ function SettingsPageInner() {
   const { state, setState, loading } = useSettingsState();
   const { openDisputePicker } = useDisputePicker();
 
+  // <main> has min-height:100vh globally, so with this page's own 92px
+  // top margin the document is always taller than the viewport — meaning
+  // the page itself scrolls no matter what overflow rules the inner
+  // .main-content/.detail-panel use. The original had this exact problem
+  // solved for free by being a position:fixed full-screen modal (so it
+  // was never part of document flow at all). This locks html+body the
+  // same stronger way .mnt-mode already does elsewhere in this codebase
+  // (plain overflow:hidden alone doesn't reliably stop rubber-banding on
+  // mobile Safari/Chrome per that rule's own comment) — so the document
+  // can't move at all while Settings is open, and only
+  // .settings-sidebar / .detail-panel (each overflow-y:auto) can scroll.
+  useEffect(() => {
+    const html = document.documentElement;
+    const { body } = document;
+    const prevHtmlOverflow = html.style.overflow;
+    const prevHtmlHeight = html.style.height;
+    const prevBodyOverflow = body.style.overflow;
+    const prevOverscroll = (html.style as any).overscrollBehavior;
+    const prevTouchAction = (html.style as any).touchAction;
+
+    html.style.overflow = "hidden";
+    html.style.height = "100%";
+    body.style.overflow = "hidden";
+    (html.style as any).overscrollBehavior = "none";
+    (html.style as any).touchAction = "none";
+
+    return () => {
+      html.style.overflow = prevHtmlOverflow;
+      html.style.height = prevHtmlHeight;
+      body.style.overflow = prevBodyOverflow;
+      (html.style as any).overscrollBehavior = prevOverscroll;
+      (html.style as any).touchAction = prevTouchAction;
+    };
+  }, []);
+
   function renderPanel() {
     if (loading) {
       return <div style={{ opacity: 0.5, padding: "40px 0", textAlign: "center" }}>Loading…</div>;
@@ -99,7 +134,16 @@ function SettingsPageInner() {
   }
 
   return (
-    <div style={{ marginTop: 92, height: "calc(100vh - 92px)", display: "flex" }}>
+    <div
+      style={{
+        position: "fixed",
+        top: 92,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        display: "flex",
+      }}
+    >
       <div className="main-content" style={{ height: "100%" }}>
         <SettingsSidebar
           activePanel={activePanel}
