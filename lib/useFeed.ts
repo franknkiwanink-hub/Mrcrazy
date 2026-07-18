@@ -24,15 +24,34 @@ interface UseFeedState {
 // so the shuffle stays stable within a session. cursor is an opaque
 // per-type offset object, also echoed back verbatim (not real Firestore
 // pagination — see handleFeed in _handler.js).
+// Module-level cache so that remounting MarketplaceGrid (e.g. navigating
+// to a listing detail page and back, which unmounts/remounts the whole
+// component since /listing/[id] is a separate route, not a modal) can
+// rehydrate the previous page(s) of listings instantly instead of
+// wiping the grid to empty + "Loading listings…" and refetching from
+// scratch. Keyed by `type` since each type filter has its own feed/seed/
+// cursor. This is intentionally simple in-memory state (not persisted
+// across full page reloads) — it just needs to survive a mount/unmount
+// cycle within the same client session.
+interface FeedCacheEntry {
+  listings: Listing[];
+  seed: number | undefined;
+  cursor: Record<string, number> | undefined;
+  exhausted: boolean;
+}
+const feedCache = new Map<string, FeedCacheEntry>();
+const cacheKey = (type: ListingType | undefined) => type || "all";
+
 export function useFeed({ type, pageSize = 24 }: UseFeedOptions = {}): UseFeedState {
-  const [listings, setListings] = useState<Listing[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cached = feedCache.get(cacheKey(type));
+  const [listings, setListings] = useState<Listing[]>(cached?.listings ?? []);
+  const [loading, setLoading] = useState(!cached);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [exhausted, setExhausted] = useState(false);
+  const [exhausted, setExhausted] = useState(cached?.exhausted ?? false);
 
-  const seedRef = useRef<number | undefined>(undefined);
-  const cursorRef = useRef<Record<string, number> | undefined>(undefined);
+  const seedRef = useRef<number | undefined>(cached?.seed);
+  const cursorRef = useRef<Record<string, number> | undefined>(cached?.cursor);
   const inFlight = useRef(false);
 
   const load = useCallback(
@@ -53,7 +72,16 @@ export function useFeed({ type, pageSize = 24 }: UseFeedOptions = {}): UseFeedSt
         seedRef.current = res.seed;
         cursorRef.current = res.cursor;
         setExhausted(res.exhausted);
-        setListings((prev) => (isInitial ? res.listings : [...prev, ...res.listings]));
+        setListings((prev) => {
+          const next = isInitial ? res.listings : [...prev, ...res.listings];
+          feedCache.set(cacheKey(type), {
+            listings: next,
+            seed: res.seed,
+            cursor: res.cursor,
+            exhausted: res.exhausted,
+          });
+          return next;
+        });
       } catch (err: any) {
         setError(err?.message || "Failed to load listings");
       } finally {
@@ -72,8 +100,27 @@ export function useFeed({ type, pageSize = 24 }: UseFeedOptions = {}): UseFeedSt
     load(true);
   }, [load]);
 
+  const prevTypeRef = useRef<ListingType | undefined>(type);
+  const didInitRef = useRef(false);
+
   useEffect(() => {
-    reset();
+    const typeChanged = didInitRef.current && prevTypeRef.current !== type;
+    prevTypeRef.current = type;
+    didInitRef.current = true;
+
+    if (typeChanged) {
+      // A real filter change (not a remount) — always start fresh.
+      reset();
+      return;
+    }
+
+    // First mount for this hook instance. If we already have cached
+    // listings for this type (rehydrated into state above), don't
+    // refetch/reset — just leave the cached page(s) on screen. Only
+    // hit the network if there's truly nothing cached yet.
+    if (!feedCache.has(cacheKey(type))) {
+      reset();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type]);
 
