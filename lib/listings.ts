@@ -133,7 +133,7 @@ export class ListingsApiError extends Error {
   }
 }
 
-async function callListingsApi<T>(action: string, params: Record<string, unknown> = {}): Promise<T> {
+async function callListingsApi<T>(action: string, params: object = {}): Promise<T> {
   const res = await fetch("/api/listings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
