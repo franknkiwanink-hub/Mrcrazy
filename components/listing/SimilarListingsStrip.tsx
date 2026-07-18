@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import { fetchSimilarListings, type Listing } from "@/lib/listings";
 import { auth } from "@/lib/firebase";
 import ListingCard from "@/components/marketplace/ListingCard";
+import { buildListingSlug } from "@/lib/slug";
 
 const MIN_TO_SHOW = 2;
 
@@ -43,7 +44,7 @@ export default function SimilarListingsStrip({ listingId }: { listingId: string 
   }, [listingId]);
 
   const onOpen = (listing: Listing) => {
-    if (listing?.id) router.push(`/listing/${encodeURIComponent(listing.id)}`);
+    if (listing?.id) router.push(`/listing/${buildListingSlug(listing.title, listing.id)}`);
   };
   const onOpenSeller = (ownerId: string | undefined) => {
     if (ownerId) router.push(`/seller/${encodeURIComponent(ownerId)}`);
