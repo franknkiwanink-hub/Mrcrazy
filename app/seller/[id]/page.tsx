@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { getSellerSeoProfile } from "./getSeller";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
 import SellerProfileClient from "./SellerProfileClient";
@@ -36,7 +37,7 @@ export async function generateMetadata({
   const isPubliclyDiscoverable = seller.profileVisibility === "public";
 
   const baseUrl = getPublicBaseUrl();
-  const url = `${baseUrl}/seller/${seller.uid}`;
+  const url = `${baseUrl}/seller/${encodeURIComponent(seller.username)}`;
 
   if (!isPubliclyDiscoverable) {
     const title = `${seller.username} — Siterifty`;
@@ -101,5 +102,18 @@ export default async function SellerProfilePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  return <SellerProfileClient uid={id} />;
+  const seller = await getSellerSeoProfile(id);
+
+  // Canonicalize: a legacy /seller/{uid} link (or a stale username after
+  // a rename) still resolves — getSellerSeoProfile falls back from a
+  // doc-id lookup to a usernameLower query — but should permanently
+  // redirect to /seller/{username} so there's exactly one indexable,
+  // shareable URL per seller going forward. A missing seller falls
+  // through to SellerProfileClient's own "not found" UI unchanged (see
+  // the note at the top of this file).
+  if (seller && decodeURIComponent(id) !== seller.username) {
+    redirect(`/seller/${encodeURIComponent(seller.username)}`);
+  }
+
+  return <SellerProfileClient uid={seller ? seller.uid : id} />;
 }
