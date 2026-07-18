@@ -11056,7 +11056,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
       }
       @media (max-width: 900px), (pointer: coarse) and (max-width: 1024px) {
       .fnav { display: flex; }
-      body { padding-bottom: calc(66px + env(safe-area-inset-bottom, 0px)); }
+      body.srf-fnav-space { padding-bottom: calc(66px + env(safe-area-inset-bottom, 0px)); }
       }
       .fnav-pill {
       pointer-events: auto;
@@ -12243,60 +12243,3 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
 .srf-tools-foot-note { margin-top: 56px; text-align: center; font-size: 12.5px; color: var(--st-text-faint); }
 .srf-tools-foot-note a { color: var(--st-lime); text-decoration: none; font-weight: 600; }
 .srf-tools .mono { font-family: 'JetBrains Mono', monospace; }
-
-/* ===== LOGOUT CONFIRMATION MODAL ===== */
-/* Ported 1:1 from styles/siterifty.css — logic previously in
-   Js/logout-share.js, now in components/layout/LogoutModal.tsx +
-   LogoutModalProvider.tsx. */
-#logoutModalOverlay {
-  display: none; position: fixed; inset: 0; z-index: 10050;
-  background: rgba(0,0,0,0.75); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-  justify-content: center; align-items: center; padding: 1.25rem;
-  opacity: 0; transition: opacity 0.18s ease;
-}
-#logoutModalOverlay.visible { display: flex; opacity: 1; }
-#logoutModalBox {
-  width: 100%; max-width: 340px;
-  background: linear-gradient(180deg, #0d0f0a 0%, #090a07 100%);
-  border: 1px solid rgba(163,230,53,0.18);
-  border-radius: 1.4rem;
-  padding: 1.75rem 1.5rem 1.4rem;
-  text-align: center;
-  box-shadow: 0 30px 60px -15px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.02);
-  transform: scale(0.94) translateY(6px);
-  transition: transform 0.2s cubic-bezier(.2,.9,.3,1.2);
-}
-#logoutModalOverlay.visible #logoutModalBox { transform: scale(1) translateY(0); }
-#logoutModalIconWrap {
-  width: 3.6rem; height: 3.6rem; margin: 0 auto 1.1rem;
-  border-radius: 1rem;
-  background: radial-gradient(circle at 30% 30%, rgba(163,230,53,0.18), rgba(163,230,53,0.05));
-  border: 1px solid rgba(163,230,53,0.3);
-  display: flex; align-items: center; justify-content: center;
-  position: relative;
-}
-#logoutModalIconWrap::after {
-  content: ''; position: absolute; inset: -6px; border-radius: 1.3rem;
-  border: 1px solid rgba(163,230,53,0.12); pointer-events: none;
-}
-#logoutModalIconWrap svg { width: 1.7rem; height: 1.7rem; stroke: #a3e635; fill: none; stroke-width: 1.8; }
-#logoutModalTitle { font-size: 1.08rem; font-weight: 800; color: #fff; letter-spacing: -0.2px; margin-bottom: 0.45rem; }
-#logoutModalMsg { font-size: 0.85rem; line-height: 1.5; color: #8a9482; margin-bottom: 1.5rem; }
-#logoutModalMsg b { color: #c2d9a0; font-weight: 600; }
-.logout-modal-actions { display: flex; flex-direction: column; gap: 0.6rem; }
-.logout-modal-btn {
-  width: 100%; padding: 0.85rem 1rem; border-radius: 0.9rem;
-  font-size: 0.88rem; font-weight: 700; cursor: pointer; border: none;
-  font-family: inherit; transition: all 0.15s; display: flex; align-items: center;
-  justify-content: center; gap: 0.5rem;
-}
-.logout-modal-btn.confirm {
-  background: #a3e635; color: #0a1005;
-}
-.logout-modal-btn.confirm:hover { background: #bef264; }
-.logout-modal-btn.confirm:active { transform: scale(0.98); }
-.logout-modal-btn.confirm svg { width: 1rem; height: 1rem; stroke: currentColor; fill: none; stroke-width: 2.2; }
-.logout-modal-btn.cancel {
-  background: transparent; color: #9ca38f; border: 1px solid rgba(255,255,255,0.08);
-}
-.logout-modal-btn.cancel:hover { background: rgba(255,255,255,0.05); color: #fff; }
