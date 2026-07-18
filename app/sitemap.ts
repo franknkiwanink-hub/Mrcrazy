@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { getAdminDb, getPublicBaseUrl } from "@/lib/server/adminDb";
+import { buildListingSlug } from "@/lib/slug";
 
 // Two sitemap "shards" by convention here: id 0 = static top-level pages
 // + all public sellers, id 1 = all active listings. Kept as two fixed
@@ -62,15 +63,17 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
       .limit(45000)
       .get();
 
-    const sellerEntries: MetadataRoute.Sitemap = sellersSnap.docs.map((d) => {
-      const data = d.data();
-      return {
-        url: `${baseUrl}/seller/${d.id}`,
-        lastModified: toDate(data.updatedAt) || toDate(data.createdAt),
-        changeFrequency: "weekly",
-        priority: 0.5,
-      };
-    });
+    const sellerEntries: MetadataRoute.Sitemap = sellersSnap.docs
+      .filter((d) => !!d.data().username)
+      .map((d) => {
+        const data = d.data();
+        return {
+          url: `${baseUrl}/seller/${encodeURIComponent(data.username)}`,
+          lastModified: toDate(data.updatedAt) || toDate(data.createdAt),
+          changeFrequency: "weekly",
+          priority: 0.5,
+        };
+      });
 
     return [...staticEntries, ...sellerEntries];
   }
@@ -83,7 +86,7 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
   return listingsSnap.docs.map((d) => {
     const data = d.data();
     return {
-      url: `${baseUrl}/listing/${d.id}`,
+      url: `${baseUrl}/listing/${buildListingSlug(data.title, d.id)}`,
       lastModified: toDate(data.updatedAt) || toDate(data.createdAt),
       changeFrequency: "daily",
       priority: 0.7,
