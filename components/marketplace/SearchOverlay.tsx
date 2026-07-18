@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Listing } from "@/lib/listings";
 import { useRecentSearches } from "@/lib/useRecentSearches";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 interface Suggestion {
   listing: Listing;
@@ -73,14 +74,7 @@ export default function SearchOverlay({
 
   // Lock background scroll while the overlay is up — a full-screen
   // takeover shouldn't let the marketplace grid scroll underneath it.
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
+  useScrollLock(open);
 
   useEffect(() => {
     if (!open) return;
