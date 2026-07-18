@@ -16,6 +16,7 @@
 // real bio, stats, or listing count into a <meta> tag just because a
 // crawler doesn't go through the client visibility check.
 
+import { cache } from "react";
 import { getAdminDb } from "@/lib/server/adminDb";
 
 export interface SellerSeoProfile {
@@ -45,7 +46,9 @@ export interface SellerSeoProfile {
 // Firestore auto-ids and usernames can never collide in practice (ids are
 // long random base62 strings; usernames are capped short human text), so
 // there's no ambiguity between the two lookup paths.
-export async function getSellerSeoProfile(segment: string): Promise<SellerSeoProfile | null> {
+export const getSellerSeoProfile = cache(async function getSellerSeoProfile(
+  segment: string
+): Promise<SellerSeoProfile | null> {
   if (!segment) return null;
   const db = getAdminDb();
 
@@ -111,4 +114,4 @@ export async function getSellerSeoProfile(segment: string): Promise<SellerSeoPro
     followerCount,
     joinedAt,
   };
-}
+});
