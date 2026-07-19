@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import Hero from "@/components/home/Hero";
 import MarketplaceGrid from "@/components/marketplace/MarketplaceGrid";
+import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 
 // The original site renders the hero and the marketplace grid on the same
 // page — index.html has <section class="hero"> immediately followed by
@@ -19,7 +20,7 @@ export default function HomePage() {
   return (
     <>
       <Hero />
-      <Suspense fallback={null}>
+      <Suspense fallback={<SiteriftyLoader />}>
         <MarketplaceGrid />
       </Suspense>
     </>
