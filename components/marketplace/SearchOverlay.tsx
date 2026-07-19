@@ -103,8 +103,70 @@ export default function SearchOverlay({
   onOpenListing: (listing: Listing) => void;
 }) {
   const [value, setValue] = useState(initialQuery);
+  const [listening, setListening] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
   const { items: recent, add: addRecent, remove: removeRecent, clear: clearRecent } = useRecentSearches();
+
+  // Web Speech API (SpeechRecognition) is only available in the browser
+  // and only in some browsers (Chrome/Edge/Safari support it under
+  // webkit-prefixed and unprefixed names; Firefox doesn't at all) — so
+  // this is feature-detected on mount and the mic button simply isn't
+  // rendered when it's unsupported, rather than rendering a button that
+  // does nothing.
+  useEffect(() => {
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    setVoiceSupported(!!SpeechRecognitionCtor);
+  }, []);
+
+  function toggleVoiceSearch() {
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) return;
+
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event: any) => {
+      let transcript = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setValue(transcript);
+    };
+    recognition.onend = () => {
+      setListening(false);
+    };
+    recognition.onerror = () => {
+      setListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    setListening(true);
+    recognition.start();
+  }
+
+  // Stop listening and release the recognizer if the overlay closes or
+  // unmounts while a voice search is still active.
+  useEffect(() => {
+    if (!open && recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+  }, [open]);
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+    };
+  }, []);
 
   // Portal target: document.body isn't available during SSR, and even on
   // the client we only want to read it after mount. Without this, the
@@ -227,6 +289,21 @@ export default function SearchOverlay({
               <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.8}>
                 <line x1={18} y1={6} x2={6} y2={18} />
                 <line x1={6} y1={6} x2={18} y2={18} />
+              </svg>
+            </button>
+          ) : null}
+          {voiceSupported ? (
+            <button
+              type="button"
+              className={`mp-so-mic${listening ? " mp-so-mic-listening" : ""}`}
+              aria-label={listening ? "Stop voice search" : "Search by voice"}
+              aria-pressed={listening}
+              onClick={toggleVoiceSearch}
+            >
+              <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}>
+                <rect x={9} y={2} width={6} height={12} rx={3} />
+                <path d="M5 10a7 7 0 0 0 14 0" strokeLinecap="round" />
+                <line x1={12} y1={19} x2={12} y2={22} strokeLinecap="round" />
               </svg>
             </button>
           ) : null}
