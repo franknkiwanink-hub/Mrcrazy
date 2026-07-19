@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
 import MarketplaceGrid from "@/components/marketplace/MarketplaceGrid";
+import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 
 // MarketplaceGrid is entirely client-rendered and filter-driven with no
 // server-readable distinct routes per filter, so one static, professional
@@ -30,7 +31,7 @@ export function generateMetadata(): Metadata {
 export default function MarketplacePage() {
   return (
     <div style={{ marginTop: 92 }}>
-      <Suspense fallback={null}>
+      <Suspense fallback={<SiteriftyLoader />}>
         <MarketplaceGrid />
       </Suspense>
     </div>
