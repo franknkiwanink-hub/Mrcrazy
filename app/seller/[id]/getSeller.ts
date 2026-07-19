@@ -19,6 +19,29 @@
 import { getAdminDb } from "@/lib/server/adminDb";
 import type { FullSeller, SellerListing } from "@/lib/useSeller";
 
+// Admin SDK document fields that are Firestore Timestamps come back as
+// Timestamp *class instances* (methods like .toDate()/.toMillis(), not a
+// plain object) — Next.js refuses to serialize those across the
+// server->client boundary ("Only plain objects... Classes or null
+// prototypes are not supported"). Every consumer downstream (isBoosted,
+// useSeller's sort, SellerListing cards) already accepts a plain
+// millisecond number for these fields, so this walks a raw listing doc
+// and converts any Timestamp-shaped value to `.toMillis()` before it's
+// ever returned from this server-only module.
+function serializeTimestamps<T extends Record<string, any>>(obj: T): T {
+  const out: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value && typeof value === "object" && typeof value.toMillis === "function") {
+      out[key] = value.toMillis();
+    } else if (Array.isArray(value)) {
+      out[key] = value.map((v) => (v && typeof v === "object" && typeof v.toMillis === "function" ? v.toMillis() : v));
+    } else {
+      out[key] = value;
+    }
+  }
+  return out as T;
+}
+
 export interface SellerSeoProfile {
   uid: string;
   username: string;
@@ -160,7 +183,7 @@ export async function getSellerFullProfile(segment: string): Promise<FullSeller 
       .where("status", "==", "active")
       .limit(40)
       .get();
-    lq.forEach((ld) => sellerListings.push({ id: ld.id, ...(ld.data() as any) }));
+    lq.forEach((ld) => sellerListings.push(serializeTimestamps({ id: ld.id, ...(ld.data() as any) })));
     sellerListings.sort((a: any, b: any) => {
       const toMillis = (v: any) => (v?.toDate ? v.toDate().getTime() : v ? new Date(v).getTime() : 0);
       return toMillis(b.createdAt) - toMillis(a.createdAt);
