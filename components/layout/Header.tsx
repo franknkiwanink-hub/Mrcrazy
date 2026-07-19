@@ -47,6 +47,25 @@ function useHamburgerShuffle() {
   return refs;
 }
 
+// Cycles the signup button's --shadow-color CSS variable through a
+// rainbow (30° hue step every second, full cycle in 12s) — same effect
+// as the reference cartoon-button implementation, ported to a ref +
+// interval instead of a global getElementById.
+function useSignupRainbowShadow() {
+  const ref = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    let hue = 0;
+    const id = setInterval(() => {
+      hue = (hue + 30) % 360;
+      ref.current?.style.setProperty("--shadow-color", `hsl(${hue}, 75%, 55%)`);
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return ref;
+}
+
 export default function Header() {
   const { user, profile } = useAuth();
   const { openAuthModal } = useAuthModal();
@@ -54,9 +73,10 @@ export default function Header() {
   const { openWallet } = useWalletModal();
   const router = useRouter();
   const [l1Ref, l2Ref, l3Ref] = useHamburgerShuffle();
+  const signupBtnRef = useSignupRainbowShadow();
 
   const isLoggedIn = !!user;
-  const label = isLoggedIn ? "Profile" : "Sign up / Log in";
+  const label = isLoggedIn ? "Profile" : "Sign Up";
   const avatarInitial = (profile?.username || "U").charAt(0).toUpperCase();
 
   return (
@@ -120,6 +140,7 @@ export default function Header() {
           </div>
         )}
         <button
+          ref={signupBtnRef}
           className={`btn-login${isLoggedIn ? "" : " btn-signup"}`}
           onClick={() => {
             // Ports the .btn-login click handler in announcement-settings.js:
@@ -170,6 +191,13 @@ export default function Header() {
                 {avatarInitial}
               </span>
             )
+          )}
+          {!isLoggedIn && (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+              <polyline points="10 17 15 12 10 7" />
+              <line x1="15" y1="12" x2="3" y2="12" />
+            </svg>
           )}
           <span
             style={{
