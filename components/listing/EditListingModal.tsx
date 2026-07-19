@@ -26,12 +26,17 @@
 // listing.update already supports every field this form sends (see
 // handleUpdate in app/api/listings/_handler.js) — no server-side change
 // was needed.
+//
+// Markup uses the #editListingOverlay / .el-* class system already defined
+// in app/globals.css (ported from the original's own stylesheet) instead of
+// one-off inline styles — this is the gold-accent themed look the original
+// modal actually had, and keeps this component visually consistent with the
+// rest of the app's CSS-driven modals rather than diverging from it.
 
 import React, { useEffect, useState } from "react";
 import { fetchListingById, updateListing, type Listing } from "@/lib/listings";
 import { useAuth } from "@/lib/AuthContext";
 import { useLimits } from "@/lib/useLimits";
-import { useScrollLock } from "@/lib/useScrollLock";
 
 const IMGUR_CLIENT_ID = "891e5bb4aa94282";
 
@@ -95,7 +100,6 @@ export default function EditListingModal({
   onSaved?: (listing: Listing) => void;
   onDeleted?: (listingId: string) => void;
 }) {
-  useScrollLock(open);
   const { user } = useAuth();
   const { limits } = useLimits();
 
@@ -293,183 +297,239 @@ export default function EditListingModal({
 
   return (
     <div
+      id="editListingOverlay"
+      className="visible"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Edit ${TYPE_LABEL[type] || "Listing"}`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      style={overlayStyle}
     >
-      <div style={cardStyle}>
-        {/* Sticky header */}
-        <div style={headerStyle}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "#fff" }}>
-              Edit {TYPE_LABEL[type] || "Listing"}
+      <div id="editListingPanel">
+        <div className="el-header">
+          <div className="el-header-left">
+            <div className="el-type-badge">
+              <svg viewBox="0 0 24 24">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                <path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z" />
+              </svg>
             </div>
-            <div style={{ fontSize: 12, color: "#888", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {listing?.title || "Untitled listing"}
+            <div className="el-header-text" style={{ minWidth: 0 }}>
+              <h2>Edit {TYPE_LABEL[type] || "Listing"}</h2>
+              <p style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {listing?.title || "Untitled listing"}
+              </p>
             </div>
           </div>
-          <button onClick={onClose} style={closeBtnStyle} aria-label="Close">
-            ✕
-          </button>
+          <div className="el-header-right">
+            <button type="button" className="el-icon-btn" onClick={onClose} aria-label="Close">
+              <svg viewBox="0 0 24 24">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <div style={{ overflowY: "auto", padding: 20, flex: 1 }}>
+        <div className="el-body">
           {loading ? (
-            <div style={{ padding: "40px 0", textAlign: "center", color: "#888", fontSize: 13 }}>Loading listing…</div>
+            <div className="el-loading">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+              Loading listing…
+            </div>
           ) : loadError ? (
-            <div style={{ padding: "40px 0", textAlign: "center", color: "#f87171", fontSize: 13 }}>{loadError}</div>
+            <div className="el-error" style={{ display: "flex", alignItems: "center" }}>{loadError}</div>
           ) : (
             <>
-              <Field label="Title" required>
-                <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
+              <div className="el-field">
+                <label>
+                  Title <span style={{ color: "#f87171" }}>*</span>
+                </label>
+                <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} />
                 <CharCount value={title} min={TITLE_MIN} max={TITLE_MAX} />
-              </Field>
+              </div>
 
-              <Field label="Description" required>
-                <textarea
-                  value={desc}
-                  onChange={(e) => setDesc(e.target.value)}
-                  rows={5}
-                  style={{ ...inputStyle, height: "auto", padding: 14, resize: "vertical" }}
-                />
+              <div className="el-field">
+                <label>
+                  Description <span style={{ color: "#f87171" }}>*</span>
+                </label>
+                <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={5} />
                 <CharCount value={desc} min={DESC_MIN} max={DESC_MAX} />
-              </Field>
+              </div>
 
               {!isApp && (
-                <Field label={isGame ? "Game URL (external link)" : "URL"}>
-                  <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} style={inputStyle} disabled={listing?.isTemplate} />
-                </Field>
+                <div className="el-field">
+                  <label>{isGame ? "Game URL (external link)" : "URL"}</label>
+                  <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} disabled={listing?.isTemplate} />
+                </div>
               )}
 
               {(isWebsite || isApp) && (
-                <Field label="Category">
-                  <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} style={inputStyle} />
-                </Field>
+                <div className="el-field">
+                  <label>Category</label>
+                  <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} />
+                </div>
               )}
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-                <Field label={isGame ? "Platform" : "Frontend"}>
-                  <input type="text" value={frontend} onChange={(e) => setFrontend(e.target.value)} style={inputStyle} />
-                </Field>
-                <Field label={isGame ? "Genre" : "Backend"}>
-                  <input type="text" value={backend} onChange={(e) => setBackend(e.target.value)} style={inputStyle} />
-                </Field>
+              <div className="el-grid-2">
+                <div className="el-field">
+                  <label>{isGame ? "Platform" : "Frontend"}</label>
+                  <input type="text" value={frontend} onChange={(e) => setFrontend(e.target.value)} />
+                </div>
+                <div className="el-field">
+                  <label>{isGame ? "Genre" : "Backend"}</label>
+                  <input type="text" value={backend} onChange={(e) => setBackend(e.target.value)} />
+                </div>
               </div>
 
               {!isGame && (
-                <Field label="Database">
-                  <input type="text" value={database} onChange={(e) => setDatabase(e.target.value)} style={inputStyle} />
-                </Field>
+                <div className="el-field">
+                  <label>Database</label>
+                  <input type="text" value={database} onChange={(e) => setDatabase(e.target.value)} />
+                </div>
               )}
 
-              <Field label="Monetization">
-                <input type="text" value={monetization} onChange={(e) => setMonetization(e.target.value)} style={inputStyle} />
-              </Field>
-
-              <span style={sectionLabelStyle}>Images</span>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
-                {images.map((slot, i) => (
-                  <label key={i} style={imgSlotStyle}>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        e.target.value = "";
-                        if (f) onPickImage(i, f);
-                      }}
-                    />
-                    {slot.dataUrl || slot.url ? (
-                      <img src={slot.dataUrl || slot.url} alt={`Image ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: "rgba(255,255,255,0.25)", fontSize: 11 }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 22, height: 22 }}>
-                          <rect x="3" y="3" width="18" height="18" rx="2" />
-                          <path d="M3 9h18M9 21V9" />
-                        </svg>
-                        Add image
-                      </div>
-                    )}
-                    <div style={imgReplaceOverlayStyle}>Replace</div>
-                  </label>
-                ))}
+              <div className="el-field">
+                <label>Monetization</label>
+                <input type="text" value={monetization} onChange={(e) => setMonetization(e.target.value)} />
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
-                <Field label="Price ($)">
-                  <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} style={inputStyle} />
-                </Field>
-                <Field label="Monthly Revenue ($)">
-                  <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} style={inputStyle} />
-                </Field>
-                <Field label="Monthly Expenses ($)">
-                  <input type="number" min="0" value={expenses} onChange={(e) => setExpenses(e.target.value)} style={inputStyle} />
-                </Field>
+              <div className="el-section">
+                <div className="el-section-title">
+                  <svg viewBox="0 0 24 24">
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <path d="m21 15-5-5L5 21" />
+                  </svg>
+                  Images
+                </div>
+                <div className="el-images">
+                  {images.map((slot, i) => (
+                    <label key={i} className="el-img-slot">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          e.target.value = "";
+                          if (f) onPickImage(i, f);
+                        }}
+                      />
+                      {slot.dataUrl || slot.url ? (
+                        <img src={slot.dataUrl || slot.url} alt={`Image ${i + 1}`} />
+                      ) : (
+                        <div className="el-img-ph">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}>
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <path d="M3 9h18M9 21V9" />
+                          </svg>
+                          <span>Add image</span>
+                        </div>
+                      )}
+                      <div className="el-img-replace">Replace</div>
+                    </label>
+                  ))}
+                </div>
               </div>
-              <div style={{ padding: 14, background: "rgba(255,255,255,0.03)", borderRadius: 10, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 12, color: "#888", fontWeight: 600 }}>Monthly Profit</span>
-                <span style={{ fontSize: 16, fontWeight: 800, color: profit < 0 ? "#f87171" : "#a3e635" }}>
+
+              <div className="el-grid-3">
+                <div className="el-field">
+                  <label>Price ($)</label>
+                  <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} />
+                </div>
+                <div className="el-field">
+                  <label>Monthly Revenue ($)</label>
+                  <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} />
+                </div>
+                <div className="el-field">
+                  <label>Monthly Expenses ($)</label>
+                  <input type="number" min="0" value={expenses} onChange={(e) => setExpenses(e.target.value)} />
+                </div>
+              </div>
+              <div className="el-profit-box">
+                <span className="el-profit-label">Monthly Profit</span>
+                <span className={`el-profit-value${profit < 0 ? " loss" : ""}`}>
                   {profit < 0 ? "-" : ""}${Math.abs(profit).toLocaleString()}
                 </span>
               </div>
 
-              <span style={sectionLabelStyle}>Transfer Methods</span>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
-                {TRANSFER_OPTIONS.map((o) => (
-                  <label
-                    key={o.value}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 8, padding: "9px 11px",
-                      background: transferMethods.includes(o.value) ? "rgba(124,58,237,0.1)" : "rgba(255,255,255,0.03)",
-                      border: `1px solid ${transferMethods.includes(o.value) ? "rgba(124,58,237,0.35)" : "rgba(255,255,255,0.08)"}`,
-                      borderRadius: 10, cursor: "pointer", fontSize: 12.5,
-                    }}
-                  >
-                    <input type="checkbox" checked={transferMethods.includes(o.value)} onChange={() => toggleTransfer(o.value)} style={{ accentColor: "#7c3aed" }} />
-                    {o.label}
-                  </label>
-                ))}
+              <div className="el-section">
+                <div className="el-section-title">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                  </svg>
+                  Transfer Methods
+                </div>
+                <div className="el-transfer-grid">
+                  {TRANSFER_OPTIONS.map((o) => (
+                    <label key={o.value} className="el-transfer-cb">
+                      <input type="checkbox" checked={transferMethods.includes(o.value)} onChange={() => toggleTransfer(o.value)} />
+                      {o.label}
+                    </label>
+                  ))}
+                </div>
               </div>
 
-              {errMsg && <div style={errorBoxStyle}>{errMsg}</div>}
-              {successMsg && <div style={successBoxStyle}>✓ Changes saved.</div>}
+              {errMsg && <div className="el-error" style={{ display: "block" }}>{errMsg}</div>}
+              {successMsg && (
+                <div className="el-success" style={{ display: "flex" }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                  Changes saved.
+                </div>
+              )}
             </>
           )}
         </div>
 
         {!loading && !loadError && (
-          <div style={footerStyle}>
-            {confirmingDelete ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
-                <div style={{ fontSize: 12.5, color: "#f87171", textAlign: "center" }}>
-                  This will permanently remove the listing. This cannot be undone.
+          <div className="el-footer">
+            <div className="el-footer-inner">
+              {confirmingDelete ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+                  <div style={{ fontSize: 12.5, color: "#f87171", textAlign: "center" }}>
+                    This will permanently remove the listing. This cannot be undone.
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button type="button" className="el-cancel-btn" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="el-save-btn"
+                      style={{ background: "#dc2626", boxShadow: "none" }}
+                      onClick={handleDelete}
+                      disabled={deleting}
+                    >
+                      {deleting ? "Deleting…" : "Delete Listing"}
+                    </button>
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={() => setConfirmingDelete(false)} style={cancelBtnStyle} disabled={deleting}>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="el-icon-btn danger"
+                    onClick={() => setConfirmingDelete(true)}
+                    disabled={saving}
+                    aria-label="Delete listing"
+                    style={{ borderRadius: "1rem", width: "auto", padding: "0 0.9rem", fontSize: "0.82rem", fontWeight: 700 }}
+                  >
+                    Delete
+                  </button>
+                  <button type="button" className="el-cancel-btn" onClick={onClose} disabled={saving} style={{ marginLeft: "auto" }}>
                     Cancel
                   </button>
-                  <button onClick={handleDelete} style={deleteConfirmBtnStyle} disabled={deleting}>
-                    {deleting ? "Deleting…" : "Delete Listing"}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <button onClick={() => setConfirmingDelete(true)} style={deleteBtnStyle} disabled={saving}>
-                  Delete
-                </button>
-                <div style={{ display: "flex", gap: 8, flex: 1, justifyContent: "flex-end" }}>
-                  <button onClick={onClose} style={cancelBtnStyle} disabled={saving}>
-                    Cancel
-                  </button>
-                  <button onClick={handleSave} style={saveBtnStyle} disabled={saving || successMsg}>
+                  <button type="button" className="el-save-btn" onClick={handleSave} disabled={saving || successMsg}>
                     {saving ? "Saving…" : "Save Changes"}
                   </button>
-                </div>
-              </>
-            )}
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -477,92 +537,8 @@ export default function EditListingModal({
   );
 }
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
-  return (
-    <div style={{ marginBottom: 16 }}>
-      <label style={fieldLabelStyle}>
-        {label} {required && <span style={{ color: "#f87171" }}>*</span>}
-      </label>
-      {children}
-    </div>
-  );
-}
-
 function CharCount({ value, min, max }: { value: string; min: number; max: number }) {
   const len = value.trim().length;
   const ok = len >= min && len <= max;
-  return (
-    <div style={{ fontSize: 11, color: ok ? "rgba(255,255,255,0.35)" : "#f87171", marginTop: 4 }}>
-      {len} / {max} characters (min {min})
-    </div>
-  );
+  return <div className="el-hint" style={{ color: ok ? undefined : "#f87171" }}>{len} / {max} characters (min {min})</div>;
 }
-
-// ── Styles ──
-const overlayStyle: React.CSSProperties = {
-  position: "fixed", inset: 0, zIndex: 99999, background: "rgba(0,0,0,0.82)",
-  backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)",
-  display: "flex", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "inherit",
-};
-const cardStyle: React.CSSProperties = {
-  position: "relative", width: "100%", maxWidth: 560, maxHeight: "90vh", display: "flex", flexDirection: "column",
-  overflow: "hidden", background: "radial-gradient(120% 100% at 50% 0%, rgba(124,58,237,0.14) 0%, rgba(0,0,0,0) 55%), #060606",
-  border: "1px solid #2a2a2a", borderRadius: 22, boxShadow: "0 30px 80px -20px rgba(124,58,237,0.3), 0 10px 40px -10px rgba(0,0,0,0.6)",
-};
-const headerStyle: React.CSSProperties = {
-  position: "sticky", top: 0, zIndex: 5, display: "flex", alignItems: "center", justifyContent: "space-between",
-  gap: 12, background: "rgba(6,6,6,0.92)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
-  borderBottom: "1px solid #1e1e1e", padding: "16px 18px", flexShrink: 0,
-};
-const closeBtnStyle: React.CSSProperties = {
-  width: 30, height: 30, borderRadius: "50%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)",
-  color: "#aaa", cursor: "pointer", fontSize: 13, flexShrink: 0,
-};
-const footerStyle: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: 8, padding: "14px 18px", borderTop: "1px solid #1e1e1e",
-  background: "rgba(6,6,6,0.92)", flexShrink: 0,
-};
-const sectionLabelStyle: React.CSSProperties = {
-  display: "block", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em",
-  color: "rgba(255,255,255,0.45)", marginBottom: 10,
-};
-const fieldLabelStyle: React.CSSProperties = {
-  display: "block", fontSize: 11.5, fontWeight: 700, color: "rgba(255,255,255,0.45)", marginBottom: 6,
-  textTransform: "uppercase", letterSpacing: "0.04em",
-};
-const inputStyle: React.CSSProperties = {
-  width: "100%", height: 42, padding: "0 12px", background: "#0c0c0c", border: "1px solid #2e2e2e",
-  borderRadius: 8, fontSize: 13.5, color: "#fff", outline: "none", fontFamily: "inherit", boxSizing: "border-box",
-};
-const imgSlotStyle: React.CSSProperties = {
-  position: "relative", display: "flex", alignItems: "center", justifyContent: "center", height: 90,
-  background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10,
-  cursor: "pointer", overflow: "hidden",
-};
-const imgReplaceOverlayStyle: React.CSSProperties = {
-  position: "absolute", inset: "auto 0 0 0", background: "rgba(0,0,0,0.7)", color: "#fff", fontSize: 10,
-  fontWeight: 700, textAlign: "center", padding: "3px 0", textTransform: "uppercase", letterSpacing: "0.04em",
-};
-const errorBoxStyle: React.CSSProperties = {
-  padding: "10px 14px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.25)",
-  borderRadius: 8, color: "#fca5a5", fontSize: 12.5, fontWeight: 600, marginBottom: 8,
-};
-const successBoxStyle: React.CSSProperties = {
-  padding: "10px 14px", background: "rgba(163,230,53,0.1)", border: "1px solid rgba(163,230,53,0.25)",
-  borderRadius: 8, color: "#a3e635", fontSize: 12.5, fontWeight: 600,
-};
-const deleteBtnStyle: React.CSSProperties = {
-  background: "none", border: "none", color: "#f87171", fontSize: 12.5, fontWeight: 700, cursor: "pointer", padding: "10px 4px",
-};
-const cancelBtnStyle: React.CSSProperties = {
-  flex: 1, height: 40, background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.7)",
-  border: "1px solid rgba(255,255,255,0.1)", borderRadius: 100, fontSize: 13, fontWeight: 700, cursor: "pointer",
-};
-const saveBtnStyle: React.CSSProperties = {
-  flex: 1, height: 40, background: "linear-gradient(135deg, #5b21b6 0%, #7c3aed 55%, #6d28d9 100%)",
-  border: "1px solid #8b5cf6", color: "#fff", borderRadius: 100, fontSize: 13, fontWeight: 800, cursor: "pointer",
-};
-const deleteConfirmBtnStyle: React.CSSProperties = {
-  flex: 1, height: 40, background: "#dc2626", border: "1px solid #ef4444", color: "#fff",
-  borderRadius: 100, fontSize: 13, fontWeight: 800, cursor: "pointer",
-};
