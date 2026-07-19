@@ -272,7 +272,8 @@
          min-height: 0; transition: opacity 0.2s;
          }
          .nav-footer { margin-top: auto; padding: 12px 20px 14px; font-size: 10px; color: rgba(255,255,255,0.2); border-top: 1px solid rgba(255,255,255,0.06); letter-spacing: 0.02em; }
-         .brand { font-size: 15px; font-weight: 800; letter-spacing: -0.04em; color: #fff; user-select: none; line-height: 1; white-space: nowrap; }
+         .brand { font-size: 15px; font-weight: 800; letter-spacing: -0.04em; color: #fff; user-select: none; line-height: 1; white-space: nowrap; display: flex; align-items: center; }
+         .brand img { height: 26px; width: auto; display: block; }
          .brand span { color: rgba(163,230,53,0.55); }
          .btn-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center; }
          .btn-login {
