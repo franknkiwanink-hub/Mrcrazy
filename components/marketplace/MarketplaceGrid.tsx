@@ -16,7 +16,10 @@ import AiPromoCard from "@/components/marketplace/AiPromoCard";
 import { buildListingSlug } from "@/lib/slug";
 import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 
-export default function MarketplaceGrid({ autoOpenSearch = false }: { autoOpenSearch?: boolean } = {}) {
+export default function MarketplaceGrid({
+  autoOpenSearch = false,
+  onExitTakeover,
+}: { autoOpenSearch?: boolean; onExitTakeover?: () => void } = {}) {
   const filters = useMarketplaceFilters();
   const type = filters.typeFilter === "all" ? undefined : filters.typeFilter;
   const { listings, loading, loadingMore, error, exhausted, loadMore, reset } = useFeed({ pageSize: 24, type });
@@ -93,6 +96,7 @@ export default function MarketplaceGrid({ autoOpenSearch = false }: { autoOpenSe
         onOpenListing={onOpen}
         onOpenSeller={onOpenSeller}
         autoOpenSearch={autoOpenSearch}
+        onExitTakeover={onExitTakeover}
       />
 
       <PremiumSellersStrip />
