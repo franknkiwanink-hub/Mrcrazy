@@ -17,5 +17,15 @@ export default function ListingViewBeacon({ listingId }: { listingId: string }) 
     trackListing("listing.view", listingId);
   }, [listingId]);
 
+  // Scroll to the top of the new listing page on every open — including
+  // navigating from one listing's own "Similar listings" strip straight
+  // into another listing, which is a same-route-pattern navigation
+  // (/listing/[id] -> /listing/[id]) that the browser/Next.js can
+  // otherwise carry the previous page's scroll position into, landing
+  // the new page scrolled down near the bottom instead of at the top.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [listingId]);
+
   return null;
 }
