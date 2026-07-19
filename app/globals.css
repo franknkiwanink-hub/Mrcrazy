@@ -365,8 +365,10 @@
          @media (min-width: 768px) { .hero { aspect-ratio: 16 / 9; } }
          .hero-bg {
          position: absolute; inset: 0;
-         background-image: url("https://m.media-amazon.com/images/I/61oe9TpcqUS._AC_UF1000,1000_QL80_.jpg");
+         background-image: url("https://cdn.phototourl.com/member/2026-07-19-76eb6d0e-70b8-42c5-8425-4024c50fbe2a.jpg");
          background-size: cover; background-position: center top;
+         filter: blur(6px);
+         transform: scale(1.05);
          transition: opacity 0.6s ease;
          }
          /* Hero image stays fixed and does not swap with the user's dynamic theme. */
