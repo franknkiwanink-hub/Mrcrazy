@@ -683,7 +683,7 @@ export default function AppListingForm() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
+    <div style={{ minHeight: "100vh", marginTop: 92, background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
       <AiLengthPickerHost />
       <input ref={bannerInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onBannerChange} />
       <input ref={iconInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onIconChange} />
