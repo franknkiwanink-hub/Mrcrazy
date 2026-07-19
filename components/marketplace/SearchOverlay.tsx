@@ -12,9 +12,9 @@
 // opening/closing/typing here never navigates or refetches, same as the
 // small popover it replaces.
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Listing } from "@/lib/listings";
 import { useRecentSearches } from "@/lib/useRecentSearches";
-import { useScrollLock } from "@/lib/useScrollLock";
 
 interface Suggestion {
   listing: Listing;
@@ -60,6 +60,21 @@ export default function SearchOverlay({
   const inputRef = useRef<HTMLInputElement>(null);
   const { items: recent, add: addRecent, remove: removeRecent, clear: clearRecent } = useRecentSearches();
 
+  // Portal target: document.body isn't available during SSR, and even on
+  // the client we only want to read it after mount. Without this, the
+  // overlay renders in-place in the DOM tree (inside MarketplaceSearchBar's
+  // .mp-search-wrap), and if any ancestor up the tree has a transform,
+  // filter, backdrop-filter, or will-change set, that ancestor becomes the
+  // containing block for position:fixed — which clips/shrinks the overlay
+  // to that ancestor's box instead of the real viewport. That's the "search
+  // overlay is cut off, not full screen" bug. Portaling straight to
+  // document.body sidesteps the whole class of ancestor-stacking issues
+  // instead of chasing down which ancestor is the culprit.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // Autofocus the input the moment the overlay mounts, same as tapping
   // YouTube's search bar drops you straight into a focused, keyboard-up
   // input rather than a still-blurred one.
@@ -74,7 +89,14 @@ export default function SearchOverlay({
 
   // Lock background scroll while the overlay is up — a full-screen
   // takeover shouldn't let the marketplace grid scroll underneath it.
-  useScrollLock(open);
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -86,7 +108,7 @@ export default function SearchOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, value]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
   const q = value.trim().toLowerCase();
 
@@ -126,7 +148,7 @@ export default function SearchOverlay({
     inputRef.current?.focus();
   }
 
-  return (
+  return createPortal(
     <div id="mpSearchOverlay" className="active" role="dialog" aria-modal="true" aria-label="Search listings">
       <div className="mp-so-header">
         <button
@@ -247,6 +269,7 @@ export default function SearchOverlay({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
