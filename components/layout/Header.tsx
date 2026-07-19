@@ -120,7 +120,7 @@ export default function Header() {
           </div>
         )}
         <button
-          className="btn-login"
+          className={`btn-login${isLoggedIn ? "" : " btn-signup"}`}
           onClick={() => {
             // Ports the .btn-login click handler in announcement-settings.js:
             // logged-in → profile modal (here: /myprofile route, since that
