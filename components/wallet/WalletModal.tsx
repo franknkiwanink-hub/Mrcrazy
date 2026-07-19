@@ -5,7 +5,6 @@ import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { loadPaypalSdk } from "@/lib/paypalSdk";
 import { useWalletSummary } from "@/lib/useWalletSummary";
-import { useScrollLock } from "@/lib/useScrollLock";
 import WithdrawTab from "@/components/wallet/WithdrawTab";
 import SendTab from "@/components/wallet/SendTab";
 import HistoryTab from "@/components/wallet/HistoryTab";
@@ -30,7 +29,6 @@ import AutoWithdrawAddon from "@/components/wallet/AutoWithdrawAddon";
 const QUICK_AMOUNTS = [20, 50, 100, 250];
 
 export default function WalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  useScrollLock(open);
   const { profile } = useAuth();
   const { summary, refresh } = useWalletSummary();
   const [tab, setTab] = useState<"deposit" | "withdraw" | "send" | "history">("deposit");
@@ -190,6 +188,11 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
         <div id="walletModalBody">
           {/* Balance hero */}
           <div id="walletBalanceCard">
+            <img
+              src="https://cdn.phototourl.com/member/2026-07-19-ffcaa670-d57c-44f6-8415-ab73856860b2.png"
+              alt="Siterifty.com"
+              style={{ height: 22, marginBottom: 8, display: "block" }}
+            />
             <div id="walletBalanceLabel">Available balance</div>
             <div id="walletBalanceAmt">
               ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
