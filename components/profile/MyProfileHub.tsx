@@ -10,6 +10,7 @@ import { useBoostModal } from "@/components/boost/BoostModalProvider";
 import { useAgentModal } from "@/components/agent/AgentModalProvider";
 import { useEditListingModal } from "@/components/listing/EditListingModalProvider";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
+import { useDisputePicker } from "@/components/dispute/DisputePickerProvider";
 import { useToast } from "@/lib/useToast";
 import { useLimits } from "@/lib/useLimits";
 import SellerBadges from "@/components/seller/SellerBadges";
@@ -137,6 +138,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   const { openAgent } = useAgentModal();
   const { openEdit } = useEditListingModal();
   const { openPlansModal } = usePlansModal();
+  const { openDisputePicker } = useDisputePicker();
   const { toast, ToastHost } = useToast();
   const { limits } = useLimits();
 
@@ -820,9 +822,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
               </button>
               <button
                 className="pm-bottom-btn pm-bottom-dispute"
-                onClick={() => {
-                  toast("The dispute picker isn't wired up yet.");
-                }}
+                onClick={openDisputePicker}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
