@@ -1,0 +1,7 @@
+The following file was DELETED as part of these fixes (not modified — so it
+can't be included in this diff zip). If you're applying this zip on top of
+an older copy of the project, delete it manually too:
+
+  components/wallet/AutoTopUpAddon.tsx
+    — removed because Auto Top-Up depended on the PayPal deposit vault,
+      which no longer exists (PayPal top-up was removed).
