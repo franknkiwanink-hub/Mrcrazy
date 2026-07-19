@@ -496,7 +496,18 @@
          transition: background 0.2s, color 0.2s;
          }
          .cta-secondary:hover { background: rgba(255,255,255,0.13); color: #fff; }
-         main { position: relative; z-index: 1; min-height: 100vh; }
+         /* No z-index here on purpose: this used to be z-index: 1, which
+            created a stacking context for <main>. Because <main> itself
+            only competes at z-index 1 against its siblings in layout.tsx
+            (header is 9990), every high-z-index full-screen overlay
+            rendered as a *page* inside {children} — e.g. #dealChatPanel
+            at z-index 9997 — was capped by that context and rendered
+            underneath header/#announcement-bar despite its own z-index
+            being far higher. Dropping the z-index removes the trap;
+            main now participates in the root stacking order by document
+            position, and #dealChatPanel's 9997 is compared directly
+            against header's 9990 and wins as intended. */
+         main { position: relative; min-height: 100vh; }
 
          /* ── VALUATION SECTION ── */
          .val-section {
