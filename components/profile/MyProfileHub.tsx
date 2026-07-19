@@ -11,6 +11,7 @@ import { useAgentModal } from "@/components/agent/AgentModalProvider";
 import { useEditListingModal } from "@/components/listing/EditListingModalProvider";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
 import { useDisputePicker } from "@/components/dispute/DisputePickerProvider";
+import { useConfirm } from "@/lib/useConfirm";
 import { useToast } from "@/lib/useToast";
 import { useLimits } from "@/lib/useLimits";
 import SellerBadges from "@/components/seller/SellerBadges";
@@ -78,59 +79,6 @@ function pmPlanClass(plan: string) {
 type ParentTab = "profile" | "listings" | "favorites";
 type SubTab = "account" | "public";
 
-function ConfirmOverlay({
-  title,
-  message,
-  confirmLabel,
-  danger,
-  busy,
-  onCancel,
-  onConfirm,
-}: {
-  title: string;
-  message: string;
-  confirmLabel: string;
-  danger?: boolean;
-  busy?: boolean;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.7)",
-        zIndex: 10001,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-      onClick={() => !busy && onCancel()}
-    >
-      <div
-        style={{ background: "#141420", padding: 24, borderRadius: 12, color: "#fff", maxWidth: 360 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 style={{ marginTop: 0 }}>{title}</h3>
-        <p style={{ opacity: 0.7, fontSize: 14 }}>{message}</p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-          <button onClick={onCancel} disabled={busy}>
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={busy}
-            style={danger ? { background: "#f87171", color: "#000", fontWeight: 700 } : undefined}
-          >
-            {busy ? "Working…" : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab }) {
   const router = useRouter();
   const { user } = useAuth();
@@ -139,6 +87,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   const { openEdit } = useEditListingModal();
   const { openPlansModal } = usePlansModal();
   const { openDisputePicker } = useDisputePicker();
+  const { confirm, ConfirmHost } = useConfirm();
   const { toast, ToastHost } = useToast();
   const { limits } = useLimits();
 
@@ -177,9 +126,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   const [avatarUploading, setAvatarUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [cancelConfirming, setCancelConfirming] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [logoutConfirming, setLogoutConfirming] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -266,12 +213,17 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
     }
   }
 
-  async function handleDeleteListing() {
-    if (!deleteTarget) return;
+  async function handleDeleteListing(listingId: string) {
+    const ok = await confirm({
+      theme: "danger",
+      title: "Delete Listing?",
+      msg: "This will permanently remove the listing. This cannot be undone.",
+      confirmText: "Delete",
+    });
+    if (!ok) return;
     setDeleting(true);
     try {
-      await deleteListing(deleteTarget);
-      setDeleteTarget(null);
+      await deleteListing(listingId);
     } catch {
       toast("Could not delete this listing. Please try again.");
     } finally {
@@ -291,10 +243,16 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   }
 
   async function handleCancelPlan() {
+    const ok = await confirm({
+      theme: "danger",
+      title: `Cancel ${planLabel} Plan`,
+      msg: "Your subscription will be cancelled and your account will revert to the Free plan at the end of your current billing cycle. Are you sure?",
+      confirmText: "Yes, Cancel Plan",
+    });
+    if (!ok) return;
     setCancelling(true);
     try {
       await cancelPlan();
-      setCancelConfirming(false);
       toast(`Your ${planLabel} plan has been cancelled. You'll stay on ${planLabel} until the end of your billing period, then revert to Free.`);
     } catch (err: any) {
       toast(err.message || "Cancellation failed. Please try again.");
@@ -455,7 +413,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                   Upgrade
                 </button>
               ) : (
-                <button className="pm-cancel-plan-btn" onClick={() => setCancelConfirming(true)}>
+                <button className="pm-cancel-plan-btn" onClick={handleCancelPlan} disabled={cancelling}>
                   Cancel Plan
                 </button>
               )}
@@ -713,7 +671,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                                 </svg>
                                 Edit
                               </button>
-                              <button className="pm-listing-delete-btn" type="button" onClick={() => setDeleteTarget(l.id)}>
+                              <button className="pm-listing-delete-btn" type="button" onClick={() => handleDeleteListing(l.id)} disabled={deleting}>
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                   <polyline points="3 6 5 6 21 6" />
                                   <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
@@ -844,34 +802,12 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
         </div>
       </div>
 
-      {deleteTarget ? (
-        <ConfirmOverlay
-          title="Delete Listing?"
-          message="This will permanently remove the listing. This cannot be undone."
-          confirmLabel="Delete"
-          danger
-          busy={deleting}
-          onCancel={() => setDeleteTarget(null)}
-          onConfirm={handleDeleteListing}
-        />
-      ) : null}
-
-      {cancelConfirming ? (
-        <ConfirmOverlay
-          title={`Cancel ${planLabel} Plan`}
-          message="Your subscription will be cancelled and your account will revert to the Free plan at the end of your current billing cycle. Are you sure?"
-          confirmLabel="Yes, Cancel Plan"
-          danger
-          busy={cancelling}
-          onCancel={() => setCancelConfirming(false)}
-          onConfirm={handleCancelPlan}
-        />
-      ) : null}
+      <ConfirmHost />
 
       {/* Uses the real #logoutModalOverlay styling from globals.css (the
-          same markup as SettingsSidebar's logout modal) instead of the
-          generic inline-styled ConfirmOverlay, so logout looks consistent
-          everywhere rather than like a plain unstyled dialog. */}
+          same markup as SettingsSidebar's logout modal), consistent with
+          delete-listing/cancel-plan now using the shared useConfirm()
+          dialog above rather than a one-off inline-styled overlay. */}
       {logoutConfirming ? (
         <div
           id="logoutModalOverlay"
