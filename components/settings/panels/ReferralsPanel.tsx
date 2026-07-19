@@ -35,6 +35,13 @@ export default function ReferralsPanel({
   const [refCount, setRefCount] = useState<number | null>(null);
   const [refEarned, setRefEarned] = useState<number | null>(null);
 
+  // /r/{username} is a real route now (app/r/[username]/page.tsx) that
+  // redirects to /?r={username} — the format authActions.ts's
+  // getReferralCode() actually reads at signup time. Kept as the
+  // shareable /r/... form here (rather than handing out the raw
+  // /?r=... link directly) since it's the nicer-looking, more shareable
+  // URL; the redirect page is what bridges it to the format signup
+  // expects.
   const refLink =
     typeof window !== "undefined"
       ? `${window.location.origin}/r/${state.username || "you"}`
