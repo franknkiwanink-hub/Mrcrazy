@@ -13,8 +13,7 @@ import { usePlansModal } from "@/components/billing/PlansModalProvider";
 import { useToast } from "@/lib/useToast";
 import { useLimits } from "@/lib/useLimits";
 import SellerBadges from "@/components/seller/SellerBadges";
-import { useLogoutModal } from "@/components/layout/LogoutModalProvider";
-import { useDisputePicker } from "@/components/dispute/DisputePickerProvider";
+import { logout } from "@/lib/authActions";
 import { buildListingSlug } from "@/lib/slug";
 
 // Ports the PROFILE MODAL from Js/profile.js + Js/profile-early.js
@@ -180,8 +179,8 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   const [deleting, setDeleting] = useState(false);
   const [cancelConfirming, setCancelConfirming] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const { confirmLogout } = useLogoutModal();
-  const { openDisputePicker } = useDisputePicker();
+  const [logoutConfirming, setLogoutConfirming] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   // Sync form fields whenever fresh profile data lands (initial load, or
   // after a successful save re-fetch) — same as pmRender re-populating
@@ -300,6 +299,11 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
     } finally {
       setCancelling(false);
     }
+  }
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    await logout();
   }
 
   const planLabel = profile.plan.charAt(0).toUpperCase() + profile.plan.slice(1);
@@ -816,7 +820,9 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
               </button>
               <button
                 className="pm-bottom-btn pm-bottom-dispute"
-                onClick={openDisputePicker}
+                onClick={() => {
+                  toast("The dispute picker isn't wired up yet.");
+                }}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
@@ -826,7 +832,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                 Dispute
               </button>
             </div>
-            <button className="pm-bottom-btn pm-bottom-logout" style={{ width: "100%" }} onClick={() => confirmLogout()}>
+            <button className="pm-bottom-btn pm-bottom-logout" style={{ width: "100%" }} onClick={() => setLogoutConfirming(true)}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
                 <polyline points="16 17 21 12 16 7" />
@@ -860,6 +866,55 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
           onCancel={() => setCancelConfirming(false)}
           onConfirm={handleCancelPlan}
         />
+      ) : null}
+
+      {/* Uses the real #logoutModalOverlay styling from globals.css (the
+          same markup as SettingsSidebar's logout modal) instead of the
+          generic inline-styled ConfirmOverlay, so logout looks consistent
+          everywhere rather than like a plain unstyled dialog. */}
+      {logoutConfirming ? (
+        <div
+          id="logoutModalOverlay"
+          className="visible"
+          onClick={() => !loggingOut && setLogoutConfirming(false)}
+        >
+          <div id="logoutModalBox" onClick={(e) => e.stopPropagation()}>
+            <div id="logoutModalIconWrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </div>
+            <div id="logoutModalTitle">Sign out?</div>
+            <div id="logoutModalMsg">
+              You&apos;ll need to sign back in to access your account.
+            </div>
+            <div className="logout-modal-actions">
+              <button
+                type="button"
+                className="logout-modal-btn confirm"
+                onClick={handleLogout}
+                disabled={loggingOut}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                {loggingOut ? "Signing out…" : "Sign Out"}
+              </button>
+              <button
+                type="button"
+                className="logout-modal-btn cancel"
+                onClick={() => setLogoutConfirming(false)}
+                disabled={loggingOut}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       <ToastHost />
