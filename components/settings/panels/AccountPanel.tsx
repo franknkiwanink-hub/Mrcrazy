@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { doc, updateDoc, serverTimestamp, collection, query, where, getDocs, limit } from "firebase/firestore";
+import { doc, updateDoc, serverTimestamp, collection, query, where, getDocs, limit, arrayUnion } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type { SettingsState } from "@/lib/useSettingsState";
 import { useToast } from "@/lib/useToast";
@@ -58,6 +58,7 @@ export default function AccountPanel({
 
   const [displayName, setDisplayName] = useState(state.displayName);
   const [username, setUsername] = useState(state.username);
+  const [contactEmail, setContactEmail] = useState(state.email);
   const [timezone, setTimezone] = useState(state.timezone);
 
   const [uploading, setUploading] = useState(false);
@@ -157,9 +158,56 @@ export default function AccountPanel({
       }
     }
 
+    const email = contactEmail.trim();
+    const usernameChanged = uname !== state.username;
+    const emailChanged = email !== state.email;
+
+    // Server is the source of truth for both cooldowns — same
+    // check-username-change / check-email-change pattern used by the
+    // profile modal's saveAccount (lib/useProfileData.ts).
+    const idToken = await user.getIdToken();
+    if (usernameChanged) {
+      const checkRes = await fetch("/api/limits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check-username-change", idToken }),
+      });
+      const checkJson = await checkRes.json().catch(() => ({}));
+      if (!checkRes.ok) {
+        toast(checkJson.error || "Couldn't check your username cooldown — try again.");
+        return;
+      }
+      if (!checkJson.allowed) {
+        const d = checkJson.daysLeft;
+        toast(`You can change your username again in ${d} day${d !== 1 ? "s" : ""}.`);
+        return;
+      }
+    }
+    if (emailChanged) {
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        toast("Enter a valid email address.");
+        return;
+      }
+      const checkRes = await fetch("/api/limits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check-email-change", idToken }),
+      });
+      const checkJson = await checkRes.json().catch(() => ({}));
+      if (!checkRes.ok) {
+        toast(checkJson.error || "Couldn't check your email change limit — try again.");
+        return;
+      }
+      if (!checkJson.allowed) {
+        const d = checkJson.daysLeft;
+        toast(`You've used all your contact email changes for this period. Try again in ${d} day${d !== 1 ? "s" : ""}.`);
+        return;
+      }
+    }
+
     setSaveState("saving");
     try {
-      await updateDoc(doc(db, "users", user.uid), {
+      const updates: Record<string, unknown> = {
         displayName: dispName,
         username: uname || dispName,
         usernameLower: (uname || dispName).toLowerCase().replace(/\s+/g, "_"),
@@ -167,8 +215,14 @@ export default function AccountPanel({
         language: "en",
         updatedAt: serverTimestamp(),
         profileUpdatedAt: serverTimestamp(), // feeds the "Update Your Profile" daily objective
-      });
-      setState((prev) => ({ ...prev, displayName: dispName, username: uname || dispName, timezone, language: "en" }));
+      };
+      if (usernameChanged) updates.usernameChangedAt = serverTimestamp();
+      if (emailChanged) {
+        updates.contactEmail = email;
+        updates.contactEmailChanges = arrayUnion(Date.now());
+      }
+      await updateDoc(doc(db, "users", user.uid), updates);
+      setState((prev) => ({ ...prev, displayName: dispName, username: uname || dispName, email, timezone, language: "en" }));
       setSaveState("saved");
     } catch (err: any) {
       toast(`Save failed: ${err.message}`);
@@ -260,16 +314,17 @@ export default function AccountPanel({
 
       <div className="input-group">
         <label>Email Address</label>
-        {/* Ports the original exactly: this field is editable but the
-            original's saveAccountBtn handler never reads its value —
-            email changes require Firebase Auth's updateEmail() + a
-            verification flow, which support-modals.js never implemented.
-            Rendering it read-only would be a stricter behavior than the
-            original actually has, so it stays a plain (if functionally
-            inert) text input, matching that gap faithfully rather than
-            hiding or "fixing" it silently. */}
-        <input className="input-field" type="email" defaultValue={state.email} placeholder="you@example.com" />
-        <span className="hint">We&apos;ll send a verification link if changed.</span>
+        <input
+          className="input-field"
+          type="email"
+          value={contactEmail}
+          placeholder="you@example.com"
+          onChange={(e) => setContactEmail(e.target.value)}
+        />
+        <span className="hint">
+          Up to {limits.contactEmail.maxChangesPerPeriod ?? 2} changes every{" "}
+          {Math.round((limits.contactEmail.periodMs ?? 0) / (24 * 60 * 60 * 1000))} days.
+        </span>
       </div>
 
       <div className="input-group">
