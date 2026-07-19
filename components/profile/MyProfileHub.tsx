@@ -273,8 +273,8 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   if (drafts > 0) listingCountText += ` · ${drafts} draft${drafts !== 1 ? "s" : ""}`;
 
   return (
-    <div id="profileModal" style={{ position: "relative", minHeight: "100vh" }}>
-      <div className="pm-modal" style={{ minHeight: "100vh" }}>
+    <div id="profileModal">
+      <div className="pm-modal">
         <div className="pm-modal-header">
           <div className="pm-left-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
