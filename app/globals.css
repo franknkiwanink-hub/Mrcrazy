@@ -9096,7 +9096,8 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
 
 /* ── extracted style block 10 (originally around char offset 1813473) ── */
 #dealChatPanel {
-            position: fixed; inset: 0; z-index: 9997;
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            width: 100%; height: 100dvh; z-index: 9997;
             background: #06060e;
             display: none; flex-direction: column;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
