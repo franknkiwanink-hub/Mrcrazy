@@ -47,7 +47,7 @@
          /* ── HEADER ── */
          header {
          position: fixed; top: 0; left: 0; right: 0;
-         z-index: 20; height: 52px;
+         z-index: 10000; height: 52px;
          display: flex; align-items: center; justify-content: space-between;
          padding: 0 20px;
          background: rgba(0,0,0,0.55);
@@ -5566,17 +5566,6 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
                #spModalCover {
                width: 100%; height: 180px;
                background: #0d0d0d; background-size: cover; background-position: center;
-               }
-               body.theme-active #spModalCover {
-               background-image: var(--app-theme-bg, none);
-               background-color: var(--app-theme-color, #0d0d0d);
-               background-size: cover; background-position: center;
-               position: relative;
-               }
-               body.theme-active #spModalCover::after {
-               content: '';
-               position: absolute; inset: 0;
-               background: var(--app-theme-overlay, rgba(0,0,0,0.55));
                }
                #spModalCover img { width: 100%; height: 100%; object-fit: cover; display: block; }
                /* Main content */
@@ -11468,7 +11457,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
 .sd-wrapper { max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
 
 .sd-header { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; padding: 16px 0; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.06); flex-wrap: wrap; gap: 12px; background: rgba(0,0,0,0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
-body.theme-active .sd-header { background: rgba(0,0,0,0.65); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+body.theme-active .sd-header { background: color-mix(in srgb, var(--app-theme-color, #000) 55%, rgba(0,0,0,0.65)); backdrop-filter: blur(6px) saturate(140%); -webkit-backdrop-filter: blur(6px) saturate(140%); }
 .sd-brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; letter-spacing: -0.03em; color: #fff; }
 .sd-brand-name { display: inline-flex; align-items: baseline; }
 .sd-brand span { color: rgba(163,230,53,0.6); }
@@ -12463,7 +12452,7 @@ body.theme-active .sd-header { background: rgba(0,0,0,0.65); backdrop-filter: bl
   background: rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  padding: 24px 32px;
+  padding: 76px 32px 24px;
   display: flex;
   flex-direction: column;
   font-family: system-ui, -apple-system, sans-serif;
@@ -12501,40 +12490,6 @@ body.theme-active .sd-header { background: rgba(0,0,0,0.65); backdrop-filter: bl
   100% {
     transform: translateX(100%);
   }
-}
-
-#siterifty-loader .s-nav {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding-bottom: 28px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-}
-
-#siterifty-loader .brand {
-  color: #ffffff;
-  font-size: 1.3rem;
-  font-weight: 600;
-  letter-spacing: -0.3px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-#siterifty-loader .brand span {
-  color: rgba(255, 255, 255, 0.4);
-  font-weight: 400;
-}
-
-#siterifty-loader .s-search {
-  flex: 1;
-  max-width: 480px;
-  height: 44px;
-  border-radius: 40px;
-}
-#siterifty-loader .s-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  flex-shrink: 0;
 }
 
 #siterifty-loader .s-banner {
@@ -12581,13 +12536,7 @@ body.theme-active .sd-header { background: rgba(0,0,0,0.65); backdrop-filter: bl
 
 @media (max-width: 600px) {
   #siterifty-loader {
-    padding: 16px;
-  }
-  #siterifty-loader .brand {
-    font-size: 1rem;
-  }
-  #siterifty-loader .s-search {
-    max-width: 100px;
+    padding: 68px 16px 16px;
   }
   #siterifty-loader .s-banner {
     height: 100px;
