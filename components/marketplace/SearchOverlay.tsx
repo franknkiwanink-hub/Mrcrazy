@@ -92,6 +92,7 @@ export default function SearchOverlay({
   listings,
   initialQuery,
   onClose,
+  onCancel,
   onSearchChange,
   onOpenListing,
 }: {
@@ -99,6 +100,7 @@ export default function SearchOverlay({
   listings: Listing[];
   initialQuery: string;
   onClose: () => void;
+  onCancel?: () => void;
   onSearchChange: (q: string) => void;
   onOpenListing: (listing: Listing) => void;
 }) {
@@ -209,7 +211,7 @@ export default function SearchOverlay({
   useEffect(() => {
     if (!open) return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") handleClose();
+      if (e.key === "Escape") handleCancel();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -253,6 +255,11 @@ export default function SearchOverlay({
     onClose();
   }
 
+  function handleCancel() {
+    onClose();
+    onCancel?.();
+  }
+
   function handleClear() {
     setValue("");
     inputRef.current?.focus();
@@ -264,7 +271,7 @@ export default function SearchOverlay({
         <button
           className="mp-so-back"
           aria-label="Close search"
-          onClick={handleClose}
+          onClick={handleCancel}
         >
           <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
             <line x1={19} y1={12} x2={5} y2={12} />
