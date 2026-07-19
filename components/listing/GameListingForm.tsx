@@ -559,7 +559,7 @@ export default function GameListingForm() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
+    <div style={{ minHeight: "100vh", marginTop: 92, background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
       <AiLengthPickerHost />
       <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFileInputChange} />
       <input
