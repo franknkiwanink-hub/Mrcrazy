@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useScrollLock } from "@/lib/useScrollLock";
 import {
   loginWithEmail,
   signupWithEmail,
@@ -10,14 +9,6 @@ import {
   sendForgotPasswordEmail,
   friendlyAuthError,
 } from "@/lib/authActions";
-
-const AVATAR_OPTIONS = [
-  "https://i.pinimg.com/736x/8d/c1/be/8dc1be45b32f2d6efebea0ec78e6b036.jpg",
-  "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQDfsluOgF7616BbxQSzOXNvGLfXVzE_-WZOWcIW3oPujiBgmHJ0mUpA-FD&s=10",
-  "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQAFqKcJtNruTDoCmD8KVW7ZBhq4tmItcEzaiGnYQY0QA&s=10",
-  "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTFfEJAs4Oomlw-gUD7EJTrGnp9Nkd7_iiOpMuXzHRy8k-9_MSQqJ1QMEs&s=10",
-  "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcScqrTQ9BZdUGLKk3ZKT_uZAiv1KEIJCyeeYzhr8ZhSkg&s=10",
-];
 
 interface AuthModalProps {
   open: boolean;
@@ -33,7 +24,6 @@ interface AuthModalProps {
 type Tab = "login" | "signup";
 
 export default function AuthModal({ open, onClose, onSignupComplete }: AuthModalProps) {
-  useScrollLock(open);
   const [tab, setTab] = useState<Tab>("login");
   const [oauthError, setOauthError] = useState("");
 
@@ -45,8 +35,6 @@ export default function AuthModal({ open, onClose, onSignupComplete }: AuthModal
   const [signupUsername, setSignupUsername] = useState("");
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
-  const [signupAvatar, setSignupAvatar] = useState<string | null>(null);
-  const [signupAvatarError, setSignupAvatarError] = useState(false);
   const [signupError, setSignupError] = useState("");
   const [signupLoading, setSignupLoading] = useState(false);
 
@@ -80,26 +68,19 @@ export default function AuthModal({ open, onClose, onSignupComplete }: AuthModal
     e.preventDefault();
     setSignupError("");
 
-    if (!signupAvatar) {
-      setSignupAvatarError(true);
-      return;
-    }
-    setSignupAvatarError(false);
-
     setSignupLoading(true);
     try {
       const { username, profilePic } = await signupWithEmail(
         signupUsername,
         signupEmail,
         signupPassword,
-        signupAvatar
+        ""
       );
       onClose();
       // Reset form
       setSignupUsername("");
       setSignupEmail("");
       setSignupPassword("");
-      setSignupAvatar(null);
       // Tour fires unconditionally after email signup, same as the
       // original's setTimeout(() => window.__startTour(username,
       // profilePic), 300) right after the signup success path.
@@ -443,54 +424,6 @@ export default function AuthModal({ open, onClose, onSignupComplete }: AuthModal
                   style={inputStyle}
                 />
               </FormField>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <label style={fieldLabelStyle}>
-                  Choose Profile Picture <span style={{ color: "#fca5a5" }}>*</span>
-                </label>
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "row",
-                    gap: 10,
-                    padding: "8px 2px",
-                    overflowX: "auto",
-                    overflowY: "visible",
-                    WebkitOverflowScrolling: "touch",
-                    width: "100%",
-                    boxSizing: "border-box",
-                  }}
-                >
-                  {AVATAR_OPTIONS.map((url) => (
-                    <img
-                      key={url}
-                      src={url}
-                      alt=""
-                      onClick={() => {
-                        setSignupAvatar(url);
-                        setSignupAvatarError(false);
-                      }}
-                      style={{
-                        width: 58,
-                        height: 58,
-                        minWidth: 58,
-                        flexShrink: 0,
-                        borderRadius: "50%",
-                        objectFit: "cover",
-                        cursor: "pointer",
-                        border: signupAvatar === url ? "3px solid #fff" : "3px solid #3f3f46",
-                        boxShadow: signupAvatar === url ? "0 0 0 2px rgba(255,255,255,0.3)" : "none",
-                        transition: "all 0.2s ease",
-                        background: "#1a1a1e",
-                      }}
-                    />
-                  ))}
-                </div>
-                {signupAvatarError && (
-                  <div style={{ color: "#fca5a5", fontSize: "0.78rem", textAlign: "center" }}>
-                    Please select a profile picture to continue.
-                  </div>
-                )}
-              </div>
               <button type="submit" disabled={signupLoading} style={submitButtonStyle}>
                 {signupLoading ? "Please wait…" : "Register Account"}
               </button>
