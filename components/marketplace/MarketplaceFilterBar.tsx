@@ -43,6 +43,7 @@ export default function MarketplaceFilterBar({
   onSearchChange,
   onOpenListing,
   onOpenSeller,
+  autoOpenSearch,
 }: {
   typeFilter: ListingType | "all";
   onTypeChange: (t: ListingType | "all") => void;
@@ -57,6 +58,7 @@ export default function MarketplaceFilterBar({
   onSearchChange: (q: string) => void;
   onOpenListing: (listing: Listing) => void;
   onOpenSeller: (ownerId: string | undefined, listing: Listing) => void;
+  autoOpenSearch?: boolean;
 }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [aiSearchOpen, setAiSearchOpen] = useState(false);
@@ -133,6 +135,7 @@ export default function MarketplaceFilterBar({
             searchQuery={searchQuery}
             onSearchChange={onSearchChange}
             onOpen={onOpenListing}
+            autoOpen={autoOpenSearch}
           />
           <AiSearchButton onClick={() => setAiSearchOpen(true)} />
         </div>
