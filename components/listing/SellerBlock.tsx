@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useSeller } from "@/lib/useSeller";
 import Stars from "@/components/marketplace/Stars";
+import SellerReveals from "@/components/listing/SellerReveals";
 import type { Listing } from "@/lib/listings";
 
 // Ports the seller-row portion of mpOpenModal's `sellerHtml` — avatar,
@@ -12,9 +13,8 @@ import type { Listing } from "@/lib/listings";
 // intentionally does NOT render the trust-badge cluster (sellerBadgesHtml)
 // here; the full badge cluster renders on the seller profile page itself,
 // which fetches the full seller record. The "Seller Reveals" reviews
-// sub-section from the original is a separate scoped follow-up, not
-// included here (Layer B, deferred consistently with the rest of the
-// listing detail page).
+// sub-section is now rendered via the separate SellerReveals component
+// below the seller row, same placement as the original.
 export default function SellerBlock({ listing, accentColor }: { listing: Listing; accentColor: string }) {
   const seller = useSeller(listing.ownerId);
   const router = useRouter();
@@ -73,6 +73,7 @@ export default function SellerBlock({ listing, accentColor }: { listing: Listing
           <path d="M9 18l6-6-6-6" />
         </svg>
       </div>
+      <SellerReveals sellerUid={listing.ownerId} />
     </div>
   );
 }
