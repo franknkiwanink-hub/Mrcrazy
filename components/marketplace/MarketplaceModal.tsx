@@ -94,7 +94,7 @@ export default function MarketplaceModal({
         </svg>
       </button>
       <div style={{ marginTop: -36, paddingTop: 24 }}>
-        <MarketplaceGrid autoOpenSearch />
+        <MarketplaceGrid autoOpenSearch onExitTakeover={onClose} />
       </div>
     </div>,
     document.body
