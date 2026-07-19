@@ -9,22 +9,17 @@ import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 // AuthModalProvider). Same open/username/onFinish contract, plus the
 // avatar/bio/role writes this version needs that the old tour didn't.
 //
-// Ported from the user-provided static HTML/CSS/JS design 1:1 — same 6
-// steps, same copy, same falling-dots finish animation — rebuilt as a
-// controlled React component instead of direct DOM manipulation, and wired
-// into real app state instead of the original's placeholders:
-//   - role (step 2)     -> saved on users/{uid}.role
-//   - username/bio/avatar (step 3) -> users/{uid} directly (bypassing the
+// 5 steps, no image intro screen (removed — it added a slow-loading
+// hero image and a plain-text "Welcome" step before any real content,
+// making the wizard feel like 6+ steps for no functional benefit):
+//   - role (step 1)     -> saved on users/{uid}.role
+//   - username/bio/avatar (step 2) -> users/{uid} directly (bypassing the
 //     avatar cooldown in useProfileData's uploadAvatar, since this is the
 //     user's first-ever avatar, not a change)
-//   - plans (step 5)    -> purely informational, no action (per product
+//   - plans (step 4)    -> purely informational, no action (per product
 //     decision — nothing charged/selected here)
-//   - explore buttons (step 6) -> router.push to real routes instead of
-//     the original's window.__open* placeholder globals
+//   - explore buttons (step 5) -> router.push to real routes
 //   - logout buttons    -> real signOut() instead of an alert() placeholder
-
-const INTRO_IMG =
-  "https://www.image2url.com/r2/default/images/1784113259080-f30b21d2-2f1f-4809-bc2e-580093c7700e.jpg";
 
 type Role = "buyer" | "seller" | "browsing";
 
@@ -37,9 +32,8 @@ export interface OnboardingWizardProps {
 export default function OnboardingWizard({ open, username, onFinish }: OnboardingWizardProps) {
   const router = useRouter();
 
-  const [showIntro, setShowIntro] = useState(true);
   const [step, setStep] = useState(1);
-  const totalSteps = 6;
+  const totalSteps = 5;
 
   const [role, setRole] = useState<Role | null>(null);
   const [profileUsername, setProfileUsername] = useState(username || "Builder");
@@ -54,7 +48,6 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
   // toggling in the original's IIFE.
   useEffect(() => {
     if (open) {
-      setShowIntro(true);
       setStep(1);
       setRole(null);
       setProfileUsername(username || "Builder");
@@ -83,8 +76,8 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
     setAvatarPreview(URL.createObjectURL(file));
   }
 
-  // Persists role + profile (username/bio/avatar) once, when leaving step
-  // 3 into step 4 — not per-keystroke. Avatar upload goes straight to
+  // Persists role + profile (username/bio/avatar) once, when leaving the
+  // profile step — not per-keystroke. Avatar upload goes straight to
   // Imgur + Firestore here (skipping useProfileData's cooldown check,
   // since a first-time upload on a brand-new account isn't a "change").
   async function persistProfileStep() {
@@ -134,8 +127,8 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
   }
 
   async function handleNext() {
-    if (step === 2 && !role) return;
-    if (step === 3) {
+    if (step === 1 && !role) return;
+    if (step === 2) {
       await persistProfileStep();
     }
     if (step < totalSteps) {
@@ -146,35 +139,11 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
   }
 
   const isLast = step === totalSteps;
-  const nextDisabled = (step === 2 && !role) || saving;
+  const nextDisabled = (step === 1 && !role) || saving;
 
   return (
-    <>
-      {showIntro && (
-        <div className="ob-intro">
-          <div className="ob-header-placeholder">
-            <span className="ob-header-logo">siterifty.com</span>
-            <button className="ob-header-logout" onClick={handleLogout}>
-              Logout
-            </button>
-          </div>
-          <div className="ob-intro-image">
-            <img src={INTRO_IMG} alt="Siterifty marketplace" />
-          </div>
-          <div className="ob-intro-bottom">
-            <button className="ob-intro-cta" onClick={() => setShowIntro(false)}>
-              GET STARTED
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14M13 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {!showIntro && (
-        <div className="ob-wizard">
-          <div className="ob-container">
+    <div className="ob-wizard">
+        <div className="ob-container">
             <div className="ob-header-placeholder">
               <span className="ob-header-logo">siterifty.com</span>
               <button className="ob-header-logout" onClick={handleLogout}>
@@ -193,37 +162,6 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
 
             <div className="ob-content-wrapper">
               {step === 1 && (
-                <div className="ob-step active">
-                  <div className="ob-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#a3e635" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5z" />
-                      <path d="M21 4l-1 1" />
-                      <path d="M3 4l1 1" />
-                      <path d="M21 20l-1-1" />
-                      <path d="M3 20l1-1" />
-                    </svg>
-                  </div>
-                  <h1 className="ob-title">
-                    Welcome to <span>siterifty</span>
-                  </h1>
-                  <p className="ob-subtitle">
-                    The indie marketplace for buying and selling websites, apps, and games — with secure escrow protection on every deal.
-                  </p>
-                  <ul className="ob-features">
-                    <li>
-                      <span className="ob-check">✓</span> List your digital products in minutes
-                    </li>
-                    <li>
-                      <span className="ob-check">✓</span> Escrow holds funds until delivery
-                    </li>
-                    <li>
-                      <span className="ob-check">✓</span> Connect with real buyers &amp; sellers
-                    </li>
-                  </ul>
-                </div>
-              )}
-
-              {step === 2 && (
                 <div className="ob-step active">
                   <div className="ob-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="#a3e635" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -282,7 +220,7 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
                 </div>
               )}
 
-              {step === 3 && (
+              {step === 2 && (
                 <div className="ob-step active">
                   <div className="ob-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="#a3e635" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -337,7 +275,7 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
                 </div>
               )}
 
-              {step === 4 && (
+              {step === 3 && (
                 <div className="ob-step active">
                   <div className="ob-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="#a3e635" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -375,7 +313,7 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
                 </div>
               )}
 
-              {step === 5 && (
+              {step === 4 && (
                 <div className="ob-step active">
                   <div className="ob-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="#a3e635" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -416,7 +354,7 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
                 </div>
               )}
 
-              {step === 6 && (
+              {step === 5 && (
                 <div className="ob-step active">
                   <div className="ob-final-dots">
                     {[5, 12, 20, 28, 36, 44, 52, 60, 68, 76, 84, 92, 98].map((x, i) => (
@@ -479,7 +417,5 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
             </div>
           </div>
         </div>
-      )}
-    </>
   );
 }
