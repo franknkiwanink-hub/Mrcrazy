@@ -13,12 +13,6 @@
 
 export const OG_SIZE = { width: 1200, height: 630 };
 
-// Same boot-glyph URL used as the site favicon in app/layout.tsx — the one
-// brand image asset in the project, reused consistently rather than
-// introducing a second one just for OG cards.
-export const BRAND_GLYPH_URL =
-  "https://www.image2url.com/r2/default/images/1783717278670-ca484861-c917-4fdb-b330-a2baf612127e.svg";
-
 export const DEFAULT_ACCENT = "#a3e635"; // --mp-accent in app/globals.css
 
 // A URL from the app's own placehold.co fallback (see WebsiteListingBody.tsx)
@@ -68,10 +62,21 @@ export function OgCard({
       }}
     >
       {/* Wordmark — matches Header.tsx's .brand / .brand span: plain
-          white "Siterifty" + dimmer lime ".com", no gradient. */}
+          white "Siterifty" + dimmer lime ".com", no gradient. The glyph
+          is an inline shape (not a fetched image) since Satori — the
+          renderer next/og uses — unreliably fetches/renders external
+          SVGs, which was silently breaking this card's render
+          entirely. */}
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={BRAND_GLYPH_URL} width={40} height={40} alt="" />
+        <div
+          style={{
+            display: "flex",
+            width: 40,
+            height: 40,
+            borderRadius: 10,
+            background: accent,
+          }}
+        />
         <div style={{ display: "flex", fontSize: 26, fontWeight: 800, letterSpacing: "-0.04em" }}>
           <span style={{ color: "#fff" }}>Siterifty</span>
           <span style={{ color: "rgba(163,230,53,0.55)" }}>.com</span>
