@@ -195,7 +195,9 @@ export default function SellerProfileHeader({
 
   return (
     <>
-      <div id="spModalCover" />
+      <div id="spModalCover">
+        <img src="https://cdn.phototourl.com/member/2026-07-19-60b20514-ac7c-4ae9-b26f-c7d5d71ce0a2.jpg" alt="" />
+      </div>
 
       <div id="spModalMain">
         <div id="spModalAvatarRow">
