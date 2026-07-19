@@ -1,15 +1,25 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { getSellerSeoProfile } from "./getSeller";
+import { getSellerSeoProfile, getSellerFullProfile } from "./getSeller";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
 import SellerProfileClient from "./SellerProfileClient";
 
 // NOTE: this route intentionally never calls notFound() for a missing
 // seller doc — the old client page rendered an inline "Seller not found"
 // message instead of a real 404, and SellerProfileClient still owns that
-// check (it re-fetches via fetchFullSeller on mount). generateMetadata
-// below independently handles the missing/private cases for crawlers so
-// the two don't need to be kept in exact sync.
+// check for the not-found case. generateMetadata below independently
+// handles the missing/private cases for crawlers so the two don't need
+// to be kept in exact sync.
+//
+// SellerProfilePage now also does a full server-side fetch
+// (getSellerFullProfile) so the page body — bio, listings, rating — is
+// present in the initial server-rendered HTML for SEO/crawlers, passed
+// into SellerProfileClient as `initialSeller`. SellerProfileClient still
+// re-fetches fresh client-side on mount (via fetchFullSeller) for the
+// same reason it always has — auth-aware fields like isOwnProfile and
+// "members"-visibility access aren't knowable server-side — so
+// `initialSeller` is only ever the signed-out-safe starting point, not
+// the final source of truth.
 
 export async function generateMetadata({
   params,
@@ -115,5 +125,14 @@ export default async function SellerProfilePage({
     redirect(`/seller/${encodeURIComponent(seller.username)}`);
   }
 
-  return <SellerProfileClient uid={seller ? seller.uid : id} />;
+  // Full profile (bio, listings, socials — already privacy-gated inside
+  // getSellerFullProfile) for SSR content: passed into SellerProfileClient
+  // as its initial state instead of that component starting from `null`
+  // and only getting real content after its own client-side fetch
+  // resolves. Reuses seller.uid (already resolved above) rather than
+  // re-running the doc-id-or-username lookup a second time with a
+  // possibly-different result.
+  const initialSeller = seller ? await getSellerFullProfile(seller.uid) : null;
+
+  return <SellerProfileClient uid={seller ? seller.uid : id} initialSeller={initialSeller} />;
 }
