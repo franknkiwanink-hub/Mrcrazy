@@ -26,6 +26,7 @@ import { AiSupportChatModalProvider } from "@/components/support/AiSupportChatMo
 import { DealPopupProvider } from "@/components/deal/DealPopupProvider";
 import { DisputePickerProvider } from "@/components/dispute/DisputePickerProvider";
 import { ImageLightboxProvider } from "@/components/listing/ImageLightboxProvider";
+import { MarketplaceSearchProvider } from "@/components/marketplace/MarketplaceSearchProvider";
 
 // This project has no dedicated favicon file (confirmed: no public/favicon*
 // and no prior icons/favicon metadata). BootOverlay.tsx already renders this
@@ -180,6 +181,7 @@ export default function RootLayout({
                     AiSupportChatModalProvider. */}
                 <DealPopupProvider>
                 <DisputePickerProvider>
+                  <MarketplaceSearchProvider>
                   <NavDrawerProvider>
                     <Header />
                     <NavDrawerOverlay />
@@ -193,6 +195,7 @@ export default function RootLayout({
                         globally mounted like in the original. */}
                     <HomeMarketplaceOnly />
                   </NavDrawerProvider>
+                  </MarketplaceSearchProvider>
                 </DisputePickerProvider>
                 </DealPopupProvider>
                 </AiSupportChatModalProvider>
