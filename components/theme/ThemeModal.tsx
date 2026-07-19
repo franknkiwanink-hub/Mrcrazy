@@ -4,12 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { applyTheme, persistTheme, type SiteTheme } from "@/components/theme/ThemeModalProvider";
 
 // Theme picker grid contents.
-// Free tier: 3 solid-color swatches (Black, Dark Blue, Dark Purple) —
+// All themes are free solid-color swatches: Black, Dark Blue, Dark Purple.
 // Black is also the app-wide default (see DEFAULT_THEME in
-// ThemeModalProvider). Every image theme is premium (`premium: true`).
-// NOTE: the current 9 image themes are placeholders sourced from
-// Unsplash/Amazon/Pinterest — swap in the final set of premium images
-// here when ready.
+// ThemeModalProvider). No image/premium themes at this time.
 const THEME_OPTIONS: Array<
   | { id: string; type: "image"; label: string; src: string; premium?: boolean }
   | { id: string; type: "color"; label: string; color: string; overlay: string; textmode: string; swatchBg: string; swatchLabelColor: string; premium?: boolean }
@@ -43,90 +40,6 @@ const THEME_OPTIONS: Array<
     textmode: "dark",
     swatchBg: "#1a0b2e",
     swatchLabelColor: "rgba(255,255,255,0.8)",
-  },
-  {
-    id: "minimal",
-    type: "image",
-    label: "Minimal",
-    src: "https://plus.unsplash.com/premium_photo-1673292293042-cafd9c8a3ab3?w=800&auto=format&fit=crop&q=60&ixlib=rb-4.1.0",
-    premium: true,
-  },
-  {
-    id: "noir",
-    type: "image",
-    label: "Noir",
-    src: "https://plus.unsplash.com/premium_photo-1710962184823-907ade6b3783?q=80&w=774&auto=format&fit=crop&ixlib=rb-4.1.0",
-    premium: true,
-  },
-  {
-    id: "shadow",
-    type: "image",
-    label: "Shadow",
-    src: "https://plus.unsplash.com/premium_photo-1710962184909-f9f8dc2c9f5f?q=80&w=774&auto=format&fit=crop&ixlib=rb-4.1.0",
-    premium: true,
-  },
-  {
-    id: "dusk",
-    type: "image",
-    label: "Dusk",
-    src: "https://plus.unsplash.com/premium_photo-1711136314696-b27c2a148d55?q=80&w=774&auto=format&fit=crop&ixlib=rb-4.1.0",
-    premium: true,
-  },
-  {
-    id: "slate",
-    type: "image",
-    label: "Slate",
-    src: "https://images.unsplash.com/photo-1725615357444-6123528686cf?w=800&auto=format&fit=crop&q=60&ixlib=rb-4.1.0",
-    premium: true,
-  },
-  {
-    id: "smoke",
-    type: "image",
-    label: "Smoke",
-    src: "https://plus.unsplash.com/premium_photo-1710965560034-778eedc929ff?q=80&w=830&auto=format&fit=crop&ixlib=rb-4.1.0",
-    premium: true,
-  },
-  {
-    id: "forest",
-    type: "image",
-    label: "Forest",
-    src: "https://plus.unsplash.com/premium_photo-1711434824963-ca894373272e?q=80&w=830&auto=format&fit=crop&ixlib=rb-4.1.0",
-    premium: true,
-  },
-  {
-    id: "nebula",
-    type: "image",
-    label: "Nebula",
-    src: "https://m.media-amazon.com/images/I/81SNLEuNQuL._UF1000,1000_QL80_.jpg",
-    premium: true,
-  },
-  {
-    id: "galaxy",
-    type: "image",
-    label: "Galaxy",
-    src: "https://i.pinimg.com/736x/0e/86/ec/0e86ec1c8b5bcbebcff97fde58530db5.jpg",
-    premium: true,
-  },
-  {
-    id: "moonlit",
-    type: "image",
-    label: "Moonlit",
-    src: "https://images.stockcake.com/public/c/5/3/c530d661-df03-4c21-b8d8-cf471a1e96a7_large/moonlit-lake-beauty-stockcake.jpg",
-    premium: true,
-  },
-  {
-    id: "petals",
-    type: "image",
-    label: "Petals",
-    src: "https://i.pinimg.com/736x/e9/fc/24/e9fc241eebd12836ecc16082d0d09495.jpg",
-    premium: true,
-  },
-  {
-    id: "aurora",
-    type: "image",
-    label: "Aurora",
-    src: "https://cdn.phototourl.com/member/2026-07-19-a7d84752-31b7-497e-aea5-4f01551c285c.jpg",
-    premium: true,
   },
 ];
 
