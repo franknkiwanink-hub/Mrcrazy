@@ -3,13 +3,8 @@
 import { useEffect } from "react";
 
 // Shared full-screen skeleton loader — glass/blurred overlay with shimmer
-// skeleton blocks mirroring the real layout below the header (hero
-// banner, section title, listing grid). The real <Header /> is a fixed,
-// higher-z-index element (see globals.css) and stays visible on top of
-// this overlay rather than being covered by it — this used to draw its
-// own fake nav row and sit above the real header (z-index 9999 vs the
-// header's old 20), which hid the actual header behind a plain dark
-// backdrop on every navigation/feed load. Two call sites:
+// skeleton blocks mirroring the real layout (nav + search + avatar, hero
+// banner, section title, listing grid). Two call sites:
 //   1. app/loading.tsx — Next's route-level loading UI, shown
 //      automatically during server-side navigation/data fetching for any
 //      route that doesn't define its own more specific loading.tsx
@@ -25,22 +20,62 @@ import { useEffect } from "react";
 // peeking through while it scrolled independently of the loader).
 export default function SiteriftyLoader() {
   useEffect(() => {
-    const { style } = document.body;
-    const prevOverflow = style.overflow;
-    const prevPosition = style.position;
-    const prevWidth = style.width;
-    style.overflow = "hidden";
-    style.position = "fixed";
-    style.width = "100%";
+    const { style: bodyStyle } = document.body;
+    const { style: htmlStyle } = document.documentElement;
+    const scrollY = window.scrollY;
+
+    const prev = {
+      bodyOverflow: bodyStyle.overflow,
+      bodyPosition: bodyStyle.position,
+      bodyWidth: bodyStyle.width,
+      bodyTop: bodyStyle.top,
+      bodyHeight: bodyStyle.height,
+      htmlOverflow: htmlStyle.overflow,
+      htmlHeight: htmlStyle.height,
+    };
+
+    // Lock BOTH html and body, and pin body to its current scroll offset
+    // via a negative top — position:fixed alone (with no top set) still
+    // lets some browsers scroll the underlying document, and locking
+    // body without also locking html leaves html free to scroll on its
+    // own. This combination is what makes the lock airtight.
+    htmlStyle.overflow = "hidden";
+    htmlStyle.height = "100%";
+    bodyStyle.overflow = "hidden";
+    bodyStyle.position = "fixed";
+    bodyStyle.width = "100%";
+    bodyStyle.height = "100%";
+    bodyStyle.top = `-${scrollY}px`;
+
     return () => {
-      style.overflow = prevOverflow;
-      style.position = prevPosition;
-      style.width = prevWidth;
+      htmlStyle.overflow = prev.htmlOverflow;
+      htmlStyle.height = prev.htmlHeight;
+      bodyStyle.overflow = prev.bodyOverflow;
+      bodyStyle.position = prev.bodyPosition;
+      bodyStyle.width = prev.bodyWidth;
+      bodyStyle.height = prev.bodyHeight;
+      bodyStyle.top = prev.bodyTop;
+      // Restore the exact scroll position the page was at before the
+      // lock — without this, removing position:fixed snaps the page
+      // back to the top instead of where the user actually was.
+      window.scrollTo(0, scrollY);
     };
   }, []);
 
   return (
     <div id="siterifty-loader">
+      <div className="s-nav">
+        <a href="/" className="brand">
+          <img
+            src="https://cdn.phototourl.com/member/2026-07-19-ffcaa670-d57c-44f6-8415-ab73856860b2.png"
+            alt="Siterifty.com"
+            style={{ height: "1.3rem", display: "block" }}
+          />
+        </a>
+        <div className="skel s-search" />
+        <div className="skel s-avatar" />
+      </div>
+
       <div className="skel s-banner" />
 
       <div className="skel s-title" />
