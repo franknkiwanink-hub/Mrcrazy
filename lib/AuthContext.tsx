@@ -43,6 +43,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Firestore doesn't open its real network channel (the underlying
+  // gRPC/WebSocket connection + auth handshake) until its first actual
+  // read or listener fires — everything before that is just local SDK
+  // setup. For a signed-in user the profile listener below happens to
+  // warm it immediately, but a signed-out visitor (or any session where
+  // the first Firestore touch is deep in some other component — the
+  // marketplace grid, a seller page, the wallet modal) pays that
+  // one-time connection cost on whatever they happen to click first.
+  // Firing one cheap, throwaway read here — as early as possible, tied
+  // to nothing else — means that cost is already paid by the time any
+  // button is clicked, session-wide, regardless of sign-in state.
+  useEffect(() => {
+    getDoc(doc(db, "_warmup", "ping")).catch(() => {
+      /* connection warmup only — result and any error are irrelevant */
+    });
+  }, []);
+
+  // Auth state: replaces window.__authReady / onAuthStateChanged wiring
+  // from firebase-init.js. Fires once on load with the current user (or
+  // null), then again on every login/logout.
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
@@ -51,6 +71,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsub();
   }, []);
 
+  // Profile doc: replaces the getDoc(doc(db,'users',uid)) call inside
+  // __syncUserSession. Using onSnapshot instead of a one-time getDoc so
+  // wallet balance / plan changes (e.g. after a PayPal webhook updates
+  // Firestore) reflect live without a manual refresh.
   useEffect(() => {
     if (!user) {
       setProfile(null);
