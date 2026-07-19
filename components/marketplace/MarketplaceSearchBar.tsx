@@ -8,7 +8,6 @@
 // overlay. AI Search is untouched (matches the original's
 // mpAiSearchBtn/mpAiSearchPanel, unaffected by this change).
 import { useEffect, useState } from "react";
-import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import type { Listing } from "@/lib/listings";
 import SearchOverlay from "@/components/marketplace/SearchOverlay";
 
@@ -17,25 +16,28 @@ export default function MarketplaceSearchBar({
   searchQuery,
   onSearchChange,
   onOpen,
+  autoOpen,
 }: {
   listings: Listing[];
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onOpen: (listing: Listing) => void;
+  autoOpen?: boolean;
 }) {
   const [overlayOpen, setOverlayOpen] = useState(false);
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
 
-  // Opened via BottomNav's global search button (/marketplace?focusSearch=1)
-  // rather than tapping the search bar directly — same overlay either way.
+  // Lets a caller above the marketplace (the hero's search trigger, via
+  // MarketplaceGrid's autoOpenSearch -> MarketplaceFilterBar's
+  // autoOpenSearch) drop the user straight into the full-screen search
+  // overlay the instant this bar mounts, instead of landing on the plain
+  // grid first and requiring a second tap on the search field.
   useEffect(() => {
-    if (searchParams.get("focusSearch") === "1") {
-      setOverlayOpen(true);
-      router.replace(pathname);
-    }
-  }, [searchParams, router, pathname]);
+    if (autoOpen) setOverlayOpen(true);
+    // Only fire on mount / when autoOpen flips true — this shouldn't
+    // reopen the overlay every time it's closed while autoOpen is still
+    // (correctly) true for the lifetime of this mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen]);
 
   return (
     <div className="mp-search-wrap">
