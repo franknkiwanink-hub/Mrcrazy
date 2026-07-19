@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/lib/AuthContext";
 import { useConfirm } from "@/lib/useConfirm";
 import {
@@ -584,9 +585,9 @@ function ItemBar({ room }: { room: { listingTitle: string; listingImage: string;
         <div id="dcpItemPrice">{price}</div>
       </div>
       {room.listingId ? (
-        <a id="dcpViewListingBtn" href={`/listing/${buildListingSlug(room.listingTitle, room.listingId)}`} target="_blank" rel="noopener noreferrer">
+        <Link id="dcpViewListingBtn" href={`/listing/${buildListingSlug(room.listingTitle, room.listingId)}`} target="_blank" rel="noopener noreferrer">
           View Listing
-        </a>
+        </Link>
       ) : null}
     </div>
   );
