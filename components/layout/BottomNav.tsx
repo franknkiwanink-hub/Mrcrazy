@@ -1,20 +1,14 @@
 "use client";
 
-import { useRouter, usePathname } from "next/navigation";
+import { useMarketplaceSearch } from "@/components/marketplace/MarketplaceSearchProvider";
 
 export default function BottomNav() {
-  const router = useRouter();
-  const pathname = usePathname();
+  const { openSearch } = useMarketplaceSearch();
 
   return (
     <nav className="fnav" id="fnav">
       <div className="fnav-pill">
-        <button
-          className="fnav-btn"
-          id="fnavSell"
-          aria-label="Sell Now"
-          onClick={() => router.push("/sell")}
-        >
+        <button className="fnav-btn" id="fnavSell" aria-label="Sell Now">
           <svg
             className="fnav-icon"
             viewBox="0 0 24 24"
@@ -28,12 +22,7 @@ export default function BottomNav() {
           </svg>
           <span className="fnav-label">Sell Now</span>
         </button>
-        <button
-          className={`fnav-btn${pathname === "/marketplace" ? " fnav-active" : ""}`}
-          id="fnavMarket"
-          aria-label="Marketplace"
-          onClick={() => router.push("/marketplace")}
-        >
+        <button className="fnav-btn fnav-active" id="fnavMarket" aria-label="Marketplace">
           <svg
             className="fnav-icon"
             viewBox="0 0 24 24"
@@ -49,12 +38,7 @@ export default function BottomNav() {
           </svg>
           <span className="fnav-label">Marketplace</span>
         </button>
-        <button
-          className="fnav-btn"
-          id="fnavSellers"
-          aria-label="Sellers"
-          onClick={() => router.push("/sellers")}
-        >
+        <button className="fnav-btn" id="fnavSellers" aria-label="Sellers">
           <svg
             className="fnav-icon"
             viewBox="0 0 24 24"
@@ -75,12 +59,7 @@ export default function BottomNav() {
           <span className="fnav-label">Sellers</span>
         </button>
       </div>
-      <button
-        className="fnav-search"
-        id="fnavSearch"
-        aria-label="Search"
-        onClick={() => router.push("/marketplace?focusSearch=1")}
-      >
+      <button className="fnav-search" id="fnavSearch" aria-label="Search" onClick={openSearch}>
         <svg
           viewBox="0 0 24 24"
           fill="none"
