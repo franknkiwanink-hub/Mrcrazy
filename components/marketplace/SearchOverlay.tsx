@@ -41,6 +41,22 @@ const TYPE_COLOR: Record<string, string> = {
   game: "#f59e0b",
 };
 
+// Mirrors the same per-type image precedence SiteCard/AppCard/GameCard
+// already use for their thumbnails (see those components), so a search
+// result shows the same picture the listing's own card would — just a
+// small square crop instead of the full card image.
+const PLACEHOLDER_THUMB = "https://placehold.co/120x120/0d0d14/444?text=%20";
+function resultThumb(listing: Listing): string {
+  const type = listing.type || "website";
+  if (type === "app") {
+    return listing.appIcon || listing.images?.[0] || listing.imageCover || PLACEHOLDER_THUMB;
+  }
+  if (type === "game") {
+    return listing.images?.[2] || listing.imageCover || listing.images?.[0] || PLACEHOLDER_THUMB;
+  }
+  return listing.images?.[2] || listing.imageCover || listing.images?.[0] || PLACEHOLDER_THUMB;
+}
+
 export default function SearchOverlay({
   open,
   listings,
@@ -236,6 +252,7 @@ export default function SearchOverlay({
               const price = m.listing.financials?.price;
               const priceStr = typeof price === "number" ? `$${price.toLocaleString()}` : "—";
               const tc = TYPE_COLOR[m.type] || "#34d399";
+              const thumb = resultThumb(m.listing);
               return (
                 <button
                   key={m.listing.id}
@@ -246,7 +263,18 @@ export default function SearchOverlay({
                     handleClose();
                   }}
                 >
-                  <span className="mp-so-result-dot" style={{ background: tc }} />
+                  <span className="mp-so-result-thumb-wrap">
+                    <img
+                      className="mp-so-result-thumb"
+                      src={thumb}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => {
+                        e.currentTarget.src = PLACEHOLDER_THUMB;
+                      }}
+                    />
+                    <span className="mp-so-result-dot" style={{ background: tc }} />
+                  </span>
                   <span className="mp-so-row-text">
                     <span className="mp-so-result-title">{highlight(m.title, q)}</span>
                     <span className="mp-so-result-sub">{m.type}</span>
