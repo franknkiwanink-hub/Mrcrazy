@@ -23,14 +23,6 @@ import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 //     the original's window.__open* placeholder globals
 //   - logout buttons    -> real signOut() instead of an alert() placeholder
 
-const AVATAR_OPTIONS = [
-  "https://i.pinimg.com/736x/8d/c1/be/8dc1be45b32f2d6efebea0ec78e6b036.jpg",
-  "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQDfsluOgF7616BbxQSzOXNvGLfXVzE_-WZOWcIW3oPujiBgmHJ0mUpA-FD&s=10",
-  "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQAFqKcJtNruTDoCmD8KVW7ZBhq4tmItcEzaiGnYQY0QA&s=10",
-  "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTFfEJAs4Oomlw-gUD7EJTrGnp9Nkd7_iiOpMuXzHRy8k-9_MSQqJ1QMEs&s=10",
-  "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcScqrTQ9BZdUGLKk3ZKT_uZAiv1KEIJCyeeYzhr8ZhSkg&s=10",
-];
-
 const INTRO_IMG =
   "https://www.image2url.com/r2/default/images/1784113259080-f30b21d2-2f1f-4809-bc2e-580093c7700e.jpg";
 
