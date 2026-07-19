@@ -17,6 +17,8 @@ export interface SellerReview {
   stars: number;
   review: string;
   updatedAt: Date | null;
+  helpfulCount: number;
+  notHelpfulCount: number;
 }
 
 interface ReviewsState {
@@ -64,6 +66,8 @@ export function useSellerReviews(sellerUid: string | undefined): ReviewsState {
             stars: Math.max(0, Math.min(5, Math.round(rev.stars || 0))),
             review: rev.review || "",
             updatedAt,
+            helpfulCount: Math.max(0, rev.helpfulCount || 0),
+            notHelpfulCount: Math.max(0, rev.notHelpfulCount || 0),
           };
         });
         setReviews(rows);
