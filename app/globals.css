@@ -3064,6 +3064,7 @@
                .mp-grid {
                display: grid;
                grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+               grid-auto-flow: dense;
                gap: 14px;
                row-gap: 20px;
                max-width: 1200px;
@@ -3100,12 +3101,17 @@
                  .mp-boosted-grid { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
                }
                /* ── Native ad slots — inserted every N listings by
-                  mpRenderCards. Full-width, own rounded/curved frame so the
-                  ad network's default iframe styling never touches the
-                  page's own design; the iframe itself supplies isolated
-                  atOptions scope per slot (see mpBuildAdCard). ── */
+                  mpRenderCards. Sits in a single grid cell (own
+                  rounded/curved frame so the ad network's default iframe
+                  styling never touches the page's own design; the iframe
+                  itself supplies isolated atOptions scope per slot — see
+                  mpBuildAdCard). Deliberately NOT grid-column:1/-1 — on a
+                  multi-column desktop grid a full-width ad forces an early
+                  row break and strands the remaining cells in that row
+                  empty, since ad cadence is based on a raw listing count,
+                  not on how many columns actually fit. A single-cell ad
+                  just flows into the grid like any other card. ── */
                .sr-ad-slot {
-               grid-column: 1 / -1;
                display: flex; align-items: center; justify-content: center;
                background: var(--sr-surface, #0d0d12);
                border: 1px solid var(--sr-line, rgba(255,255,255,0.08));
@@ -3233,7 +3239,6 @@
                   (not --mp-accent lime) since this card was supplied
                   pre-themed and distinct from the seller-promo card. ── */
                .sr-ai-promo {
-               grid-column: 1 / -1;
                max-width: 380px;
                margin: 0 auto;
                background: #0a0a0f;
@@ -3996,6 +4001,33 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
                .reveal-star { color: rgba(255,255,255,.18); display: inline-flex; }
                .reveal-star.filled { color: #f5b93f; }
 
+               /* ── Desktop scaling for the listing detail view ──
+                  Everything above (.modal-hero, .modal-gallery,
+                  .modal-content, .modal-tech-grid, .modal-financials,
+                  .modal-settings-grid) had no breakpoint above mobile at
+                  all, so on a wide viewport the page body was centered
+                  (see app/listing/[id]/page.tsx's maxWidth:760 wrapper)
+                  but the content inside never grew past its small fixed
+                  phone proportions — same font sizes, same 2-up grids,
+                  same tight padding. This gives it real desktop sizing
+                  without touching anything below 900px. */
+               @media (min-width: 900px) {
+                 .modal-hero-title { font-size: 26px; }
+                 .modal-hero-overlay { padding: 24px; }
+                 .modal-content { padding: 32px 8px; }
+                 .modal-title { font-size: 26px; }
+                 .modal-desc { font-size: 15px; }
+                 .modal-gallery { padding: 16px 8px; gap: 12px; }
+                 .modal-gallery-shot { width: 180px; }
+                 .modal-gallery-shot.portrait { width: 180px; }
+                 .modal-gallery-shot.wide { width: 280px; }
+                 .modal-tech-grid,
+                 .modal-financials,
+                 .modal-settings-grid {
+                   grid-template-columns: repeat(3, 1fr);
+                 }
+               }
+
                /* ═══════════════════════════════════════════════════════
                   AD / "PREPARING…" COUNTDOWN OVERLAY (#mpAdOverlay)
                   Shown before opening an external link/preview/game on
@@ -4674,6 +4706,36 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
                cursor: pointer; color: rgba(255,255,255,.55); transition: all .18s;
                }
                #walletModalClose:hover { background: rgba(255,255,255,.12); color: #fff; }
+               /* ── Desktop: the mobile version above is a genuine
+                  full-bleed sheet (#walletModal fixed/inset:0,
+                  #walletModalInner width/height:100%) with no upper
+                  size cap, so on a wide viewport it was just that same
+                  sheet stretched edge-to-edge instead of behaving like a
+                  dialog. This turns it into a proper centered card with
+                  a dimmed backdrop once there's room for one; nothing
+                  above this changes for phone widths. ── */
+               @media (min-width: 768px) {
+                 #walletModal {
+                   background: rgba(5,5,8,0.7);
+                   backdrop-filter: blur(3px);
+                   -webkit-backdrop-filter: blur(3px);
+                   align-items: center;
+                   justify-content: center;
+                   padding: 32px;
+                 }
+                 #walletModalInner {
+                   width: 100%;
+                   max-width: 640px;
+                   height: auto;
+                   max-height: calc(100vh - 64px);
+                   border-radius: 22px;
+                   border: 1px solid rgba(255,255,255,.08);
+                   box-shadow: 0 30px 90px rgba(0,0,0,.55);
+                   overflow: hidden;
+                 }
+                 #walletModalHeader { padding-top: 16px; border-radius: 22px 22px 0 0; }
+                 #walletModalBody { padding-bottom: 40px; }
+               }
                #walletModalBody {
                flex: 1; overflow-y: auto;
                padding: 20px 18px calc(48px + env(safe-area-inset-bottom));
@@ -5396,6 +5458,18 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
                display: flex; flex-direction: column;
                position: relative;
                }
+               /* ── Desktop: the card above already caps at 800px, but the
+                  shell it sits in has no backdrop/margin, so on a wide
+                  viewport it was a full-bleed black page with the card
+                  pinned to the top and a close button anchored to the true
+                  viewport corner rather than the card — reads as a leftover
+                  mobile sheet, not a dialog. This adds a dimmed backdrop and
+                  breathing room around the card once there's space for it. ── */
+               @media (min-width: 900px) {
+                 #spModal { background: rgba(5,5,8,0.7); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); padding: 40px 20px; }
+                 #spModalInner { min-height: 0; max-height: calc(100vh - 80px); border-radius: 20px; overflow-y: auto; box-shadow: 0 30px 90px rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.08); }
+                 #spModalClose { position: absolute; top: 1.25rem; right: 1.25rem; }
+               }
                #spModalClose {
                position: fixed; top: 1.25rem; right: 1.25rem; z-index: 10;
                width: 38px; height: 38px; border-radius: 50%;
@@ -6015,6 +6089,18 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
             .svm-user-name { font-size:0.95rem; }
             .svm-user-handle { font-size:0.78rem; }
             .svm-follow-btn { padding:0.4rem 0.9rem; font-size:0.78rem; }
+         }
+         /* ── Desktop widening ──
+            .svm-feed-container was capped at max-width:720px forever and
+            .svm-profiles-grid was hardcoded to exactly 2 columns with no
+            larger breakpoint, so on a wide viewport the whole directory
+            rendered as a narrow 2-column phone layout floating in a sea
+            of empty space either side. This lets both grow with the
+            viewport instead. */
+         @media (min-width: 900px) {
+            .svm-feed-container { max-width: 1100px; }
+            .svm-profiles-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+            .svm-empty-message { grid-column: 1 / -1; }
          }
 
 /* ── extracted style block 3 (originally around char offset 867654) ── */
@@ -7276,6 +7362,27 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
     .pm-modal-content { padding: 1.5rem 1.1rem 2rem; }
     .pm-parent-tab { font-size: 0.78rem; }
     .pm-listing-image { height: 84px; }
+  }
+
+  /* ── Desktop widening ──
+     .pm-parent-content/.pm-quick-row were hard-capped at max-width:440px
+     (a phone-width single column) with no larger breakpoint, so on a wide
+     viewport the modal was centered but its actual content never grew
+     past phone width. .pm-listings-grid was also permanently 1 column.
+     This gives the modal real desktop proportions without changing
+     anything below 900px. */
+  @media (min-width: 900px) {
+    .pm-quick-row,
+    .pm-parent-content {
+      max-width: 720px;
+    }
+    .pm-modal-content {
+      padding: 2.25rem 2rem 3rem;
+    }
+    .pm-listings-grid {
+      max-width: 720px;
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
 
 /* ── extracted style block 5 (originally around char offset 938229) ── */
