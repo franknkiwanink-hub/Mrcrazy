@@ -68,6 +68,27 @@ export default function NavDrawer() {
     router.push(path);
   }
 
+  // router.push() never prefetches a route's JS chunk on its own the way
+  // next/link does (next/link prefetches once the link scrolls into
+  // view) — every one of this drawer's links uses go()/router.push(),
+  // so without this, each first click pays a full cold fetch-and-parse
+  // of that route's chunk with nothing on screen in the meantime. Warm
+  // the core destinations once, right away, so by the time anyone
+  // actually taps a link the chunk is already cached and the
+  // navigation is instant.
+  useEffect(() => {
+    const routes = [
+      "/myprofile",
+      "/sell",
+      "/marketplace",
+      "/dashboard",
+      "/settings",
+      "/sellers",
+    ];
+    routes.forEach((r) => router.prefetch(r));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const planName = profile?.plan || "free";
   const isPaidPlan = planName !== "free";
 
