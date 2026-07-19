@@ -213,6 +213,37 @@ export function useProfileData() {
     const emailChanged = newContactEmail !== profile.contactEmail;
     if (!usernameChanged && !emailChanged) return;
 
+    // Server is the source of truth for both cooldowns — always ask
+    // before writing, same pattern uploadAvatar already uses for
+    // check-profilepic-change below.
+    const idToken = await user.getIdToken();
+    if (usernameChanged) {
+      const checkRes = await fetch("/api/limits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check-username-change", idToken }),
+      });
+      const checkJson = await checkRes.json().catch(() => ({}));
+      if (!checkRes.ok) throw new Error(checkJson.error || "Couldn't check your username cooldown — try again.");
+      if (!checkJson.allowed) {
+        const d = checkJson.daysLeft;
+        throw new Error(`You can change your username again in ${d} day${d !== 1 ? "s" : ""}.`);
+      }
+    }
+    if (emailChanged) {
+      const checkRes = await fetch("/api/limits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check-email-change", idToken }),
+      });
+      const checkJson = await checkRes.json().catch(() => ({}));
+      if (!checkRes.ok) throw new Error(checkJson.error || "Couldn't check your email change limit — try again.");
+      if (!checkJson.allowed) {
+        const d = checkJson.daysLeft;
+        throw new Error(`You've used all your contact email changes for this period. Try again in ${d} day${d !== 1 ? "s" : ""}.`);
+      }
+    }
+
     const updates: Record<string, unknown> = {};
     if (usernameChanged) {
       const lower = newUsername.toLowerCase().replace(/\s+/g, "_");
