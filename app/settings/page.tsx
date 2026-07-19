@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 import SettingsSidebar, { type SettingsPanelId } from "@/components/settings/SettingsSidebar";
 import { useSettingsState } from "@/lib/useSettingsState";
 import AccountPanel from "@/components/settings/panels/AccountPanel";
@@ -160,7 +161,7 @@ function SettingsPageInner() {
 
 export default function SettingsPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<SiteriftyLoader />}>
       <SettingsPageInner />
     </Suspense>
   );
