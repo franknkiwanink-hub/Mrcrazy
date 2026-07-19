@@ -59,6 +59,14 @@ export default function Header() {
   const label = isLoggedIn ? "Profile" : "Sign Up";
   const avatarInitial = (profile?.username || "U").charAt(0).toUpperCase();
 
+  // Header is mounted on every page and its avatar/profile button always
+  // navigates via router.push (never next/link), which doesn't
+  // auto-prefetch — warm the chunk once on mount so the click is instant
+  // instead of triggering a cold fetch with nothing on screen meanwhile.
+  useEffect(() => {
+    router.prefetch("/myprofile");
+  }, [router]);
+
   return (
     <header>
       <div className="left">
