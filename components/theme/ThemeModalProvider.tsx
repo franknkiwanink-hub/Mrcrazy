@@ -17,6 +17,14 @@ export interface SiteTheme {
 
 const STORAGE_KEY = "siterifty_theme";
 
+export const DEFAULT_THEME: SiteTheme = {
+  id: "color-black",
+  type: "color",
+  color: "#000000",
+  overlay: "rgba(0,0,0,0)",
+  textmode: "dark",
+};
+
 // Ports __applyTheme from auth-modal.js: writes the CSS custom properties
 // #appThemeBg / body.theme-active read, exactly matching the original's
 // color-vs-gradient-vs-image branches.
@@ -92,11 +100,16 @@ export function ThemeModalProvider({ children }: { children: ReactNode }) {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed) applyTheme(parsed);
+        if (parsed) {
+          applyTheme(parsed);
+          return;
+        }
       }
     } catch {
       // ignore corrupted storage
     }
+    // No saved theme yet — default to Black.
+    applyTheme(DEFAULT_THEME);
   }, []);
 
   const plan = profile?.plan || "free";
