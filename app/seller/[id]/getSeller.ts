@@ -16,8 +16,8 @@
 // real bio, stats, or listing count into a <meta> tag just because a
 // crawler doesn't go through the client visibility check.
 
-import { cache } from "react";
 import { getAdminDb } from "@/lib/server/adminDb";
+import type { FullSeller, SellerListing } from "@/lib/useSeller";
 
 export interface SellerSeoProfile {
   uid: string;
@@ -46,9 +46,7 @@ export interface SellerSeoProfile {
 // Firestore auto-ids and usernames can never collide in practice (ids are
 // long random base62 strings; usernames are capped short human text), so
 // there's no ambiguity between the two lookup paths.
-export const getSellerSeoProfile = cache(async function getSellerSeoProfile(
-  segment: string
-): Promise<SellerSeoProfile | null> {
+export async function getSellerSeoProfile(segment: string): Promise<SellerSeoProfile | null> {
   if (!segment) return null;
   const db = getAdminDb();
 
@@ -114,4 +112,130 @@ export const getSellerSeoProfile = cache(async function getSellerSeoProfile(
     followerCount,
     joinedAt,
   };
-});
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FULL SELLER PROFILE (server-side) — Admin SDK mirror of
+// lib/useSeller.ts's fetchFullSeller, used so the actual page body
+// (bio, listings grid, rating, avatar) is present in the server-rendered
+// HTML for SEO/crawlers, not only fetched client-side after mount.
+//
+// Deliberately kept as its own function rather than replacing
+// getSellerSeoProfile above: that one is cheap (two count() aggregations,
+// no listing docs) and is all generateMetadata needs. This one fetches
+// the actual listing docs (capped 20, mirroring fetchFullSeller) because
+// the page body needs to render seller listing cards, not just a count.
+// Both stay in sync manually since they read the same user doc shape —
+// same tradeoff already accepted for getSellerSeoProfile vs
+// fetchFullSeller per the file-level comment above.
+//
+// PRIVACY: same profileVisibility/showBio/showEmail/showSocial gates as
+// generateMetadata and the client page's own visibility checks. A
+// private or members-only profile must never have its real bio/listings/
+// contact fields land in server-rendered HTML for a signed-out crawler —
+// this returns a minimal, already-gated shape, not the raw doc, so
+// SellerProfileClient can render it directly without re-deriving the
+// privacy rules a second time.
+// ═══════════════════════════════════════════════════════════════════
+
+export async function getSellerFullProfile(segment: string): Promise<FullSeller | null> {
+  if (!segment) return null;
+  const db = getAdminDb();
+
+  let snap = await db.collection("users").doc(segment).get();
+  if (!snap.exists) {
+    const lower = segment.toLowerCase();
+    const q = await db.collection("users").where("usernameLower", "==", lower).limit(1).get();
+    if (q.empty) return null;
+    snap = q.docs[0];
+  }
+  const uid = snap.id;
+  const d = snap.data() || {};
+
+  let sellerListings: SellerListing[] = [];
+  try {
+    const lq = await db
+      .collection("listings")
+      .where("ownerId", "==", uid)
+      .where("status", "==", "active")
+      .limit(40)
+      .get();
+    lq.forEach((ld) => sellerListings.push({ id: ld.id, ...(ld.data() as any) }));
+    sellerListings.sort((a: any, b: any) => {
+      const toMillis = (v: any) => (v?.toDate ? v.toDate().getTime() : v ? new Date(v).getTime() : 0);
+      return toMillis(b.createdAt) - toMillis(a.createdAt);
+    });
+    sellerListings = sellerListings.slice(0, 20);
+  } catch (err) {
+    console.error("[getSellerFullProfile] failed to load seller listings for", uid, err);
+  }
+
+  let followerCount = 0;
+  try {
+    const followerSnap = await db.collection("users").doc(uid).collection("followers").count().get();
+    followerCount = followerSnap.data().count;
+  } catch (err) {
+    console.error("[getSellerFullProfile] follower count failed for", uid, err);
+  }
+
+  // Same field the client's fetchFullSeller reads first, same fallback
+  // to a get-seller-stats-style aggregation for sellers who predate it —
+  // done here via a direct Admin-SDK query against the same
+  // users/{uid}/deals subcollection app/api/deal/_handler.js's
+  // handleGetSellerStats reads (status === 'complete'), instead of a
+  // server component calling its own app's API route over HTTP.
+  let dealsCompleted = typeof d.dealsCompleted === "number" ? d.dealsCompleted : null;
+  if (dealsCompleted === null) {
+    try {
+      const dealsSnap = await db.collection("users").doc(uid).collection("deals").where("status", "==", "complete").count().get();
+      dealsCompleted = dealsSnap.data().count;
+    } catch (err) {
+      console.error("[getSellerFullProfile] deals-completed count failed for", uid, err);
+      dealsCompleted = 0;
+    }
+  }
+
+  const joinedAt: Date | null = d.createdAt
+    ? d.createdAt.toDate
+      ? d.createdAt.toDate()
+      : new Date(d.createdAt)
+    : null;
+
+  const profileVisibility = d.profileVisibility || "public";
+  const showBio = d.showBio !== false;
+  const showEmail = d.showEmail === true;
+  const showSocial = d.showSocial !== false;
+
+  // Gate at the source: a private/members profile's bio and contact
+  // fields never enter the returned object at all for a signed-out
+  // render, rather than relying on every consumer to re-check
+  // profileVisibility before displaying them. isOwnProfile/signed-in
+  // "members" access still works normally — that re-fetches fresh via
+  // fetchFullSeller client-side once auth state is known (see
+  // SellerProfileClient), same as it always has; this server-rendered
+  // version is only ever the signed-out-safe baseline.
+  const isPubliclyVisible = profileVisibility === "public";
+
+  return {
+    uid,
+    username: d.username || d.displayName || d.email?.split("@")[0] || "Anonymous",
+    profilePic: d.profilePic || "",
+    plan: d.plan || "free",
+    rating: typeof d.rating === "number" ? d.rating : 0,
+    ratingCount: typeof d.ratingCount === "number" ? d.ratingCount : 0,
+    bio: isPubliclyVisible && showBio ? d.bio || "" : "",
+    contactEmail: isPubliclyVisible && showEmail ? d.contactEmail || "" : "",
+    website: isPubliclyVisible && showSocial ? d.website || d.websiteUrl || "" : "",
+    twitter: isPubliclyVisible && showSocial ? d.twitter || d.twitterUrl || "" : "",
+    github: isPubliclyVisible && showSocial ? d.github || d.githubUrl || "" : "",
+    linkedin: isPubliclyVisible && showSocial ? d.linkedin || d.linkedinUrl || "" : "",
+    joinedAt,
+    listings: isPubliclyVisible ? sellerListings : [],
+    followerCount,
+    dealsCompleted: dealsCompleted || 0,
+    profileVisibility,
+    showEmail,
+    showBio,
+    showSocial,
+  };
+}
