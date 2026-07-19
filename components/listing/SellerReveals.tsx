@@ -1,6 +1,7 @@
 "use client";
 
 import { useSellerReviews, formatReviewTime } from "@/lib/useSellerReviews";
+import ReviewHelpfulVote from "@/components/listing/ReviewHelpfulVote";
 
 // Ports the "modal-reveals-section" block from mpOpenModal's sellerHtml
 // (index.html lines 1753-1762, populated by the reviews-loading block at
@@ -81,6 +82,14 @@ export default function SellerReveals({ sellerUid }: { sellerUid: string | undef
                     ))}
                   </div>
                   {rev.review ? <div className="reveal-msg">{rev.review}</div> : null}
+                  {sellerUid && (
+                    <ReviewHelpfulVote
+                      sellerUid={sellerUid}
+                      reviewId={rev.id}
+                      helpfulCount={rev.helpfulCount}
+                      notHelpfulCount={rev.notHelpfulCount}
+                    />
+                  )}
                 </div>
               </div>
             );
