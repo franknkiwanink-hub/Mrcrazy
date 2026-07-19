@@ -7,9 +7,6 @@ import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useNavDrawer } from "@/components/layout/NavDrawerProvider";
 import { useWalletModal } from "@/components/wallet/WalletModalProvider";
 
-const DEFAULT_AVATAR =
-  "https://i.pinimg.com/736x/8d/c1/be/8dc1be45b32f2d6efebea0ec78e6b036.jpg";
-
 // Ports the hamburger icon's idle line-shuffle from announcement-settings.js
 // (index.html lines 30-41) — the 3 bars quietly cycle through 6 fixed-width
 // permutations every 3-5s so the icon never looks perfectly static.
@@ -60,7 +57,7 @@ export default function Header() {
 
   const isLoggedIn = !!user;
   const label = isLoggedIn ? "Profile" : "Sign up / Log in";
-  const avatarSrc = profile?.profilePic || DEFAULT_AVATAR;
+  const avatarInitial = (profile?.username || "U").charAt(0).toUpperCase();
 
   return (
     <header>
@@ -134,20 +131,45 @@ export default function Header() {
           }}
         >
           {isLoggedIn && (
-            <img
-              src={avatarSrc}
-              alt=""
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: "50%",
-                objectFit: "cover",
-                flexShrink: 0,
-              }}
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
-              }}
-            />
+            profile?.profilePic ? (
+              <img
+                src={profile.profilePic}
+                alt=""
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: "50%",
+                  objectFit: "cover",
+                  flexShrink: 0,
+                }}
+                onError={(e) => {
+                  const el = e.currentTarget;
+                  const span = document.createElement("span");
+                  span.textContent = avatarInitial;
+                  span.style.cssText =
+                    "width:26px;height:26px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.12);color:#fff;font-size:12px;font-weight:700;";
+                  el.replaceWith(span);
+                }}
+              />
+            ) : (
+              <span
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "rgba(255,255,255,0.12)",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                {avatarInitial}
+              </span>
+            )
           )}
           <span
             style={{
