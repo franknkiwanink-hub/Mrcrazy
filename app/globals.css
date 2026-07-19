@@ -292,6 +292,13 @@
          }
          @keyframes shimmer { 0% { left: -60%; } 100% { left: 115%; } }
          .btn-login:hover { background: rgba(255,255,255,0.1); color: #fff; }
+         .btn-signup {
+         background: linear-gradient(135deg, #baff39 0%, #7ee84a 100%);
+         border: none; color: #0a0a0a; font-weight: 700; padding: 8px 18px;
+         box-shadow: 0 2px 10px rgba(163,230,53,0.35);
+         }
+         .btn-signup::after { display: none; }
+         .btn-signup:hover { background: linear-gradient(135deg, #c6ff5c 0%, #8bf05e 100%); color: #0a0a0a; box-shadow: 0 2px 14px rgba(163,230,53,0.5); }
          /* ── ANNOUNCEMENT BAR ── */
          #announcement-bar {
          position: fixed; top: 52px; left: 0; right: 0;
