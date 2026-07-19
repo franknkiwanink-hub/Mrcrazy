@@ -47,7 +47,7 @@
          /* ── HEADER ── */
          header {
          position: fixed; top: 0; left: 0; right: 0;
-         z-index: 10000; height: 52px;
+         z-index: 9990; height: 52px;
          display: flex; align-items: center; justify-content: space-between;
          padding: 0 20px;
          background: rgba(0,0,0,0.55);
@@ -11105,7 +11105,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
          display: none; opacity: 0; transition: opacity 0.25s ease;
          font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
       }
-      #editListingOverlay.visible { opacity: 1; }
+      #editListingOverlay.visible { display: block; opacity: 1; }
       #editListingPanel {
          position: absolute; inset: 0;
          display: flex; flex-direction: column;
