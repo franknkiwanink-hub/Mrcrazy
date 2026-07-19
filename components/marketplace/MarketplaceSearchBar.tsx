@@ -17,12 +17,14 @@ export default function MarketplaceSearchBar({
   onSearchChange,
   onOpen,
   autoOpen,
+  onExitTakeover,
 }: {
   listings: Listing[];
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onOpen: (listing: Listing) => void;
   autoOpen?: boolean;
+  onExitTakeover?: () => void;
 }) {
   const [overlayOpen, setOverlayOpen] = useState(false);
 
@@ -75,6 +77,9 @@ export default function MarketplaceSearchBar({
         listings={listings}
         initialQuery={searchQuery}
         onClose={() => setOverlayOpen(false)}
+        onCancel={() => {
+          if (autoOpen) onExitTakeover?.();
+        }}
         onSearchChange={onSearchChange}
         onOpenListing={onOpen}
       />
