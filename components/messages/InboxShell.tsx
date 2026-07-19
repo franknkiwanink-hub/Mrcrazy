@@ -135,8 +135,8 @@ export default function InboxShell() {
   const totalUnread = inbox.chatsUnread + inbox.dealsUnread;
 
   return (
-    <div style={{ marginTop: 92, minHeight: "calc(100vh - 92px)", background: "#080808", display: "flex", justifyContent: "center" }}>
-      <div className="ibx-box" style={{ height: "calc(100vh - 92px)" }}>
+    <div style={{ marginTop: 92, minHeight: "calc(100dvh - 92px)", background: "#080808", display: "flex", justifyContent: "center" }}>
+      <div className="ibx-box" style={{ height: "calc(100dvh - 92px)" }}>
         <div className="ibx-header">
           <div className="ibx-header-left">
             <button className="ibx-back-btn" onClick={() => router.push("/myprofile")} aria-label="Back">
