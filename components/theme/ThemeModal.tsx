@@ -119,6 +119,17 @@ export default function ThemeModal({
     };
   }, []);
 
+  // Lock background scroll while the modal is up — the page underneath
+  // shouldn't scroll behind this overlay (same pattern as SearchOverlay).
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
   function showUpgradeNudge() {
     setNudge(true);
     nudgeTimers.current.forEach(clearTimeout);
