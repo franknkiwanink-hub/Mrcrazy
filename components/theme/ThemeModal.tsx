@@ -2,22 +2,54 @@
 
 import { useEffect, useRef, useState } from "react";
 import { applyTheme, persistTheme, type SiteTheme } from "@/components/theme/ThemeModalProvider";
-import { useScrollLock } from "@/lib/useScrollLock";
 
-// Ports the THEME PICKER MODAL's `.theme-grid` contents 1:1 from
-// index.html (11 image themes + 1 color swatch, in source order).
-// Free tier: only "minimal" (image) and "color-black" (swatch) are
-// unlocked; every other option carries data-premium="true" in the
-// original — same list is mirrored here via `premium: true`.
+// Theme picker grid contents.
+// Free tier: 3 solid-color swatches (Black, Dark Blue, Dark Purple) —
+// Black is also the app-wide default (see DEFAULT_THEME in
+// ThemeModalProvider). Every image theme is premium (`premium: true`).
+// NOTE: the current 9 image themes are placeholders sourced from
+// Unsplash/Amazon/Pinterest — swap in the final set of premium images
+// here when ready.
 const THEME_OPTIONS: Array<
   | { id: string; type: "image"; label: string; src: string; premium?: boolean }
-  | { id: string; type: "color"; label: string; color: string; overlay: string; textmode: string; swatchBg: string; swatchLabelColor: string }
+  | { id: string; type: "color"; label: string; color: string; overlay: string; textmode: string; swatchBg: string; swatchLabelColor: string; premium?: boolean }
 > = [
+  {
+    id: "color-black",
+    type: "color",
+    label: "Black",
+    color: "#000000",
+    overlay: "rgba(0,0,0,0)",
+    textmode: "dark",
+    swatchBg: "#000",
+    swatchLabelColor: "rgba(255,255,255,0.8)",
+  },
+  {
+    id: "color-navy",
+    type: "color",
+    label: "Dark Blue",
+    color: "#0a1128",
+    overlay: "rgba(0,0,0,0)",
+    textmode: "dark",
+    swatchBg: "#0a1128",
+    swatchLabelColor: "rgba(255,255,255,0.8)",
+  },
+  {
+    id: "color-plum",
+    type: "color",
+    label: "Dark Purple",
+    color: "#1a0b2e",
+    overlay: "rgba(0,0,0,0)",
+    textmode: "dark",
+    swatchBg: "#1a0b2e",
+    swatchLabelColor: "rgba(255,255,255,0.8)",
+  },
   {
     id: "minimal",
     type: "image",
     label: "Minimal",
     src: "https://plus.unsplash.com/premium_photo-1673292293042-cafd9c8a3ab3?w=800&auto=format&fit=crop&q=60&ixlib=rb-4.1.0",
+    premium: true,
   },
   {
     id: "noir",
@@ -83,20 +115,17 @@ const THEME_OPTIONS: Array<
     premium: true,
   },
   {
-    id: "color-black",
-    type: "color",
-    label: "Black",
-    color: "#000000",
-    overlay: "rgba(0,0,0,0)",
-    textmode: "dark",
-    swatchBg: "#000",
-    swatchLabelColor: "rgba(255,255,255,0.8)",
-  },
-  {
     id: "petals",
     type: "image",
     label: "Petals",
     src: "https://i.pinimg.com/736x/e9/fc/24/e9fc241eebd12836ecc16082d0d09495.jpg",
+    premium: true,
+  },
+  {
+    id: "aurora",
+    type: "image",
+    label: "Aurora",
+    src: "https://cdn.phototourl.com/member/2026-07-19-a7d84752-31b7-497e-aea5-4f01551c285c.jpg",
     premium: true,
   },
 ];
@@ -146,7 +175,6 @@ export default function ThemeModal({
   onClose: () => void;
   plan: string;
 }) {
-  useScrollLock(open);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
   const [nudge, setNudge] = useState(false);
@@ -161,11 +189,15 @@ export default function ThemeModal({
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed?.id) setSelectedId(parsed.id);
+        if (parsed?.id) {
+          setSelectedId(parsed.id);
+          return;
+        }
       }
     } catch {
       // ignore corrupted storage
     }
+    setSelectedId("color-black");
   }, [open]);
 
   useEffect(() => {
