@@ -1,6 +1,8 @@
 "use client";
 
-import { useLogoutModal } from "@/components/layout/LogoutModalProvider";
+import { signOut } from "firebase/auth";
+import { useState } from "react";
+import { auth } from "@/lib/firebase";
 
 export type SettingsPanelId =
   | "account"
@@ -214,10 +216,26 @@ interface SettingsSidebarProps {
 }
 
 export default function SettingsSidebar({ activePanel, onSelectPanel, onRaiseDispute }: SettingsSidebarProps) {
-  const { confirmLogout } = useLogoutModal();
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  // Ports __logoutWithConfirm: confirm modal, then signOut(auth), then a
+  // hard redirect home (a full reload, not client-side navigation — same
+  // as the original's window.location.href, so no in-memory state from
+  // this session lingers on screen).
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      await signOut(auth);
+    } catch {
+      // silent, matches original
+    }
+    window.location.href = window.location.origin + "/";
+  }
 
   return (
-    <nav className="settings-sidebar" id="settingsSidebar">
+    <>
+      <nav className="settings-sidebar" id="settingsSidebar">
         {SECTIONS.map((section) => (
           <div key={section.label} style={{ display: "contents" }}>
             <span className="sidebar-section-label">{section.label}</span>
@@ -257,7 +275,8 @@ export default function SettingsSidebar({ activePanel, onSelectPanel, onRaiseDis
           <button
             className="sidebar-footer-btn logout"
             id="settingsLogoutBtn"
-            onClick={() => confirmLogout()}
+            onClick={() => setConfirmingLogout(true)}
+            disabled={loggingOut}
           >
             <svg viewBox="0 0 24 24">
               <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
@@ -268,5 +287,58 @@ export default function SettingsSidebar({ activePanel, onSelectPanel, onRaiseDis
           </button>
         </div>
       </nav>
+
+      {/* Logout confirm modal — uses the real #logoutModalOverlay styling
+          already defined in globals.css (previously dead CSS with no
+          matching markup anywhere in the app). Rendered conditionally by
+          React rather than toggled via a `.visible` class, so it mounts
+          only while confirmingLogout is true — but still picks up all of
+          #logoutModalOverlay/#logoutModalBox/.logout-modal-btn's styling
+          since those are plain id/class selectors. */}
+      {confirmingLogout ? (
+        <div
+          id="logoutModalOverlay"
+          className="visible"
+          onClick={() => !loggingOut && setConfirmingLogout(false)}
+        >
+          <div id="logoutModalBox" onClick={(e) => e.stopPropagation()}>
+            <div id="logoutModalIconWrap">
+              <svg viewBox="0 0 24 24">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </div>
+            <div id="logoutModalTitle">Sign out?</div>
+            <div id="logoutModalMsg">
+              You&apos;ll need to sign back in to access your account.
+            </div>
+            <div className="logout-modal-actions">
+              <button
+                type="button"
+                className="logout-modal-btn confirm"
+                onClick={handleLogout}
+                disabled={loggingOut}
+              >
+                <svg viewBox="0 0 24 24">
+                  <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                {loggingOut ? "Signing out…" : "Sign Out"}
+              </button>
+              <button
+                type="button"
+                className="logout-modal-btn cancel"
+                onClick={() => setConfirmingLogout(false)}
+                disabled={loggingOut}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
