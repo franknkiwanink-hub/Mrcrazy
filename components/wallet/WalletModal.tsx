@@ -191,7 +191,7 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
             <img
               src="https://cdn.phototourl.com/member/2026-07-19-ffcaa670-d57c-44f6-8415-ab73856860b2.png"
               alt="Siterifty.com"
-              style={{ height: 22, marginBottom: 8, display: "block" }}
+              style={{ height: 22, marginBottom: 8, display: "block", marginLeft: "auto", marginRight: "auto" }}
             />
             <div id="walletBalanceLabel">Available balance</div>
             <div id="walletBalanceAmt">
