@@ -42,6 +42,42 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
     }
   }, [open, refresh]);
 
+  useEffect(() => {
+    if (!open) return;
+    const { style: bodyStyle } = document.body;
+    const { style: htmlStyle } = document.documentElement;
+    const scrollY = window.scrollY;
+
+    const prev = {
+      bodyOverflow: bodyStyle.overflow,
+      bodyPosition: bodyStyle.position,
+      bodyWidth: bodyStyle.width,
+      bodyTop: bodyStyle.top,
+      bodyHeight: bodyStyle.height,
+      htmlOverflow: htmlStyle.overflow,
+      htmlHeight: htmlStyle.height,
+    };
+
+    htmlStyle.overflow = "hidden";
+    htmlStyle.height = "100%";
+    bodyStyle.overflow = "hidden";
+    bodyStyle.position = "fixed";
+    bodyStyle.width = "100%";
+    bodyStyle.height = "100%";
+    bodyStyle.top = `-${scrollY}px`;
+
+    return () => {
+      htmlStyle.overflow = prev.htmlOverflow;
+      htmlStyle.height = prev.htmlHeight;
+      bodyStyle.overflow = prev.bodyOverflow;
+      bodyStyle.position = prev.bodyPosition;
+      bodyStyle.width = prev.bodyWidth;
+      bodyStyle.height = prev.bodyHeight;
+      bodyStyle.top = prev.bodyTop;
+      window.scrollTo(0, scrollY);
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const balance = profile?.walletBalance ?? summary.walletBalance ?? 0;
