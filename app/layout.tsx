@@ -25,6 +25,7 @@ import WelcomeBackScreen from "@/components/system/WelcomeBackScreen";
 import { AiSupportChatModalProvider } from "@/components/support/AiSupportChatModalProvider";
 import { DealPopupProvider } from "@/components/deal/DealPopupProvider";
 import { DisputePickerProvider } from "@/components/dispute/DisputePickerProvider";
+import { ImageLightboxProvider } from "@/components/listing/ImageLightboxProvider";
 
 // This project has no dedicated favicon file (confirmed: no public/favicon*
 // and no prior icons/favicon metadata). BootOverlay.tsx already renders this
@@ -113,6 +114,16 @@ export default function RootLayout({
             no state needed here. */}
         <div id="appThemeBg" aria-hidden="true" />
         <PushServiceWorkerRegister />
+        {/* Image lightbox — zoomable/pannable full-screen image viewer,
+            opened by clicking any element carrying .srf-lightbox-trigger
+            (listing cover/gallery images). Self-contained: no auth or
+            other context dependency, just a document-level click
+            delegation listener + its own state, so it sits outside
+            AuthProvider and wraps everything so its trigger listener is
+            live from first paint (including on BootOverlay/auth-gated
+            screens, matching the original's always-present global DOM
+            node behavior). */}
+        <ImageLightboxProvider>
         <AuthProvider>
           {/* Boot overlay — first thing rendered, removed only after auth
               resolves once + a cooldown, same comment/positioning as the
@@ -194,6 +205,7 @@ export default function RootLayout({
           </ThemeModalProvider>
           </CurrencyProvider>
         </AuthProvider>
+        </ImageLightboxProvider>
       </body>
     </html>
   );
