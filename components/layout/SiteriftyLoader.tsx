@@ -3,8 +3,13 @@
 import { useEffect } from "react";
 
 // Shared full-screen skeleton loader — glass/blurred overlay with shimmer
-// skeleton blocks mirroring the real layout (nav + search + avatar, hero
-// banner, section title, listing grid). Two call sites:
+// skeleton blocks mirroring the real layout below the header (hero
+// banner, section title, listing grid). The real <Header /> is a fixed,
+// higher-z-index element (see globals.css) and stays visible on top of
+// this overlay rather than being covered by it — this used to draw its
+// own fake nav row and sit above the real header (z-index 9999 vs the
+// header's old 20), which hid the actual header behind a plain dark
+// backdrop on every navigation/feed load. Two call sites:
 //   1. app/loading.tsx — Next's route-level loading UI, shown
 //      automatically during server-side navigation/data fetching for any
 //      route that doesn't define its own more specific loading.tsx
@@ -36,18 +41,6 @@ export default function SiteriftyLoader() {
 
   return (
     <div id="siterifty-loader">
-      <div className="s-nav">
-        <a href="/" className="brand">
-          <img
-            src="https://cdn.phototourl.com/member/2026-07-19-ffcaa670-d57c-44f6-8415-ab73856860b2.png"
-            alt="Siterifty.com"
-            style={{ height: "1.3rem", display: "block" }}
-          />
-        </a>
-        <div className="skel s-search" />
-        <div className="skel s-avatar" />
-      </div>
-
       <div className="skel s-banner" />
 
       <div className="skel s-title" />
