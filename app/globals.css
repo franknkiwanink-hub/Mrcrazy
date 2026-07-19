@@ -296,19 +296,18 @@
          background: #d4ff4d; border: 2.5px solid #1a1a1a; border-radius: 10px;
          color: #1a1a1a; font-weight: 700; padding: 8px 18px;
          letter-spacing: 0.3px; text-shadow: 0 1px 0 rgba(255,255,255,0.3);
-         --shadow-color: #ff4d4d;
-         box-shadow: 0 5px 0 0 var(--shadow-color);
+         box-shadow: 0 5px 0 0 #ff4d4d;
          transition: transform 0.2s ease, box-shadow 0.2s ease;
          }
          .btn-signup::after { display: none; }
          .btn-signup:hover {
          background: #d4ff4d; color: #1a1a1a;
          transform: translateY(1px);
-         box-shadow: 0 3px 0 0 var(--shadow-color);
+         box-shadow: 0 3px 0 0 #ff4d4d;
          }
          .btn-signup:active {
          transform: translateY(4px);
-         box-shadow: 0 1px 0 0 var(--shadow-color);
+         box-shadow: 0 1px 0 0 #ff4d4d;
          }
 
          /* ── ANNOUNCEMENT BAR ── */
