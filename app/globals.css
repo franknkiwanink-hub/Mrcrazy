@@ -3,7 +3,7 @@
          input, textarea { user-select: text; -webkit-user-select: text; }
          *:focus { outline: none; }
          /* ── HIDE SCROLLBARS GLOBALLY (scrolling still works) ── */
-         html { scrollbar-width: none; -ms-overflow-style: none; }
+         html { scrollbar-width: none; -ms-overflow-style: none; background: #000; }
          html::-webkit-scrollbar { display: none; width: 0; height: 0; }
          *, *::before, *::after { scrollbar-width: none; -ms-overflow-style: none; }
          *::-webkit-scrollbar { display: none; width: 0; height: 0; }
@@ -71,7 +71,7 @@
          .hamburger.open span:nth-child(1) { transform: translateY(0); }
          /* ── NAV DRAWER ── */
          #navOverlay {
-         position: fixed; inset: 0; z-index: 300;
+         position: fixed; inset: 0; z-index: 10500;
          background: rgba(0,0,0,0.55);
          backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
          opacity: 0; visibility: hidden;
@@ -83,7 +83,7 @@
          width: 280px; max-width: 84vw;
          background: #0a0a0b;
          border-right: 1px solid rgba(255,255,255,0.08);
-         z-index: 301;
+         z-index: 10501;
          transform: translateX(-100%);
          transition: transform 0.32s cubic-bezier(0.4,0,0.2,1);
          display: flex; flex-direction: column;
@@ -6537,9 +6537,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
   .pm-modal {
     width: 100%;
     height: 100%;
-    background:
-      linear-gradient(180deg, rgba(8, 8, 14, 0.55) 0%, rgba(8, 8, 14, 0.75) 100%),
-      url('https://wallup.net/wp-content/uploads/2019/09/952645-forest-trees-nature-landscape-tree.jpg') center/cover no-repeat fixed;
+    background: #0a0a0b;
     display: flex;
     flex-direction: column;
     overflow: hidden;
