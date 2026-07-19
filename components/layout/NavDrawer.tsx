@@ -6,7 +6,7 @@ import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useNavDrawer } from "@/components/layout/NavDrawerProvider";
 import { useNavListingsCount } from "@/lib/useNavListingsCount";
 import { useToast } from "@/lib/useToast";
-import { useLogoutModal } from "@/components/layout/LogoutModalProvider";
+import { logout } from "@/lib/authActions";
 import { useWalletModal } from "@/components/wallet/WalletModalProvider";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
 import { useThemeModal } from "@/components/theme/ThemeModalProvider";
@@ -34,9 +34,16 @@ export default function NavDrawer() {
   const { openWallet } = useWalletModal();
   const { openPlansModal } = usePlansModal();
   const { openThemePicker } = useThemeModal();
-  const { confirmLogout } = useLogoutModal();
   const router = useRouter();
   const isLoggedIn = !!user;
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    closeNav();
+    await logout();
+  }
 
   // Bumps every time the drawer opens, so useNavListingsCount refetches
   // fresh — mirrors the original's openNav() calling
@@ -309,10 +316,7 @@ export default function NavDrawer() {
           <button
             className="nav-link"
             id="navLogoutBtn"
-            onClick={async () => {
-              closeNav();
-              await confirmLogout();
-            }}
+            onClick={() => setConfirmingLogout(true)}
             style={{ marginTop: 2, color: "#f87171", opacity: 0.75 }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -423,6 +427,55 @@ export default function NavDrawer() {
       </div>
       {/* /navScrollBody */}
       <ToastHost />
+
+      {/* Logout confirm modal — same real #logoutModalOverlay styling used
+          in Settings/My Profile, rendered as a sibling of <nav> (not
+          inside the drawer's own scroll body) so the drawer closing
+          doesn't unmount or animate it away. */}
+      {confirmingLogout ? (
+        <div
+          id="logoutModalOverlay"
+          className="visible"
+          onClick={() => !loggingOut && setConfirmingLogout(false)}
+        >
+          <div id="logoutModalBox" onClick={(e) => e.stopPropagation()}>
+            <div id="logoutModalIconWrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </div>
+            <div id="logoutModalTitle">Sign out?</div>
+            <div id="logoutModalMsg">
+              You&apos;ll need to sign back in to access your account.
+            </div>
+            <div className="logout-modal-actions">
+              <button
+                type="button"
+                className="logout-modal-btn confirm"
+                onClick={handleLogout}
+                disabled={loggingOut}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                {loggingOut ? "Signing out…" : "Sign Out"}
+              </button>
+              <button
+                type="button"
+                className="logout-modal-btn cancel"
+                onClick={() => setConfirmingLogout(false)}
+                disabled={loggingOut}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </nav>
   );
 }
