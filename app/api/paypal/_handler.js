@@ -2,12 +2,26 @@
 // All money operations go through here. Frontend never touches Firestore for money.
 //
 // Actions (POST body: { action, ...params }):
-//   create-order   → deposit: create PayPal order server-side (vault ON_SUCCESS)
-//   capture-order  → deposit: verify capture + credit Firestore; saves vault ID if returned
+//   create-order   → DISABLED. PayPal deposits are no longer offered — Siterifty
+//                    holds user balances (escrow, wallet), and running that kind
+//                    of money transmission through PayPal's standard checkout
+//                    violates their acceptable-use terms for platforms holding
+//                    customer funds. PayPal is still used for the Pro
+//                    subscription only (get-plan-id/activate-sub/cancel-sub
+//                    below), which is a normal recurring charge to Siterifty,
+//                    not custody of user funds. See handleCreateOrder for the
+//                    stub response. A new deposit provider will replace this.
+//   capture-order  → DISABLED, same reasoning as create-order. Also stops
+//                    issuing/saving PayPal vault tokens — Auto Top-Up (which
+//                    depended on the vault) is removed along with it.
 //   get-plan-id    → subscription: return plan_id (never exposed in HTML)
 //   activate-sub   → subscription: verify ACTIVE with PayPal, write plan to Firestore
 //   cancel-sub     → subscription: cancel PayPal billing + downgrade to free
-//   withdraw       → wallet: debit balance, write pending withdrawal record
+//   withdraw       → wallet: debit balance, write pending withdrawal record.
+//                    method is 'paypal' | 'bank' | 'bitcoin' — payout itself is
+//                    always a manual step done outside this codebase (see
+//                    handleWithdraw's own comment); this just validates the
+//                    right fields for the chosen method and records the request.
 //   lookup-recipient → wallet: resolve a user by email for P2P transfer (server-side only —
 //                      the client never queries the users collection directly for this)
 //   transfer       → wallet: server-validated P2P balance transfer between two users
@@ -17,15 +31,13 @@
 //                     ever sends `days`, never a price, so it cannot pay less than listed.
 //   [webhook]      → PayPal billing events: renewals, cancellations, payment failures
 //
-// ── Auto Top-Up (wallet settings) ─────────────────────────────────────────
-//   autotopup-get     → read the caller's auto top-up settings
-//   autotopup-save    → enable/disable + set threshold/topUpAmount (requires a
-//                        saved PayPal vault token — auto top-up charges the
-//                        buyer's saved payment method with no popup)
-//   Auto top-up itself is not a separate action the client calls — it runs
-//   server-side (maybeAutoTopUp) every time a debit would otherwise succeed,
-//   right after the debit, checking the resulting balance against the user's
-//   threshold and charging their vaulted PayPal method if it's below it.
+// ── Auto Top-Up ────────────────────────────────────────────────────────────
+//   REMOVED. Auto Top-Up charged a saved PayPal vault token whenever the
+//   balance dropped below a threshold — it only made sense while PayPal
+//   deposits existed. autotopup-get/autotopup-save actions and
+//   maybeAutoTopUp are gone (call sites that used to await maybeAutoTopUp
+//   after a debit now simply don't — nothing else depended on its return
+//   value, since it was always fire-and-forget).
 //
 // ── Auto Send (recurring P2P payments) ────────────────────────────────────
 //   autosend-create   → schedule a repeating transfer to another user every
@@ -41,10 +53,11 @@
 // ── Auto Withdrawal (wallet settings) ─────────────────────────────────────
 //   autowithdraw-get   → read the caller's auto withdrawal settings
 //   autowithdraw-save  → enable/disable + set threshold/keepBalance/payout
-//                         method (PayPal email or bank email on file)
-//   Like auto top-up, auto withdrawal is not a separate action the client
-//   calls to "run" it — it runs server-side (maybeAutoWithdraw) right after
-//   any successful credit to withdrawableBalance (referral bonus, P2P
+//                         method (PayPal email, bank details, or BTC address
+//                         on file)
+//   Like auto top-up used to, auto withdrawal is not a separate action the
+//   client calls to "run" it — it runs server-side (maybeAutoWithdraw) right
+//   after any successful credit to withdrawableBalance (referral bonus, P2P
 //   transfer received, auto send received — and escrow release, called from
 //   /api/deal). If the resulting withdrawable balance is at/above the user's
 //   threshold, it automatically files a payout request for everything above
@@ -79,13 +92,7 @@ const BOOST_PLANS = Object.fromEntries(LIMITS.boost.plans.map(p => [p.days, p.pr
 // ── Auto Send: allowed recurring intervals, in days — from limits.js ────────
 const AUTOSEND_INTERVALS = LIMITS.autoSend.intervals;
 
-// ── Auto Top-Up: sane server-side bounds so the client can't set something
-//    absurd (e.g. threshold above topUpAmount would trigger forever) —
-//    from limits.js, single source shared with the frontend's own display. ──
-const AUTOTOPUP_MIN_THRESHOLD = LIMITS.autoTopUp.minThreshold;
-const AUTOTOPUP_MAX_THRESHOLD = LIMITS.autoTopUp.maxThreshold;
-const AUTOTOPUP_MIN_AMOUNT    = LIMITS.autoTopUp.minAmount;   // matches deposit minimum
-const AUTOTOPUP_MAX_AMOUNT    = LIMITS.autoTopUp.maxAmount;   // matches deposit maximum
+// Auto Top-Up (and its bounds constants) removed along with PayPal deposits.
 
 // ── Auto Withdrawal: sane server-side bounds, mirroring auto top-up's
 //    pattern. Ideally sourced from LIMITS.autoWithdraw in limits.js (add it
@@ -343,8 +350,8 @@ export default async function handler(req, res) {
       case 'get-donations':     return await handleGetDonations(req, res);
       case 'boost-listing':     return await handleBoostListing(req, res);
       case 'wallet-summary':    return await handleWalletSummary(req, res);
-      case 'autotopup-get':     return await handleAutoTopUpGet(req, res);
-      case 'autotopup-save':    return await handleAutoTopUpSave(req, res);
+      // autotopup-get / autotopup-save removed — Auto Top-Up depended on the
+      // PayPal vault, which no longer exists now that deposits are disabled.
       case 'autowithdraw-get':  return await handleAutoWithdrawGet(req, res);
       case 'autowithdraw-save': return await handleAutoWithdrawSave(req, res);
       case 'autosend-create':   return await handleAutoSendCreate(req, res);
@@ -374,100 +381,14 @@ export default async function handler(req, res) {
 //      payment_source.token — the buyer skips the PayPal popup entirely.
 //      Falls back to path A if the stored token is stale or invalid.
 // ─────────────────────────────────────────────────────────────────────────────
+// PayPal deposits are disabled — see the top-of-file comment. Left as a
+// named stub (rather than deleting the case label) so a re-enable, or
+// swapping in the new deposit provider, is a small diff instead of
+// reconstructing routing/validation from scratch.
 async function handleCreateOrder(req, res) {
-  const { idToken, amount, useVault = false } = req.body;
-  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
-
-  const amt = parseFloat(amount);
-  if (!amt || amt < 5 || amt > 10000) {
-    return res.status(400).json({ error: 'Amount must be between $5 and $10,000' });
-  }
-
-  const fbUser  = await verifyFirebaseToken(idToken);
-  const uid     = fbUser.localId;
-  const token   = await getPayPalToken();
-  const safeAmt = amt.toFixed(2);
-
-  // ── Path B: reuse stored vault token (no popup needed) ───────────────────
-  if (useVault) {
-    const db       = getAdminDb();
-    const userSnap = await db.collection('users').doc(uid).get();
-    const vaultId  = userSnap.exists ? userSnap.data().paypalVaultId : null;
-
-    if (vaultId) {
-      const ppRes = await fetch(`${ppBase()}/v2/checkout/orders`, {
-        method: 'POST',
-        headers: {
-          'Authorization':     `Bearer ${token}`,
-          'Content-Type':      'application/json',
-          'PayPal-Request-Id': `srf-vault-${Date.now()}`,
-        },
-        body: JSON.stringify({
-          intent: 'CAPTURE',
-          purchase_units: [{
-            amount: { currency_code: 'USD', value: safeAmt },
-            description: 'Siterifty Wallet Deposit',
-          }],
-          payment_source: {
-            token: {
-              id:   vaultId,
-              type: 'PAYMENT_METHOD_TOKEN',
-            },
-          },
-        }),
-      });
-
-      if (ppRes.ok) {
-        const order = await ppRes.json();
-        return res.status(200).json({ orderID: order.id, usedVault: true });
-      }
-      // Token stale or revoked — fall through to normal flow
-      console.warn('[paypal] Vault order failed — falling back to normal checkout');
-    }
-  }
-
-  // ── Path A: normal order with store_in_vault: "ON_SUCCESS" ───────────────
-  // PayPal vaults the payment method silently when the buyer approves.
-  // The vault.id (if issued) is extracted and saved in capture-order.
-  const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://siterifty.com';
-
-  const ppRes = await fetch(`${ppBase()}/v2/checkout/orders`, {
-    method: 'POST',
-    headers: {
-      'Authorization':     `Bearer ${token}`,
-      'Content-Type':      'application/json',
-      'PayPal-Request-Id': `srf-deposit-${Date.now()}`,
-    },
-    body: JSON.stringify({
-      intent: 'CAPTURE',
-      purchase_units: [{
-        amount: { currency_code: 'USD', value: safeAmt },
-        description: 'Siterifty Wallet Deposit',
-      }],
-      payment_source: {
-        paypal: {
-          experience_context: {
-            return_url: `${SITE_URL}/deposit-success`,
-            cancel_url: `${SITE_URL}/deposit-cancel`,
-          },
-          attributes: {
-            vault: {
-              store_in_vault: 'ON_SUCCESS',
-            },
-          },
-        },
-      },
-    }),
+  return res.status(410).json({
+    error: 'PayPal deposits are no longer available. Adding funds will use a new payment provider — check back soon.',
   });
-
-  if (!ppRes.ok) {
-    const err = await ppRes.json();
-    console.error('PayPal create-order error:', err);
-    return res.status(502).json({ error: 'PayPal order creation failed' });
-  }
-
-  const order = await ppRes.json();
-  return res.status(200).json({ orderID: order.id, usedVault: false });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -479,255 +400,17 @@ async function handleCreateOrder(req, res) {
 // We save paypalVaultId + paypalVaultEmail on the user doc so future deposits
 // can use Path B in create-order (no popup, instant charge).
 // ─────────────────────────────────────────────────────────────────────────────
+// PayPal deposits are disabled — see the top-of-file comment.
 async function handleCaptureOrder(req, res) {
-  const { idToken, orderID } = req.body;
-  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
-  if (!orderID) return res.status(400).json({ error: 'Missing orderID' });
-
-  // 1. Verify Firebase identity
-  const fbUser = await verifyFirebaseToken(idToken);
-  const uid = fbUser.localId;
-
-  // 2. Capture with PayPal — actually charges the customer
-  const token = await getPayPalToken();
-  const captureRes = await fetch(`${ppBase()}/v2/checkout/orders/${orderID}/capture`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type':  'application/json',
-    },
+  return res.status(410).json({
+    error: 'PayPal deposits are no longer available. Adding funds will use a new payment provider — check back soon.',
   });
-
-  if (!captureRes.ok) {
-    const err = await captureRes.json();
-    console.error('PayPal capture error:', err);
-    return res.status(502).json({ error: 'PayPal capture failed' });
-  }
-
-  const capture = await captureRes.json();
-
-  // 3. Confirm COMPLETED — never trust client-supplied amount
-  if (capture.status !== 'COMPLETED') {
-    return res.status(400).json({ error: `Order status: ${capture.status}` });
-  }
-
-  const capObj = capture.purchase_units?.[0]?.payments?.captures?.[0];
-  if (!capObj || capObj.status !== 'COMPLETED') {
-    return res.status(400).json({ error: 'Capture not completed' });
-  }
-
-  const paid = parseFloat(capObj.amount.value);
-  if (!paid || paid < 1) {
-    return res.status(400).json({ error: 'Invalid captured amount' });
-  }
-
-  // 4. Extract vault token if PayPal issued one
-  // PayPal returns this when store_in_vault: "ON_SUCCESS" was set on create-order
-  // and the buyer consented to saving their payment method.
-  const vaultId    = capture.payment_source?.paypal?.attributes?.vault?.id    ?? null;
-  const vaultEmail = capture.payment_source?.paypal?.email_address             ?? null;
-  const vaultSaved = Boolean(vaultId);
-
-  // 5. Credit Firestore via Admin SDK in a transaction + optionally save vault ID
-  const db = getAdminDb();
-  const userRef = db.collection('users').doc(uid);
-
-  const newBalance = await db.runTransaction(async tx => {
-    const snap = await tx.get(userRef);
-    if (!snap.exists) throw new Error('User document not found');
-    const current = Number(snap.data().walletBalance || 0);
-    const updated = parseFloat((current + paid).toFixed(2));
-
-    // Build the user-doc update — include vault fields only when present.
-    // Deliberately does NOT touch withdrawableBalance: a PayPal deposit can
-    // be spent inside Siterifty (escrow, boosts, sending to others) but can
-    // never be cashed back out — only sale earnings, transfer receives, and
-    // referral bonuses increase withdrawableBalance (see handleWithdraw,
-    // handleTransfer, handleActivateSub).
-    const userUpdate = { walletBalance: updated };
-    if (vaultSaved) {
-      userUpdate.paypalVaultId    = vaultId;
-      userUpdate.paypalVaultEmail = vaultEmail || snap.data().paypalVaultEmail || null;
-      userUpdate.paypalVaultSavedAt = FieldValue.serverTimestamp();
-    }
-
-    tx.update(userRef, userUpdate);
-    tx.set(userRef.collection('transactions').doc(), {
-      type:          'deposit',
-      amount:        paid,
-      label:         `PayPal deposit · Order ${capture.id}`,
-      paypalOrderId: capture.id,
-      vaultSaved,
-      status:        'completed',
-      createdAt:     FieldValue.serverTimestamp(),
-    });
-    return updated;
-  });
-
-  if (vaultSaved) {
-    console.log(`[paypal] Vault token saved for uid=${uid} vault=${vaultId}`);
-  }
-
-  return res.status(200).json({ success: true, amount: paid, newBalance, vaultSaved });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// maybeAutoTopUp(db, uid)
-//
-// Called (fire-and-forget-safe, but we await it) right after any successful
-// debit — withdraw, transfer, boost-listing, autosend-run — to see whether
-// the resulting balance dropped below the user's configured auto top-up
-// threshold. If so, and a PayPal vault token is on file, charges the vaulted
-// payment method for the configured top-up amount and credits the wallet,
-// exactly like a normal deposit (capture-order) but with no buyer popup.
-//
-// Settings live at users/{uid}.autoTopUp = { enabled, threshold, topUpAmount }.
-// Runs OUTSIDE the caller's transaction (it needs its own fresh read + its
-// own PayPal charge + its own transaction) so a top-up failure never rolls
-// back the debit that triggered it. Every attempt — success, no-vault,
-// PayPal decline — is logged to the transactions subcollection so History
-// shows exactly what happened.
-// ─────────────────────────────────────────────────────────────────────────────
-async function maybeAutoTopUp(db, uid) {
-  try {
-    const userRef  = db.collection('users').doc(uid);
-    const userSnap = await userRef.get();
-    if (!userSnap.exists) return;
-    const data = userSnap.data();
-
-    const cfg = data.autoTopUp;
-    if (!cfg || !cfg.enabled) return;
-
-    const threshold   = Number(cfg.threshold || 0);
-    const topUpAmount = Number(cfg.topUpAmount || 0);
-    if (!threshold || !topUpAmount) return;
-
-    const currentBal = Number(data.walletBalance || 0);
-    if (currentBal >= threshold) return; // above threshold — nothing to do
-
-    // Debounce: don't fire again within 2 minutes of the last attempt (in
-    // case several debits land in quick succession before the first top-up
-    // has finished writing).
-    const lastAttempt = data.autoTopUp.lastAttemptAt?.toMillis?.() || 0;
-    if (Date.now() - lastAttempt < 2 * 60 * 1000) return;
-
-    await userRef.update({ 'autoTopUp.lastAttemptAt': FieldValue.serverTimestamp() });
-
-    const vaultId = data.paypalVaultId;
-    if (!vaultId) {
-      await userRef.collection('transactions').add({
-        type:       'autotopup_failed',
-        amount:     0,
-        label:      'Auto top-up skipped',
-        note:       'No saved PayPal payment method on file. Make a manual deposit once to enable auto top-up.',
-        status:     'failed',
-        failReason: 'no_vault',
-        createdAt:  FieldValue.serverTimestamp(),
-      });
-      return;
-    }
-
-    const token   = await getPayPalToken();
-    const safeAmt = topUpAmount.toFixed(2);
-
-    const orderRes = await fetch(`${ppBase()}/v2/checkout/orders`, {
-      method: 'POST',
-      headers: {
-        'Authorization':     `Bearer ${token}`,
-        'Content-Type':      'application/json',
-        'PayPal-Request-Id': `srf-autotopup-${uid}-${Date.now()}`,
-      },
-      body: JSON.stringify({
-        intent: 'CAPTURE',
-        purchase_units: [{
-          amount: { currency_code: 'USD', value: safeAmt },
-          description: 'Siterifty Auto Top-Up',
-        }],
-        payment_source: {
-          token: { id: vaultId, type: 'PAYMENT_METHOD_TOKEN' },
-        },
-      }),
-    });
-
-    if (!orderRes.ok) {
-      const err = await orderRes.json().catch(() => ({}));
-      console.error('[autotopup] create-order failed', uid, err);
-      await userRef.collection('transactions').add({
-        type:       'autotopup_failed',
-        amount:     0,
-        label:      'Auto top-up failed',
-        note:       'PayPal could not start the charge on your saved payment method.',
-        status:     'failed',
-        failReason: 'create_order_failed',
-        createdAt:  FieldValue.serverTimestamp(),
-      });
-      return;
-    }
-
-    const order = await orderRes.json();
-
-    const captureRes = await fetch(`${ppBase()}/v2/checkout/orders/${order.id}/capture`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-    });
-
-    if (!captureRes.ok) {
-      const err = await captureRes.json().catch(() => ({}));
-      console.error('[autotopup] capture failed', uid, err);
-      await userRef.collection('transactions').add({
-        type:       'autotopup_failed',
-        amount:     0,
-        label:      'Auto top-up declined',
-        note:       'Your saved PayPal payment method declined the charge. Update your payment method to keep auto top-up working.',
-        status:     'failed',
-        failReason: 'capture_declined',
-        createdAt:  FieldValue.serverTimestamp(),
-      });
-      return;
-    }
-
-    const capture = await captureRes.json();
-    if (capture.status !== 'COMPLETED') {
-      await userRef.collection('transactions').add({
-        type:       'autotopup_failed',
-        amount:     0,
-        label:      'Auto top-up declined',
-        note:       `PayPal order status: ${capture.status}`,
-        status:     'failed',
-        failReason: 'not_completed',
-        createdAt:  FieldValue.serverTimestamp(),
-      });
-      return;
-    }
-
-    const capObj = capture.purchase_units?.[0]?.payments?.captures?.[0];
-    const paid = parseFloat(capObj?.amount?.value || 0);
-    if (!paid || paid < 1) return;
-
-    await db.runTransaction(async tx => {
-      const freshSnap = await tx.get(userRef);
-      if (!freshSnap.exists) return;
-      const freshBal = Number(freshSnap.data().walletBalance || 0);
-      const updated  = parseFloat((freshBal + paid).toFixed(2));
-      tx.update(userRef, { walletBalance: updated });
-      tx.set(userRef.collection('transactions').doc(), {
-        type:          'autotopup',
-        amount:        paid,
-        label:         `Auto top-up · Order ${capture.id}`,
-        note:          `Balance fell below your $${threshold.toFixed(2)} threshold — charged your saved PayPal for $${paid.toFixed(2)}.`,
-        paypalOrderId: capture.id,
-        status:        'completed',
-        createdAt:     FieldValue.serverTimestamp(),
-      });
-    });
-
-    console.log(`[autotopup] Charged $${paid} for uid=${uid}`);
-  } catch (err) {
-    // Never let an auto top-up failure surface to or block the caller's
-    // original request (withdraw/transfer/boost) — just log it.
-    console.error('[autotopup] unexpected error', uid, err);
-  }
-}
+// maybeAutoTopUp (and the PayPal vault it charged) has been removed along
+// with PayPal deposits — see the top-of-file comment. Its former call
+// sites (withdraw, transfer, donate, autosend-run, boost-listing) simply
+// no longer call it; none of them used its return value.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // maybeAutoWithdraw(db, uid)
@@ -1194,16 +877,26 @@ async function handleCancelSub(req, res) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// withdraw  { idToken, amount, paypalEmail, method?, scheduledFor? }
+// withdraw  { idToken, amount, method?, scheduledFor?, ...method-specific fields }
+//   method: 'paypal'  → paypalEmail
+//   method: 'bank'    → bankAccountName, bankAccountNumber, bankRoutingNumber, bankAccountType
+//   method: 'bitcoin' → bitcoinAddress
 //   →  { success, newBalance, newWithdrawable, fee, receive }
 //
 // Withdrawable balance is tracked SEPARATELY from walletBalance
 // (withdrawableBalance on the user doc). Only money that entered the wallet
 // from a sale/escrow-release, a P2P transfer receive, or a referral bonus is
-// withdrawable — a straight PayPal deposit is spendable inside Siterifty
-// (boosts, escrow, sending to others) but can never be cashed back out, so
+// withdrawable — deposited funds are spendable inside Siterifty (boosts,
+// escrow, sending to others) but can never be cashed back out, so
 // walletBalance always stays >= withdrawableBalance and this endpoint checks
 // withdrawableBalance specifically rather than the combined total.
+//
+// No payout is actually sent from here for any method, including Bitcoin —
+// this only validates the request, debits the balance, and files a pending
+// `withdrawals` doc with the payout details attached. Sending the money
+// (PayPal payout, bank ACH, or a BTC transfer) is a manual step done outside
+// this codebase; see handleAdminResolveWithdrawal for how a completed/failed
+// outcome gets marked afterward.
 //
 // `scheduledFor` (optional ISO date string) lets the user pick a future
 // payout date from the wallet UI; if omitted or in the past we process
@@ -1217,13 +910,66 @@ async function handleCancelSub(req, res) {
 // here after transfer/autosend-run/referral credits.
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleWithdraw(req, res) {
-  const { idToken, amount, paypalEmail, method = 'paypal', scheduledFor } = req.body;
-  if (!idToken)    return res.status(401).json({ error: 'Missing auth token' });
-  if (!paypalEmail || !paypalEmail.includes('@')) {
-    return res.status(400).json({ error: 'Invalid PayPal email' });
-  }
-  if (!['paypal', 'bank'].includes(method)) {
+  const {
+    idToken,
+    amount,
+    method = 'paypal',
+    scheduledFor,
+    // PayPal
+    paypalEmail,
+    // Bank (US ACH)
+    bankAccountName,
+    bankAccountNumber,
+    bankRoutingNumber,
+    bankAccountType, // 'checking' | 'savings'
+    // Bitcoin — payouts are sent manually; we just need a valid-looking address.
+    bitcoinAddress,
+  } = req.body;
+
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+  if (!['paypal', 'bank', 'bitcoin'].includes(method)) {
     return res.status(400).json({ error: 'Invalid payment method' });
+  }
+
+  // Per-method payout details — each method collects the fields that
+  // actually let a human being pay the person, not a one-size-fits-all
+  // email address.
+  let payoutDetails;
+  if (method === 'paypal') {
+    if (!paypalEmail || !paypalEmail.includes('@')) {
+      return res.status(400).json({ error: 'Enter a valid PayPal email address.' });
+    }
+    payoutDetails = { paypalEmail: paypalEmail.trim() };
+  } else if (method === 'bank') {
+    const name    = (bankAccountName || '').trim();
+    const acct    = (bankAccountNumber || '').trim();
+    const routing = (bankRoutingNumber || '').trim();
+    const type    = bankAccountType === 'savings' ? 'savings' : bankAccountType === 'checking' ? 'checking' : null;
+
+    if (!name) return res.status(400).json({ error: 'Enter the account holder name.' });
+    if (!/^\d{4,17}$/.test(acct)) return res.status(400).json({ error: 'Enter a valid account number.' });
+    if (!/^\d{9}$/.test(routing)) return res.status(400).json({ error: 'Enter a valid 9-digit routing number.' });
+    if (!type) return res.status(400).json({ error: 'Select an account type (checking or savings).' });
+
+    payoutDetails = {
+      bankAccountName:   name,
+      bankAccountNumber: acct,
+      bankRoutingNumber: routing,
+      bankAccountType:   type,
+    };
+  } else {
+    // Bitcoin — Siterifty never processes the payout itself (see
+    // handleWithdraw's top comment: payouts are always a manual step done
+    // outside this codebase); this just needs an address that's plausibly
+    // a real BTC address so it can be sent to manually. Covers legacy
+    // (1...), P2SH (3...), and bech32 (bc1...) formats without pulling in
+    // a full base58/bech32 checksum library.
+    const addr = (bitcoinAddress || '').trim();
+    const looksValid = /^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{25,59})$/.test(addr);
+    if (!looksValid) {
+      return res.status(400).json({ error: 'Enter a valid Bitcoin wallet address.' });
+    }
+    payoutDetails = { bitcoinAddress: addr };
   }
 
   const amt = parseFloat(amount);
@@ -1272,6 +1018,12 @@ async function handleWithdraw(req, res) {
   const adminRef = creditAdmin ? db.collection('users').doc(adminUid) : null;
   let ledgerEntry = null;
 
+  const methodLabel = method === 'bank' ? 'Bank Transfer' : method === 'bitcoin' ? 'Bitcoin' : 'PayPal';
+  const noteDetail =
+    method === 'paypal'   ? `PayPal: ${payoutDetails.paypalEmail}` :
+    method === 'bitcoin'  ? `BTC address: ${payoutDetails.bitcoinAddress}` :
+    `Bank: ${payoutDetails.bankAccountName} · ${payoutDetails.bankAccountType} · routing ${payoutDetails.bankRoutingNumber} · acct ****${payoutDetails.bankAccountNumber.slice(-4)}`;
+
   const result = await db.runTransaction(async tx => {
     const [snap, adminSnap] = await Promise.all([
       tx.get(userRef),
@@ -1289,7 +1041,7 @@ async function handleWithdraw(req, res) {
     if (amt > withdrawable) {
       throw new Error(
         withdrawable <= 0
-          ? 'You have no withdrawable balance. Money from PayPal deposits can be spent on Siterifty but not withdrawn — only earnings from sales, transfers received, or referral bonuses qualify.'
+          ? 'You have no withdrawable balance. Deposited funds can be spent on Siterifty but not withdrawn — only earnings from sales, transfers received, or referral bonuses qualify.'
           : `You can only withdraw up to $${withdrawable.toFixed(2)} — the rest of your balance came from deposits, which aren't withdrawable.`
       );
     }
@@ -1301,10 +1053,10 @@ async function handleWithdraw(req, res) {
     // `receive`) — the 5% fee is real money leaving their balance, same as
     // any other platform fee, and pendingBalance tracks the full hold until
     // the downstream payout process (outside this file) actually sends
-    // `receive` to their PayPal/bank. The fee itself is credited to the
-    // admin account (or ledgered) right here, at request time — it must
-    // not be left as inert metadata on the transaction/withdrawals docs
-    // with nothing ever actually collecting it.
+    // `receive` to their PayPal/bank/BTC wallet. The fee itself is credited
+    // to the admin account (or ledgered) right here, at request time — it
+    // must not be left as inert metadata on the transaction/withdrawals
+    // docs with nothing ever actually collecting it.
     const updatedBal         = parseFloat((bal - amt).toFixed(2));
     const updatedWithdrawable = parseFloat((withdrawable - amt).toFixed(2));
     const pending             = parseFloat(((data.pendingBalance || 0) + amt).toFixed(2));
@@ -1319,9 +1071,9 @@ async function handleWithdraw(req, res) {
       type:         'withdraw',
       amount:       -amt,
       fee,
-      receive,      // net amount that will actually be paid out to PayPal/bank once approved
-      label:        `Withdrawal via ${method === 'bank' ? 'Bank Transfer' : 'PayPal'}`,
-      note:         `PayPal: ${paypalEmail}` + (feeOwedButUnroutable ? ' (fee pending platform reconciliation)' : ''),
+      receive,      // net amount that will actually be paid out once approved
+      label:        `Withdrawal via ${methodLabel}`,
+      note:         noteDetail + (feeOwedButUnroutable ? ' (fee pending platform reconciliation)' : ''),
       method,
       scheduledFor: scheduledTs,
       status:       'pending',
@@ -1330,9 +1082,9 @@ async function handleWithdraw(req, res) {
 
     tx.set(db.collection('withdrawals').doc(), {
       uid,
-      email:        fbUser.email,
-      paypalEmail,
+      email:  fbUser.email,
       method,
+      ...payoutDetails,
       amount:       amt,
       fee,
       receive,
@@ -1381,8 +1133,6 @@ async function handleWithdraw(req, res) {
   if (ledgerEntry) {
     await _ledgerUnclaimedFee(db, ledgerEntry);
   }
-
-  await maybeAutoTopUp(db, uid);
 
   return res.status(200).json({
     success:         true,
@@ -1747,7 +1497,7 @@ async function handleTransfer(req, res) {
     await _ledgerUnclaimedFee(db, ledgerEntry);
   }
 
-  await maybeAutoTopUp(db, senderUid);
+  // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
   await maybeAutoWithdraw(db, recipientUid);
 
   return res.status(200).json({
@@ -1949,7 +1699,7 @@ async function handleDonate(req, res) {
     await _ledgerUnclaimedFee(db, ledgerEntry);
   }
 
-  await maybeAutoTopUp(db, donorUid);
+  // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
   await maybeAutoWithdraw(db, sellerUid);
 
   return res.status(200).json({
@@ -2080,110 +1830,6 @@ async function handleWalletSummary(req, res) {
   });
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// autotopup-get  { idToken }  →  { enabled, threshold, topUpAmount, hasVault }
-// ─────────────────────────────────────────────────────────────────────────────
-async function handleAutoTopUpGet(req, res) {
-  const { idToken } = req.body;
-  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
-
-  const fbUser = await verifyFirebaseToken(idToken);
-  const uid = fbUser.localId;
-
-  const db = getAdminDb();
-  const snap = await db.collection('users').doc(uid).get();
-  if (!snap.exists) return res.status(404).json({ error: 'User not found' });
-
-  const data = snap.data();
-  const cfg = data.autoTopUp || {};
-
-  return res.status(200).json({
-    enabled:     Boolean(cfg.enabled),
-    threshold:   Number(cfg.threshold || 0),
-    topUpAmount: Number(cfg.topUpAmount || 0),
-    hasVault:    Boolean(data.paypalVaultId),
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// autotopup-save  { idToken, enabled, threshold, topUpAmount }  →  { success, ...settings }
-//
-// Requires a saved PayPal vault token to actually enable it — auto top-up
-// charges unattended, so it can only use an already-vaulted payment method
-// (saved automatically on a prior manual deposit; see capture-order).
-// ─────────────────────────────────────────────────────────────────────────────
-async function handleAutoTopUpSave(req, res) {
-  const { idToken, enabled, threshold, topUpAmount } = req.body;
-  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
-
-  const fbUser = await verifyFirebaseToken(idToken);
-  const uid = fbUser.localId;
-
-  const db = getAdminDb();
-  const userRef = db.collection('users').doc(uid);
-  const snap = await userRef.get();
-  if (!snap.exists) return res.status(404).json({ error: 'User not found' });
-  const data = snap.data();
-
-  const wantsEnabled = Boolean(enabled);
-
-  if (wantsEnabled) {
-    if (!data.paypalVaultId) {
-      return res.status(400).json({
-        error: 'Make one PayPal deposit first so we have a saved payment method to auto-charge.',
-      });
-    }
-
-    const th  = Number(threshold);
-    const amt = Number(topUpAmount);
-
-    if (!th || th < AUTOTOPUP_MIN_THRESHOLD || th > AUTOTOPUP_MAX_THRESHOLD) {
-      return res.status(400).json({ error: `Threshold must be between $${AUTOTOPUP_MIN_THRESHOLD} and $${AUTOTOPUP_MAX_THRESHOLD}.` });
-    }
-    if (!amt || amt < AUTOTOPUP_MIN_AMOUNT || amt > AUTOTOPUP_MAX_AMOUNT) {
-      return res.status(400).json({ error: `Top-up amount must be between $${AUTOTOPUP_MIN_AMOUNT} and $${AUTOTOPUP_MAX_AMOUNT}.` });
-    }
-
-    await userRef.set({
-      autoTopUp: {
-        enabled:     true,
-        threshold:   parseFloat(th.toFixed(2)),
-        topUpAmount: parseFloat(amt.toFixed(2)),
-        updatedAt:   FieldValue.serverTimestamp(),
-      },
-    }, { merge: true });
-
-    await userRef.collection('transactions').add({
-      type:      'autotopup_settings',
-      amount:    0,
-      label:     'Auto top-up enabled',
-      note:      `Will top up $${amt.toFixed(2)} whenever your balance drops below $${th.toFixed(2)}.`,
-      status:    'completed',
-      createdAt: FieldValue.serverTimestamp(),
-    });
-
-    return res.status(200).json({ success: true, enabled: true, threshold: th, topUpAmount: amt });
-  }
-
-  // Disabling — always allowed, no vault requirement
-  await userRef.set({
-    autoTopUp: {
-      enabled:   false,
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-  }, { merge: true });
-
-  await userRef.collection('transactions').add({
-    type:      'autotopup_settings',
-    amount:    0,
-    label:     'Auto top-up disabled',
-    status:    'completed',
-    createdAt: FieldValue.serverTimestamp(),
-  });
-
-  return res.status(200).json({ success: true, enabled: false });
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // autowithdraw-get  { idToken }
@@ -2567,7 +2213,7 @@ async function handleAutoSendRun(req, res) {
       });
 
       succeeded++;
-      await maybeAutoTopUp(db, senderUid);
+      // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
       await maybeAutoWithdraw(db, schedule.recipientUid);
       console.log(`[autosend] OK schedule=${scheduleRef.id} sender=${senderUid} newBal=${result.newSenderBal}`);
 
@@ -2697,7 +2343,7 @@ async function handleBoostListing(req, res) {
     return { updatedBal, newUntil };
   });
 
-  await maybeAutoTopUp(db, uid);
+  // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
 
   return res.status(200).json({
     success:      true,
