@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { fetchFullSeller, fetchSellerDealStats, type FullSeller, type SellerDealStats } from "@/lib/useSeller";
 import SellerProfileHeader from "@/components/seller/SellerProfileHeader";
@@ -16,10 +16,25 @@ import DonateOverlay from "@/components/seller/DonateOverlay";
 // generateMetadata + notFound() for crawlers/SSR, and renders this
 // component for the actual interactive UI, same as the old page did
 // for every visitor before.
-export default function SellerProfileClient({ uid }: { uid: string }) {
+//
+// `initialSeller` is the server-fetched profile (see page.tsx's
+// getSellerFullProfile call) — seeded directly into state so the first
+// render already shows real content instead of the loading skeleton,
+// both for a crawler that never runs the effect below and for a human
+// visitor who'd otherwise see a content flash while the client refetch
+// resolves. It's `null` for a not-found seller (page.tsx already
+// determined that), so the effect's own fetchFullSeller call is what
+// sets notFoundState in that case, same as before.
+export default function SellerProfileClient({
+  uid,
+  initialSeller = null,
+}: {
+  uid: string;
+  initialSeller?: FullSeller | null;
+}) {
   const { user } = useAuth();
 
-  const [seller, setSeller] = useState<FullSeller | null>(null);
+  const [seller, setSeller] = useState<FullSeller | null>(initialSeller);
   const [notFoundState, setNotFoundState] = useState(false);
   const [dealStats, setDealStats] = useState<SellerDealStats | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -28,12 +43,33 @@ export default function SellerProfileClient({ uid }: { uid: string }) {
 
   const isOwnProfile = !!user && user.uid === uid;
 
+  // Guards the reset-before-refetch logic below: true only once, on this
+  // component's very first effect run. That first run is when
+  // `initialSeller` (SSR data, already correct for this uid) is sitting
+  // in state — nothing to clear. Every later run of this effect (uid
+  // changed via client-side nav to a different seller, e.g. clicking a
+  // "similar sellers" link) has stale data from the *previous* uid that
+  // does need clearing before the new fetch resolves.
+  const isFirstRun = useRef(true);
+
   useEffect(() => {
     if (!uid) return;
     let cancelled = false;
-    setSeller(null);
-    setNotFoundState(false);
-    setDealStats(null);
+
+    if (!isFirstRun.current) {
+      setSeller(null);
+      setNotFoundState(false);
+      setDealStats(null);
+    }
+    isFirstRun.current = false;
+    // Deliberately NOT resetting `seller`/`notFoundState`/`dealStats` to
+    // their empty states on the first run (see isFirstRun above) — doing
+    // so would blank out the SSR-seeded `initialSeller` the instant this
+    // effect runs on mount, producing exactly the loading flash seeding
+    // it was meant to avoid. The fresh fetchFullSeller call below still
+    // always runs and overwrites `seller` once it resolves (auth-aware
+    // fields like isOwnProfile access need that fresh read) — first run
+    // just doesn't clear the screen before that happens.
     (async () => {
       const s = await fetchFullSeller(uid);
       if (cancelled) return;
