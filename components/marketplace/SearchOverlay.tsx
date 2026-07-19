@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Listing } from "@/lib/listings";
+import { isBoosted } from "@/lib/listings";
 import { useRecentSearches } from "@/lib/useRecentSearches";
 
 interface Suggestion {
@@ -55,6 +56,35 @@ function resultThumb(listing: Listing): string {
     return listing.images?.[2] || listing.imageCover || listing.images?.[0] || PLACEHOLDER_THUMB;
   }
   return listing.images?.[2] || listing.imageCover || listing.images?.[0] || PLACEHOLDER_THUMB;
+}
+
+// Mirrors the same Timestamp-or-number normalization isBoosted() already
+// uses for boostedUntil, applied to createdAt so recency sorting works
+// regardless of whether the field came back as a Firestore Timestamp or
+// a plain number (server vs. any client-side mock data).
+function createdAtMs(listing: Listing): number {
+  const c = listing.createdAt as number | { toMillis?: () => number; seconds?: number } | undefined;
+  if (!c) return 0;
+  if (typeof c === "number") return c;
+  if (typeof c.toMillis === "function") return c.toMillis();
+  if (typeof c.seconds === "number") return c.seconds * 1000;
+  return 0;
+}
+
+// Empty-state recommendations shown before the user has typed anything
+// (and has no recent searches either) — boosted listings first (sellers
+// paid for that placement, same priority BoostedRow gives them elsewhere),
+// then the most recently listed, so the panel is never just a blank
+// magnifying-glass icon with nothing to act on.
+function recommended(listings: Listing[], limit: number): Listing[] {
+  return [...listings]
+    .filter((l) => l.status !== "sold" && l.status !== "removed")
+    .sort((a, b) => {
+      const boostDiff = Number(isBoosted(b)) - Number(isBoosted(a));
+      if (boostDiff !== 0) return boostDiff;
+      return createdAtMs(b) - createdAtMs(a);
+    })
+    .slice(0, limit);
 }
 
 export default function SearchOverlay({
@@ -147,6 +177,8 @@ export default function SearchOverlay({
         .slice(0, 20)
     : [];
 
+  const recs: Listing[] = !q ? recommended(listings, 8) : [];
+
   function commitSearch(term: string) {
     const trimmed = term.trim();
     if (!trimmed) return;
@@ -203,49 +235,98 @@ export default function SearchOverlay({
 
       <div className="mp-so-body">
         {!q ? (
-          recent.length ? (
-            <>
-              <div className="mp-so-section-head">
-                <span>Recent searches</span>
-                <button className="mp-so-clear-all" onClick={clearRecent}>
-                  Clear all
-                </button>
-              </div>
-              <div className="mp-so-list">
-                {recent.map((term) => (
-                  <button key={term} className="mp-so-row" onClick={() => commitSearch(term)}>
-                    <svg className="mp-so-row-icon" width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <circle cx={12} cy={12} r={9} />
-                      <polyline points="12 7 12 12 15 14" />
-                    </svg>
-                    <span className="mp-so-row-text">{term}</span>
-                    <span
-                      className="mp-so-row-remove"
-                      role="button"
-                      aria-label={`Remove ${term} from recent searches`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeRecent(term);
-                      }}
-                    >
-                      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
-                        <line x1={18} y1={6} x2={6} y2={18} />
-                        <line x1={6} y1={6} x2={18} y2={18} />
-                      </svg>
-                    </span>
+          <>
+            {recent.length ? (
+              <>
+                <div className="mp-so-section-head">
+                  <span>Recent searches</span>
+                  <button className="mp-so-clear-all" onClick={clearRecent}>
+                    Clear all
                   </button>
-                ))}
+                </div>
+                <div className="mp-so-list">
+                  {recent.map((term) => (
+                    <button key={term} className="mp-so-row" onClick={() => commitSearch(term)}>
+                      <svg className="mp-so-row-icon" width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <circle cx={12} cy={12} r={9} />
+                        <polyline points="12 7 12 12 15 14" />
+                      </svg>
+                      <span className="mp-so-row-text">{term}</span>
+                      <span
+                        className="mp-so-row-remove"
+                        role="button"
+                        aria-label={`Remove ${term} from recent searches`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeRecent(term);
+                        }}
+                      >
+                        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
+                          <line x1={18} y1={6} x2={6} y2={18} />
+                          <line x1={6} y1={6} x2={18} y2={18} />
+                        </svg>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+
+            {recs.length ? (
+              <>
+                <div className="mp-so-section-head">
+                  <span>Recommended for you</span>
+                </div>
+                <div className="mp-so-list">
+                  {recs.map((listing) => {
+                    const price = listing.financials?.price;
+                    const priceStr = typeof price === "number" ? `$${price.toLocaleString()}` : "—";
+                    const type = listing.type || "website";
+                    const tc = TYPE_COLOR[type] || "#34d399";
+                    const thumb = resultThumb(listing);
+                    return (
+                      <button
+                        key={listing.id}
+                        className="mp-so-row mp-so-result"
+                        onClick={() => {
+                          onOpenListing(listing);
+                          handleClose();
+                        }}
+                      >
+                        <span className="mp-so-result-thumb-wrap">
+                          <img
+                            className="mp-so-result-thumb"
+                            src={thumb}
+                            alt=""
+                            loading="lazy"
+                            onError={(e) => {
+                              e.currentTarget.src = PLACEHOLDER_THUMB;
+                            }}
+                          />
+                          <span className="mp-so-result-dot" style={{ background: tc }} />
+                        </span>
+                        <span className="mp-so-row-text">
+                          <span className="mp-so-result-title">{listing.title || "Untitled"}</span>
+                          <span className="mp-so-result-sub">{isBoosted(listing) ? "Boosted" : type}</span>
+                        </span>
+                        <span className="mp-so-result-price">{priceStr}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
+
+            {!recent.length && !recs.length ? (
+              <div className="mp-so-empty">
+                <svg width={40} height={40} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}>
+                  <circle cx={11} cy={11} r={8} />
+                  <line x1={21} y1={21} x2="16.65" y2="16.65" />
+                </svg>
+                <span>Search listings by title, type, or description</span>
               </div>
-            </>
-          ) : (
-            <div className="mp-so-empty">
-              <svg width={40} height={40} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}>
-                <circle cx={11} cy={11} r={8} />
-                <line x1={21} y1={21} x2="16.65" y2="16.65" />
-              </svg>
-              <span>Search listings by title, type, or description</span>
-            </div>
-          )
+            ) : null}
+          </>
         ) : matches.length ? (
           <div className="mp-so-list">
             {matches.map((m) => {
