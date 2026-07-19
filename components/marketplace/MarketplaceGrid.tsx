@@ -150,7 +150,7 @@ export default function MarketplaceGrid({ autoOpenSearch = false }: { autoOpenSe
                 if (!listing) return null;
                 return <ListingCard key={item.id} listing={listing} onOpen={onOpen} onOpenSeller={onOpenSeller} />;
               }
-              if (item.kind === "ad") return <AdSlot key={item.id} kind={item.adKind} />;
+              if (item.kind === "ad") return <AdSlot key={item.id} kind={item.adKind} targetBreakpoint={item.targetBreakpoint} />;
               if (item.kind === "seller-promo") return <SellerPromoCard key={item.id} />;
               return <AiPromoCard key={item.id} />;
             })
