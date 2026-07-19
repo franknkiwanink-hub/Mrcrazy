@@ -142,6 +142,7 @@ export default function ThemeModal({
     setSelectedId(opt.id);
     applyTheme(theme);
     persistTheme(theme);
+    onClose();
   }
 
   function handleImgError(id: string) {
