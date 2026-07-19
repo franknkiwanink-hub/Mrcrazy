@@ -12,6 +12,7 @@
 // template/price/search params). AI Search hits /api/aistudio
 // (action: 'recommendations') directly from AiSearchPanel.
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Listing, ListingType } from "@/lib/listings";
 import { FALLBACK_PRICE_CAP, type ActiveTag, type TemplateFilter } from "@/lib/useMarketplaceFilters";
 import { useLimits } from "@/lib/useLimits";
@@ -70,6 +71,13 @@ export default function MarketplaceFilterBar({
   const [exactMax, setExactMax] = useState(priceMax !== null ? String(priceMax) : "");
   const priceBtnRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  // Portal target isn't available during SSR, and even on the client we
+  // only want to read it after mount — same guard SearchOverlay and
+  // MarketplaceModal use for their own document.body portals.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (!popoverOpen) return;
@@ -81,6 +89,22 @@ export default function MarketplaceFilterBar({
     }
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
+  }, [popoverOpen]);
+
+  // Escape-to-close + background scroll lock, matching the other
+  // full-screen/portaled overlays (SearchOverlay, MarketplaceModal).
+  useEffect(() => {
+    if (!popoverOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setPopoverOpen(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = prevOverflow;
+    };
   }, [popoverOpen]);
 
   const lo = Math.min(sliderMin, sliderMax);
@@ -202,121 +226,136 @@ export default function MarketplaceFilterBar({
               <polyline points="6 9 12 15 18 9" />
             </svg>
           </button>
-          <div
-            className={"mp-price-popover" + (popoverOpen ? " active" : "")}
-            id="mpPricePopover"
-            ref={popoverRef}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mp-pp-header">
-              <span>Price range</span>
-              <button
-                className="mp-pp-close"
-                id="mpPopClose"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setPopoverOpen(false);
-                }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                  <line x1={18} y1={6} x2={6} y2={18} />
-                  <line x1={6} y1={6} x2={18} y2={18} />
-                </svg>
-              </button>
-            </div>
-            <div className="mp-slider-track">
-              <div className="mp-slider-range" id="mpSliderRange" style={{ left: rangeLeft, right: rangeRight }} />
-              <input
-                type="range"
-                id="mpSliderMin"
-                className="mp-range-input"
-                min={0}
-                max={PRICE_CAP}
-                step={10}
-                value={sliderMin}
-                onChange={(e) => {
-                  let v = Number(e.target.value);
-                  if (v > sliderMax) v = sliderMax;
-                  setSliderMin(v);
-                  setExactMin(String(v));
-                }}
-              />
-              <input
-                type="range"
-                id="mpSliderMax"
-                className="mp-range-input"
-                min={0}
-                max={PRICE_CAP}
-                step={10}
-                value={sliderMax}
-                onChange={(e) => {
-                  let v = Number(e.target.value);
-                  if (v < sliderMin) v = sliderMin;
-                  setSliderMax(v);
-                  setExactMax(v >= PRICE_CAP ? "" : String(v));
-                }}
-              />
-            </div>
-            <div className="mp-slider-scale">
-              <span>$0</span>
-              <span>$2.5k</span>
-              <span>$5k</span>
-              <span>$7.5k</span>
-              <span>$10k+</span>
-            </div>
-            <div className="mp-exact-row">
-              <label className="mp-exact-field">
-                <span>Min</span>
-                <div className="mp-input-prefix">
-                  <span>$</span>
-                  <input
-                    type="number"
-                    id="mpExactMin"
-                    min={0}
-                    step={0.01}
-                    placeholder="0.00"
-                    value={exactMin}
-                    onChange={(e) => {
-                      setExactMin(e.target.value);
-                      const v = parseFloat(e.target.value);
-                      setSliderMin(isNaN(v) ? 0 : Math.min(v, PRICE_CAP));
-                    }}
-                  />
-                </div>
-              </label>
-              <span className="mp-exact-dash">–</span>
-              <label className="mp-exact-field">
-                <span>Max</span>
-                <div className="mp-input-prefix">
-                  <span>$</span>
-                  <input
-                    type="number"
-                    id="mpExactMax"
-                    min={0}
-                    step={0.01}
-                    placeholder="Any"
-                    value={exactMax}
-                    onChange={(e) => {
-                      setExactMax(e.target.value);
-                      const v = parseFloat(e.target.value);
-                      setSliderMax(isNaN(v) ? PRICE_CAP : Math.min(v, PRICE_CAP));
-                    }}
-                  />
-                </div>
-              </label>
-            </div>
-            <div className="mp-pp-actions">
-              <button className="mp-pp-btn ghost" id="mpPriceReset" onClick={resetPrice}>
-                Reset
-              </button>
-              <button className="mp-pp-btn primary" id="mpPriceApply" onClick={applyPrice}>
-                Apply
-              </button>
-            </div>
-          </div>
         </div>
         </div>
       </div>
+      {/* Portaled straight to document.body — #mpFilterBar has its own
+          backdrop-filter, which establishes a containing block for any
+          position:fixed descendant, so a popover left nested inside it
+          gets centered/clipped relative to the filter bar's box instead
+          of the real viewport (this was the "price popup pushes the
+          whole page wider / lands off to the side" bug). Same portal
+          pattern already used by SearchOverlay and MarketplaceModal. */}
+      {mounted && popoverOpen
+        ? createPortal(
+            <>
+              <div className="mp-price-popover-backdrop active" onClick={() => setPopoverOpen(false)} />
+              <div
+                className="mp-price-popover active"
+                id="mpPricePopover"
+                ref={popoverRef}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="mp-pp-header">
+                  <span>Price range</span>
+                  <button
+                    className="mp-pp-close"
+                    id="mpPopClose"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPopoverOpen(false);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                      <line x1={18} y1={6} x2={6} y2={18} />
+                      <line x1={6} y1={6} x2={18} y2={18} />
+                    </svg>
+                  </button>
+                </div>
+                <div className="mp-slider-track">
+                  <div className="mp-slider-range" id="mpSliderRange" style={{ left: rangeLeft, right: rangeRight }} />
+                  <input
+                    type="range"
+                    id="mpSliderMin"
+                    className="mp-range-input"
+                    min={0}
+                    max={PRICE_CAP}
+                    step={10}
+                    value={sliderMin}
+                    onChange={(e) => {
+                      let v = Number(e.target.value);
+                      if (v > sliderMax) v = sliderMax;
+                      setSliderMin(v);
+                      setExactMin(String(v));
+                    }}
+                  />
+                  <input
+                    type="range"
+                    id="mpSliderMax"
+                    className="mp-range-input"
+                    min={0}
+                    max={PRICE_CAP}
+                    step={10}
+                    value={sliderMax}
+                    onChange={(e) => {
+                      let v = Number(e.target.value);
+                      if (v < sliderMin) v = sliderMin;
+                      setSliderMax(v);
+                      setExactMax(v >= PRICE_CAP ? "" : String(v));
+                    }}
+                  />
+                </div>
+                <div className="mp-slider-scale">
+                  <span>$0</span>
+                  <span>$2.5k</span>
+                  <span>$5k</span>
+                  <span>$7.5k</span>
+                  <span>$10k+</span>
+                </div>
+                <div className="mp-exact-row">
+                  <label className="mp-exact-field">
+                    <span>Min</span>
+                    <div className="mp-input-prefix">
+                      <span>$</span>
+                      <input
+                        type="number"
+                        id="mpExactMin"
+                        min={0}
+                        step={0.01}
+                        placeholder="0.00"
+                        value={exactMin}
+                        onChange={(e) => {
+                          setExactMin(e.target.value);
+                          const v = parseFloat(e.target.value);
+                          setSliderMin(isNaN(v) ? 0 : Math.min(v, PRICE_CAP));
+                        }}
+                      />
+                    </div>
+                  </label>
+                  <span className="mp-exact-dash">–</span>
+                  <label className="mp-exact-field">
+                    <span>Max</span>
+                    <div className="mp-input-prefix">
+                      <span>$</span>
+                      <input
+                        type="number"
+                        id="mpExactMax"
+                        min={0}
+                        step={0.01}
+                        placeholder="Any"
+                        value={exactMax}
+                        onChange={(e) => {
+                          setExactMax(e.target.value);
+                          const v = parseFloat(e.target.value);
+                          setSliderMax(isNaN(v) ? PRICE_CAP : Math.min(v, PRICE_CAP));
+                        }}
+                      />
+                    </div>
+                  </label>
+                </div>
+                <div className="mp-pp-actions">
+                  <button className="mp-pp-btn ghost" id="mpPriceReset" onClick={resetPrice}>
+                    Reset
+                  </button>
+                  <button className="mp-pp-btn primary" id="mpPriceApply" onClick={applyPrice}>
+                    Apply
+                  </button>
+                </div>
+              </div>
+            </>,
+            document.body
+          )
+        : null}
       <div id="mpActiveTags" style={{ display: activeTags.length ? "flex" : "none" }}>
         {activeTags.map((tag, i) => (
           <span className="active-filter-tag" key={i}>
