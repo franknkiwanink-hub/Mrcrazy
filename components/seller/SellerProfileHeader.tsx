@@ -6,6 +6,7 @@ import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useToast } from "@/lib/useToast";
+import { useConfirm } from "@/lib/useConfirm";
 import Stars from "@/components/marketplace/Stars";
 import SellerBadges from "./SellerBadges";
 import type { FullSeller } from "@/lib/useSeller";
@@ -66,12 +67,12 @@ export default function SellerProfileHeader({
   const { user, profile } = useAuth();
   const { openAuthModal } = useAuthModal();
   const { toast, ToastHost } = useToast();
+  const { confirm, alert, ConfirmHost } = useConfirm();
   const isOwnProfile = !!user && user.uid === seller.uid;
 
   const [isFollowing, setIsFollowing] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
   const [bioOverflowing, setBioOverflowing] = useState(false);
-  const [reportConfirming, setReportConfirming] = useState(false);
   const [reportBusy, setReportBusy] = useState(false);
   const [reportDone, setReportDone] = useState(false);
   const bioTextRef = useRef<HTMLDivElement>(null);
@@ -139,6 +140,14 @@ export default function SellerProfileHeader({
       openAuthModal();
       return;
     }
+    const confirmed = await confirm({
+      theme: "report",
+      title: "Report Seller",
+      msg: `Report ${seller.username}'s profile to our team? Our moderators will review it and take action if needed. False reports may result in account restrictions.`,
+      confirmText: "Report",
+    });
+    if (!confirmed) return;
+
     setReportBusy(true);
     try {
       const reportRef = await addDoc(collection(db, "reports"), {
@@ -170,10 +179,13 @@ export default function SellerProfileHeader({
       console.warn("seller report write", err);
     } finally {
       setReportBusy(false);
-      setReportConfirming(false);
       setReportDone(true);
-      toast("Report submitted — our team will review it within 24 hours.");
     }
+    await alert({
+      theme: "report",
+      title: "Report Submitted",
+      msg: "Our team will review this within 24 hours. Thank you for keeping Siterifty safe.",
+    });
   }
 
   const initial = seller.username.charAt(0).toUpperCase();
@@ -280,7 +292,8 @@ export default function SellerProfileHeader({
                 id="spReportSellerBtn"
                 aria-label="Report this seller"
                 title="Report seller"
-                onClick={() => (user ? setReportConfirming(true) : openAuthModal())}
+                disabled={reportBusy}
+                onClick={() => (user ? handleReport() : openAuthModal())}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
@@ -291,34 +304,7 @@ export default function SellerProfileHeader({
             )}
           </div>
 
-          {reportConfirming && (
-            // Inline confirm overlay — the original used a global
-            // window.srfModal.confirm() dialog that hasn't been ported to
-            // this app yet, so this follows the same inline-styled-overlay
-            // convention already established for the Sign Out confirm in
-            // SettingsSidebar.tsx rather than inventing new global modal
-            // infrastructure as a side effect of this feature.
-            <div
-              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center" }}
-              onClick={() => !reportBusy && setReportConfirming(false)}
-            >
-              <div style={{ background: "#141420", padding: 24, borderRadius: 12, color: "#fff", maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
-                <h3 style={{ marginTop: 0 }}>Report Seller</h3>
-                <p style={{ opacity: 0.7, fontSize: 14 }}>
-                  Report {seller.username}&apos;s profile to our team? Our moderators will review it and take action
-                  if needed. False reports may result in account restrictions.
-                </p>
-                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-                  <button onClick={() => setReportConfirming(false)} disabled={reportBusy}>
-                    Cancel
-                  </button>
-                  <button onClick={handleReport} disabled={reportBusy}>
-                    {reportBusy ? "Reporting…" : "Report"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <ConfirmHost />
         </div>
 
         <div id="spModalStats">
