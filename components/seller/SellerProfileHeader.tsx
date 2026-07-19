@@ -183,9 +183,7 @@ export default function SellerProfileHeader({
 
   return (
     <>
-      <div id="spModalCover">
-        <img src={`https://picsum.photos/seed/${encodeURIComponent(seller.uid)}/800/240`} alt="" loading="lazy" />
-      </div>
+      <div id="spModalCover" />
 
       <div id="spModalMain">
         <div id="spModalAvatarRow">
