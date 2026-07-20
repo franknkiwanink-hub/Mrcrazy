@@ -83,6 +83,31 @@
 //                              The source listing itself is always excluded
 //                              from the result.
 //
+//   action: 'listing.search'  { idToken?, q, type?, limit? }
+//                              → { ok: true, data: { listings, query } }
+//                              Public — same auth posture as listing.feed.
+//                              Server-side full-catalog search: matches `q`
+//                              against every ACTIVE listing of the given
+//                              type(s), not just whatever page of the feed
+//                              the client happens to have loaded already.
+//                              Costs ZERO additional Firestore reads beyond
+//                              what browsing already pays — reuses
+//                              _getTypePool's same cached, TTL'd pool
+//                              (same doc handleFeed/handleSimilar already
+//                              warm) and does the match + scoring entirely
+//                              in memory, server-side. Scoring mirrors the
+//                              client's existing weights exactly (title
+//                              startsWith=100 / includes=80 / type
+//                              includes=60 / description includes=40) so
+//                              results are identical to what the old
+//                              client-side-only search showed — just run
+//                              against the full pool instead of a partial
+//                              in-memory list. Results capped at `limit`
+//                              (default 20, max 50) and deliberately skip
+//                              the ownerPlan/getAll lookup handleFeed does
+//                              (search doesn't need the premium shimmer,
+//                              and a large match set shouldn't pay for it).
+//
 //   action: 'listing.daily-stats' { idToken, listingId, days }
 //                              → { ok: true, data: { days: [{ date, impressionCount, viewCount }, ...] } }
 //                              Owner only. Per-day impression/view history for
@@ -226,7 +251,7 @@ export default async function handler(req, res) {
   // browse listings and preview/download an already-attached build file
   // without being logged in. Every other action (create/update/delete/
   // report) still requires auth.
-  const PUBLIC_ACTIONS = ['listing.feed', 'listing.file-url', 'listing.impression', 'listing.view', 'listing.premium-sellers', 'listing.similar'];
+  const PUBLIC_ACTIONS = ['listing.feed', 'listing.file-url', 'listing.impression', 'listing.view', 'listing.premium-sellers', 'listing.similar', 'listing.search'];
   if (!idToken && !PUBLIC_ACTIONS.includes(action)) {
     return fail(res, new ApiError('Missing auth token', 'AUTH_MISSING', 401));
   }
@@ -239,6 +264,7 @@ export default async function handler(req, res) {
       case 'listing.report': return ok(res, await handleReport(req.body, idToken));
       case 'listing.feed':   return ok(res, await handleFeed(req.body, idToken));
       case 'listing.similar': return ok(res, await handleSimilar(req.body, idToken));
+      case 'listing.search':  return ok(res, await handleSearch(req.body, idToken));
       case 'listing.mine':   return ok(res, await handleMine(req.body, idToken));
       case 'listing.daily-stats': return ok(res, await handleDailyStats(req.body, idToken));
       case 'listing.file-url': return ok(res, await handleFileUrl(req.body, idToken));
@@ -1181,6 +1207,80 @@ async function handleSimilar(body, idToken) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// listing.search  { idToken?, q, type?, limit? }  → { listings, query }
+//
+// Public, same auth posture as handleFeed/handleSimilar. The fix for
+// search's Firestore cost: previously (client-side only) search could only
+// ever filter whatever page of the feed happened to already be loaded in
+// the browser — a listing on page 4 that hadn't been scrolled to yet was
+// invisible to search. Running a fresh Firestore query per keystroke was
+// the obvious alternative, but at 5000 views/day that blows the free-tier
+// read budget fast (see design notes). This does neither: it reuses
+// _getTypePool's cached, TTL'd pool — the exact same cached doc handleFeed
+// and handleSimilar already read — and matches in memory. A cache hit
+// costs one Firestore doc read per type searched (same as a feed pageview
+// touching that type); a cache miss costs the same one real collection
+// query _getTypePool always pays on TTL expiry, not a new cost search
+// introduces. No matter how many times a user re-searches within the TTL
+// window, or how many concurrent users search, the marginal Firestore cost
+// is zero beyond ordinary browsing.
+const SEARCH_DEFAULT_LIMIT = 20;
+const SEARCH_MAX_LIMIT = 50;
+
+// Mirrors SearchOverlay.tsx / MarketplaceSearchBar's client-side scoring
+// exactly, so server results are identical to what the old client-only
+// popover showed — title startsWith beats title includes beats type match
+// beats description match. Returns -1 (no match) rather than 0 so a
+// legitimate zero-score match is never possible to confuse with "excluded".
+function _searchScore(listing, q) {
+  const title = listing.title || 'Untitled';
+  const type = listing.type || 'website';
+  const desc = listing.description || '';
+  const tl = title.toLowerCase();
+  if (tl.startsWith(q)) return 100;
+  if (tl.includes(q)) return 80;
+  if (type.toLowerCase().includes(q)) return 60;
+  if (desc.toLowerCase().includes(q)) return 40;
+  return -1;
+}
+
+async function handleSearch(body, idToken) {
+  if (idToken) await verifyFirebaseToken(idToken);
+  const db = getAdminDb();
+
+  const { q, type, limit } = body || {};
+  const query = typeof q === 'string' ? q.trim().toLowerCase() : '';
+  if (!query) return { listings: [], query: '' };
+
+  const size = Math.min(SEARCH_MAX_LIMIT, Math.max(1, Number(limit) || SEARCH_DEFAULT_LIMIT));
+  const activeTypes = (type && FEED_TYPES.includes(type)) ? [type] : FEED_TYPES;
+
+  // Same per-type cached pool handleFeed/handleSimilar already warm — a
+  // hit here costs exactly what a feed pageview touching these types
+  // already costs, a miss costs exactly what _getTypePool's own TTL-expiry
+  // refresh already costs. No new Firestore query shape is introduced.
+  const pools = await Promise.all(activeTypes.map((t) => _getTypePool(db, t)));
+
+  const scored = [];
+  pools.forEach((pool) => {
+    pool.forEach((listing) => {
+      const score = _searchScore(listing, query);
+      if (score >= 0) scored.push({ listing, score });
+    });
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  const results = scored.slice(0, size).map((s) => s.listing);
+
+  // Deliberately no ownerPlan/getAll lookup here (unlike handleFeed) — a
+  // large match set (up to SEARCH_MAX_LIMIT) shouldn't pay the extra reads
+  // just so search results can show the premium shimmer. Client falls back
+  // to ownerPlan: 'free' for any listing missing the field, same as it
+  // already does for feed items before that lookup resolves.
+  return { listings: results, query };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // listing.premium-sellers  { idToken?, seed? }  → { sellers, seed }
 //
 // Public — signed-out visitors see the marketplace's Premium Sellers strip
@@ -1520,3 +1620,14 @@ async function handleView(body, idToken) {
 export const config = {
   api: { bodyParser: { sizeLimit: '2mb' } },
 };
+
+// Additive named export alongside the default `handler` — this file is
+// deliberately a byte-for-byte port of the original api/listings.js (see
+// header comment) and only exported the Node-style `handler` before. The
+// SSR /marketplace?q=... page (app/marketplace/searchListings.ts) needs to
+// call handleSearch's actual logic in-process — it can't POST to its own
+// /api/listings route from a Server Component efficiently (that would be
+// an extra, pointless HTTP hop within the same request). Exporting the
+// function directly, without touching the default-exported port itself,
+// is the least-invasive way to give it that access.
+export { handleSearch };
