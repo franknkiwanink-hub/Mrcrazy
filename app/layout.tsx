@@ -42,9 +42,9 @@ const BRAND_GLYPH_URL =
   "https://www.image2url.com/r2/default/images/1783717278670-ca484861-c917-4fdb-b330-a2baf612127e.svg";
 
 const SITE_TITLE =
-  "Siterifty — Buy & Sell Websites, Apps & Games for Indie & Small Developers";
+  "Siterifty — Buy & Sell Websites, Apps & Games";
 const SITE_DESCRIPTION =
-  "Siterifty is a secure, escrow-protected marketplace built for indie and small developers buying and selling websites, apps, and games. Browse profitable listings or list your own — safe, verified deals from start to finish.";
+  "Siterifty is an escrow-protected marketplace for indie developers to buy and sell websites, apps, and games — safe, verified deals start to finish.";
 
 // Original index.html sets this explicitly via <meta name="viewport"
 // content="width=device-width, initial-scale=1.0">. Next.js doesn't
@@ -77,11 +77,20 @@ export const metadata: Metadata = {
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
     type: "website",
+    images: [
+      {
+        url: "https://cdn.phototourl.com/member/2026-07-20-ac4fdc9a-270f-485c-8e67-990e9e8de1b6.jpg",
+        width: 1200,
+        height: 630,
+        alt: "Siterifty — Buy & Sell Websites, Apps & Games",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
+    images: ["https://cdn.phototourl.com/member/2026-07-20-ac4fdc9a-270f-485c-8e67-990e9e8de1b6.jpg"],
   },
 };
 
