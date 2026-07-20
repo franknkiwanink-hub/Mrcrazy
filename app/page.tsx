@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense } from "react";
+import { useRouter } from "next/navigation";
 import Hero from "@/components/home/Hero";
 import MarketplaceGrid from "@/components/marketplace/MarketplaceGrid";
-import MarketplaceModal from "@/components/marketplace/MarketplaceModal";
 import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 
 // The original site renders the hero and the marketplace grid on the same
@@ -15,20 +15,30 @@ import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 // the header without an extra margin on the section after it).
 //
 // The homepage grid runs in `preview` mode — a fixed dozen listings, no
-// infinite scroll — ending in a "See full marketplace" CTA that opens the
-// same full-screen MarketplaceModal Hero's own search bar already uses.
-// The real, unrestricted infinite-scroll feed lives only on /marketplace
-// itself (both inline as its own route, and here inside the modal).
+// infinite scroll — ending in a "See full marketplace" CTA. That CTA is a
+// real navigation to the standalone /marketplace route (not a modal, and
+// not the search overlay) — it just eases into that navigation with a
+// brief smooth-scroll-to-top first, so the shift reads as intentional
+// rather than an abrupt jump straight into a page change mid-scroll.
 export default function HomePage() {
-  const [marketplaceModalOpen, setMarketplaceModalOpen] = useState(false);
+  const router = useRouter();
+
+  const handleSeeFullMarketplace = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    // Give the smooth-scroll a moment to actually play before the route
+    // change swaps the page out from under it — long enough to read as
+    // a deliberate transition, short enough not to feel like a delay.
+    window.setTimeout(() => {
+      router.push("/marketplace");
+    }, 350);
+  };
 
   return (
     <>
       <Hero />
       <Suspense fallback={<SiteriftyLoader />}>
-        <MarketplaceGrid preview onSeeFullMarketplace={() => setMarketplaceModalOpen(true)} />
+        <MarketplaceGrid preview onSeeFullMarketplace={handleSeeFullMarketplace} />
       </Suspense>
-      <MarketplaceModal open={marketplaceModalOpen} onClose={() => setMarketplaceModalOpen(false)} />
     </>
   );
 }
