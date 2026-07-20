@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import SignInRequired from "@/components/auth/SignInRequired";
 import { useAiSupportChatModal } from "@/components/support/AiSupportChatModalProvider";
 import {
   useInbox,
@@ -169,15 +170,11 @@ export default function InboxShell() {
 
         <div className="ibx-body" onScroll={handleScroll}>
           {!user ? (
-            <div className="ibx-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-              </svg>
-              <div className="ibx-empty-text">Sign in to see your messages</div>
-              <button className="ibx-open-chat-btn" style={{ marginTop: 14 }} onClick={openAuthModal}>
-                Sign in
-              </button>
-            </div>
+            <SignInRequired
+              fullScreen={false}
+              title="Sign in to see your messages"
+              description="Your chats, deal conversations, and group threads are only visible once you're signed in."
+            />
           ) : inbox.tab === "chats" ? (
             <ChatsTab inbox={inbox} onOpenChat={openChatRow} onOpenAiSupport={openAiSupportChat} />
           ) : inbox.tab === "deals" ? (
