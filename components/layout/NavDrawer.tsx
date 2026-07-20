@@ -57,10 +57,18 @@ export default function NavDrawer() {
   const listingsCount = useNavListingsCount(user?.uid, openCount);
 
   // Auth guard — ports __requireAuth: runs fn() if signed in, otherwise
-  // opens the auth modal instead.
+  // opens the auth modal instead. Closes the drawer first in the
+  // logged-out branch too (not just inside `fn`/`go`) — previously only
+  // `go()` called closeNav(), so a logged-out tap on something like
+  // "Start Selling" opened AuthModal while the drawer stayed open on
+  // top of it (drawer is z-index 10501, AuthModal 9999), making it look
+  // like the tap did nothing at all.
   function requireAuth(fn: () => void) {
     if (user) fn();
-    else openAuthModal();
+    else {
+      closeNav();
+      openAuthModal();
+    }
   }
 
   function go(path: string) {
@@ -355,7 +363,7 @@ export default function NavDrawer() {
 
         <div className="nav-section">
           <div className="nav-section-title">Browse</div>
-          <a href="/marketplace" className="nav-link" id="navMarketplaceLink" onClick={(e) => { e.preventDefault(); requireAuth(() => go("/marketplace")); }}>
+          <a href="/marketplace" className="nav-link" id="navMarketplaceLink" onClick={(e) => { e.preventDefault(); go("/marketplace"); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <rect x="3" y="3" width="7" height="7" rx="1" />
               <rect x="14" y="3" width="7" height="7" rx="1" />
