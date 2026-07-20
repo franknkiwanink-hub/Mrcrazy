@@ -13,10 +13,10 @@ import type { AdBreakpoint } from "@/lib/feedInterleave";
 
 const AD_UNITS = {
   rect: {
-    key: "02d530955f964bb754200c047d5cab26",
+    key: "1d7ef19e8780b451cfff300fe1ff0ff0",
     width: 300,
     height: 250,
-    invokeSrc: "https://beavercolourfuldelinquent.com/02d530955f964bb754200c047d5cab26/invoke.js",
+    invokeSrc: "https://beavercolourfuldelinquent.com/1d7ef19e8780b451cfff300fe1ff0ff0/invoke.js",
   },
   banner: {
     key: "8a5b6bbea4b7fc182c78002d81437da5",
@@ -74,8 +74,48 @@ function useBreakpoint(): Breakpoint | null {
 // at all — not just visually hidden — so a tablet visitor never loads
 // the desktop ad network's iframe (or vice versa) for a slot that isn't
 // meant for them.
+// Adsterra's invoke.js fires document.write into the iframe once the ad
+// network actually has a creative to serve; until then (or if the
+// network never fills) the iframe sits there blank, which reads as a
+// broken empty box even though the slot itself is working correctly.
+// A skeleton placeholder covers that gap: shown from mount, faded out
+// the moment the iframe's own load event fires (script finished
+// executing/writing into the frame), so there's never a bare empty
+// rectangle — worst case on a true no-fill it just settles into a
+// quiet placeholder instead of nothing.
+function AdPlaceholder({ width, height }: { width: number; height: number }) {
+  return (
+    <div
+      className="sr-ad-placeholder"
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        maxWidth: width,
+        maxHeight: height,
+        margin: "0 auto",
+        borderRadius: 10,
+        background:
+          "linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.09) 37%, rgba(255,255,255,0.04) 63%)",
+        backgroundSize: "400% 100%",
+        animation: "sr-ad-shimmer 1.4s ease infinite",
+      }}
+    />
+  );
+}
+
 export default function AdSlot({ kind, targetBreakpoint }: { kind: "rect" | "banner" | "leaderboard"; targetBreakpoint: Breakpoint }) {
   const bp = useBreakpoint();
+  const [loaded, setLoaded] = useState(false);
+
+  // Reset the loaded flag whenever the slot's identity changes (kind or
+  // breakpoint) so a recycled/keyed remount doesn't inherit a stale
+  // "loaded" state from a different ad unit.
+  useEffect(() => {
+    setLoaded(false);
+  }, [kind, targetBreakpoint]);
+
   if (bp === null || bp !== targetBreakpoint) return null;
 
   const unit = AD_UNITS[kind];
@@ -94,7 +134,11 @@ export default function AdSlot({ kind, targetBreakpoint }: { kind: "rect" | "ban
     "</body></html>";
 
   return (
-    <div className={"sr-ad-slot" + (kind === "banner" ? " sr-ad-banner" : "") + (kind === "leaderboard" ? " sr-ad-leaderboard" : "")}>
+    <div
+      className={"sr-ad-slot" + (kind === "banner" ? " sr-ad-banner" : "") + (kind === "leaderboard" ? " sr-ad-leaderboard" : "")}
+      style={{ position: "relative" }}
+    >
+      {!loaded && <AdPlaceholder width={unit.width} height={unit.height} />}
       <iframe
         width={unit.width}
         height={unit.height}
@@ -102,7 +146,14 @@ export default function AdSlot({ kind, targetBreakpoint }: { kind: "rect" | "ban
         title="Advertisement"
         loading="lazy"
         srcDoc={srcDoc}
-        style={{ border: "none", maxWidth: "100%" }}
+        onLoad={() => setLoaded(true)}
+        style={{
+          border: "none",
+          maxWidth: "100%",
+          position: "relative",
+          opacity: loaded ? 1 : 0,
+          transition: "opacity 0.25s ease",
+        }}
       />
     </div>
   );
