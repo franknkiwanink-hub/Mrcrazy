@@ -16,10 +16,23 @@ import AiPromoCard from "@/components/marketplace/AiPromoCard";
 import { buildListingSlug } from "@/lib/slug";
 import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 
+const PREVIEW_COUNT = 12;
+
 export default function MarketplaceGrid({
   autoOpenSearch = false,
   onExitTakeover,
-}: { autoOpenSearch?: boolean; onExitTakeover?: () => void } = {}) {
+  preview = false,
+  onSeeFullMarketplace,
+}: {
+  autoOpenSearch?: boolean;
+  onExitTakeover?: () => void;
+  // Homepage-only mode: shows a fixed, small number of listings with no
+  // infinite scroll, ending in a "See full marketplace" CTA instead of
+  // loading forever. /marketplace itself never passes this — it stays
+  // the one place with the real, unrestricted infinite-scroll feed.
+  preview?: boolean;
+  onSeeFullMarketplace?: () => void;
+} = {}) {
   const filters = useMarketplaceFilters();
   const type = filters.typeFilter === "all" ? undefined : filters.typeFilter;
   const { listings, loading, loadingMore, error, exhausted, loadMore, reset } = useFeed({ pageSize: 24, type });
@@ -42,14 +55,10 @@ export default function MarketplaceGrid({
 
   // Client-side portion of mpApplyAndRender: template/price filters apply
   // on top of whatever the server already returned for the current type.
-  const filteredListings = useMemo(
-    () => filters.applyClientFilters(listings),
-    // applyClientFilters is itself memoized on [templateFilter, priceMin,
-    // priceMax] inside the hook, so depending on it (not the whole
-    // `filters` object, which is a fresh literal every render) avoids
-    // recomputing this on unrelated re-renders.
-    [filters.applyClientFilters, listings]
-  );
+  const filteredListings = useMemo(() => {
+    const applied = filters.applyClientFilters(listings);
+    return preview ? applied.slice(0, PREVIEW_COUNT) : applied;
+  }, [filters.applyClientFilters, listings, preview]);
   const listingById = useMemo(() => new Map(filteredListings.map((l) => [l.id, l])), [filteredListings]);
 
   // Ports mpRenderCards' ad/promo interleaving off the filtered set.
@@ -59,6 +68,7 @@ export default function MarketplaceGrid({
   // rootMargin: '200px' pattern exactly.
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    if (preview) return;
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
     const observer = new IntersectionObserver(
@@ -69,7 +79,7 @@ export default function MarketplaceGrid({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [loadMore]);
+  }, [loadMore, preview]);
 
   // First-load state — same client-side fetch (useFeed) the old small
   // in-grid spinner covered, now using the shared full-screen skeleton
@@ -102,7 +112,13 @@ export default function MarketplaceGrid({
       <PremiumSellersStrip />
 
       <div className="mp-results">
-        Showing <strong id="mpResultCount">{filteredListings.length}</strong>
+        {preview ? (
+          "Fresh listings"
+        ) : (
+          <>
+            Showing <strong id="mpResultCount">{filteredListings.length}</strong>
+          </>
+        )}
       </div>
 
       <BoostedRow listings={filteredListings} onOpen={onOpen} onOpenSeller={onOpenSeller} />
@@ -161,28 +177,53 @@ export default function MarketplaceGrid({
           )}
         </div>
 
-        <div ref={sentinelRef} id="mpLoadSentinel" />
-        {loadingMore ? (
-          <div id="mpLoadMoreSpinner" style={{ display: "flex" }}>
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="rgba(255,255,255,0.35)"
-              strokeWidth="2.2"
-              style={{ animation: "mp-spin 1s linear infinite", flexShrink: 0 }}
+        {preview ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: "28px 0 8px" }}>
+            <button
+              type="button"
+              onClick={onSeeFullMarketplace}
+              style={{
+                padding: "0.7rem 1.8rem",
+                background: "rgba(163,230,53,0.1)",
+                border: "1.5px solid rgba(163,230,53,0.4)",
+                borderRadius: "2rem",
+                color: "#a3e635",
+                fontSize: "0.88rem",
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                letterSpacing: "0.02em",
+              }}
             >
-              <circle cx="12" cy="12" r="10" strokeOpacity="0.2" />
-              <path d="M12 2a10 10 0 0110 10" strokeLinecap="round" />
-            </svg>
-            Loading more…
+              See full marketplace →
+            </button>
           </div>
-        ) : exhausted && filteredListings.length ? (
-          <div style={{ textAlign: "center", padding: "16px 0", opacity: 0.5, fontSize: 13 }}>
-            You&apos;ve reached the end of the marketplace.
-          </div>
-        ) : null}
+        ) : (
+          <>
+            <div ref={sentinelRef} id="mpLoadSentinel" />
+            {loadingMore ? (
+              <div id="mpLoadMoreSpinner" style={{ display: "flex" }}>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="rgba(255,255,255,0.35)"
+                  strokeWidth="2.2"
+                  style={{ animation: "mp-spin 1s linear infinite", flexShrink: 0 }}
+                >
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.2" />
+                  <path d="M12 2a10 10 0 0110 10" strokeLinecap="round" />
+                </svg>
+                Loading more…
+              </div>
+            ) : exhausted && filteredListings.length ? (
+              <div style={{ textAlign: "center", padding: "16px 0", opacity: 0.5, fontSize: 13 }}>
+                You&apos;ve reached the end of the marketplace.
+              </div>
+            ) : null}
+          </>
+        )}
       </div>
     </div>
   );
