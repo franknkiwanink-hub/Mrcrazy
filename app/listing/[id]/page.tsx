@@ -4,6 +4,7 @@ import { getListingById } from "./getListing";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
 import { fmtPrice, type Listing } from "@/lib/listings";
 import { buildListingSlug } from "@/lib/slug";
+import { isRealPhoto } from "@/lib/og/ogCard";
 import ListingViewBeacon from "./ListingViewBeacon";
 import SimilarListingsStrip from "@/components/listing/SimilarListingsStrip";
 import AppListingBody from "@/components/listing/AppListingBody";
@@ -35,6 +36,17 @@ function buildDescription(listing: Listing): string {
   return `${typeLabel} for sale on Siterifty — ${fmtPrice(listing.financials?.price)}.`;
 }
 
+// Same cover-photo resolution the old opengraph-image.tsx used: real
+// listing photo first, app icon as fallback, never the placehold.co
+// stand-in image. Used directly as the og:image/twitter:image URL now,
+// instead of being fetched into a Satori-rendered card — next/og's
+// renderer fetches external (Firebase Storage) images unreliably, which
+// was silently breaking these cards.
+function coverPhoto(listing: Listing): string | undefined {
+  const candidate = listing.imageCover || listing.images?.[0] || listing.appIcon;
+  return isRealPhoto(candidate) ? candidate : undefined;
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -55,11 +67,12 @@ export async function generateMetadata({
   const baseUrl = getPublicBaseUrl();
   const url = `${baseUrl}/listing/${buildListingSlug(listing.title, listing.id)}`;
 
-  // og:image / twitter:image are no longer set manually here — the
-  // sibling opengraph-image.tsx route generates a branded, per-listing
-  // card and Next.js auto-wires it for both og:image and the Twitter
-  // card, so anything set here would just be dead weight that gets
-  // overridden anyway.
+  // og:image / twitter:image now point directly at the listing's own
+  // Firebase-hosted photo — no more per-listing opengraph-image.tsx
+  // Satori render, since that route unreliably fetched the same Firebase
+  // Storage URL and silently produced a blank/broken card.
+  const photo = coverPhoto(listing);
+
   return {
     title,
     description,
@@ -69,11 +82,13 @@ export async function generateMetadata({
       description,
       url,
       type: "website",
+      images: photo ? [{ url: photo, width: 1200, height: 630, alt: listing.title || "Listing" }] : undefined,
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
+      images: photo ? [photo] : undefined,
     },
   };
 }
