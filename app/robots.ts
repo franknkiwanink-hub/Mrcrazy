@@ -12,7 +12,18 @@ export default function robots(): MetadataRoute.Robots {
   return {
     rules: {
       userAgent: "*",
-      allow: ["/", "/listing/", "/seller/", "/leaderboard", "/marketplace", "/about", "/contact", "/help", "/terms"],
+      allow: [
+        "/",
+        "/listing/",
+        "/seller/",
+        "/leaderboard",
+        "/marketplace",
+        "/about",
+        "/contact",
+        "/help",
+        "/terms",
+        "/gallery",
+      ],
       // Auth-gated app sections — a crawler can't sign in, so these just
       // hit a login wall. No SEO value in indexing them, and disallowing
       // keeps crawl budget on the public pages above. Note /sellers
