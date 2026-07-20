@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSellerSeoProfile, getSellerFullProfile } from "./getSeller";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
+import { isRealPhoto } from "@/lib/og/ogCard";
 import SellerProfileClient from "./SellerProfileClient";
 
 // NOTE: this route intentionally never calls notFound() for a missing
@@ -88,6 +89,13 @@ export async function generateMetadata({
 
   const description = truncatedBio ? `${truncatedBio} ${statLine}` : statLine;
 
+  // og:image / twitter:image now point directly at the seller's own
+  // Firebase-hosted avatar — no more per-seller opengraph-image.tsx
+  // Satori render, since that route unreliably fetched the same Firebase
+  // Storage URL and silently produced a blank/broken card. Never falls
+  // back to the placehold.co stand-in avatar (see isRealPhoto).
+  const avatar = isRealPhoto(seller.profilePic) ? seller.profilePic : undefined;
+
   return {
     title,
     description,
@@ -97,11 +105,13 @@ export async function generateMetadata({
       description,
       url,
       type: "profile",
+      images: avatar ? [{ url: avatar, width: 1200, height: 630, alt: seller.username }] : undefined,
     },
     twitter: {
       card: "summary_large_image",
       title,
       description,
+      images: avatar ? [avatar] : undefined,
     },
   };
 }
