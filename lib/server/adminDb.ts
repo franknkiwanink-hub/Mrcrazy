@@ -44,3 +44,39 @@ export function getPublicBaseUrl(): string {
     "https://siterifty.com"
   );
 }
+
+// Admin SDK Firestore Timestamps are class instances (Timestamp.prototype),
+// not plain objects — Next.js refuses to pass those from a Server
+// Component to a Client Component ("Only plain objects... can be passed").
+// This walks a value and converts any Timestamp-shaped value (has both
+// .toDate and .toMillis) to a plain ISO string, recursively, so no matter
+// which field holds one it's always safe to serialize. Arrays and nested
+// objects are walked too since a Timestamp could in principle live inside
+// any of them.
+//
+// Extracted here from app/listing/[id]/getListing.ts, which originally
+// kept this private to itself — now shared, since the SSR marketplace
+// search page (app/marketplace/searchListings.ts) needs the exact same
+// conversion for the listing docs handleSearch returns straight from the
+// Admin SDK.
+export function serializeTimestamps<T>(value: T): T {
+  if (value === null || value === undefined) return value;
+  if (
+    typeof value === "object" &&
+    typeof (value as any).toDate === "function" &&
+    typeof (value as any).toMillis === "function"
+  ) {
+    return (value as any).toDate().toISOString() as unknown as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => serializeTimestamps(v)) as unknown as T;
+  }
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = serializeTimestamps(v);
+    }
+    return out as T;
+  }
+  return value;
+}
