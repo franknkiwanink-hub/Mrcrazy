@@ -83,8 +83,8 @@ export default function Header() {
         </button>
         <div className="brand">
           <img
-            src="https://cdn.phototourl.com/member/2026-07-19-ffcaa670-d57c-44f6-8415-ab73856860b2.png"
-            alt="Siterifty.com"
+            src="/images/siterifty-logo.png"
+            alt="Siterifty.com — Buy, Sell, Build, Trust"
           />
         </div>
       </div>
