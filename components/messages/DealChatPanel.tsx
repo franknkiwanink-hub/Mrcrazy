@@ -57,6 +57,49 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
 
   const isSeller = !!(user && chat.room && user.uid === chat.room.sellerUid);
 
+  // Lock the page behind this panel for as long as it's mounted — same
+  // hardened pattern as WalletModal/SiteriftyLoader (lock both html and
+  // body, pin to the exact scroll offset, restore it on close) rather
+  // than relying on #dealChatPanel's own position:fixed/100dvh alone,
+  // which doesn't stop the underlying document from still scrolling on
+  // a touch-drag over the overlay. The messages list itself (messagesRef
+  // below) has its own independent overflow-y:auto and is the only
+  // thing meant to still scroll while this is open.
+  useEffect(() => {
+    const { style: bodyStyle } = document.body;
+    const { style: htmlStyle } = document.documentElement;
+    const scrollY = window.scrollY;
+
+    const prev = {
+      bodyOverflow: bodyStyle.overflow,
+      bodyPosition: bodyStyle.position,
+      bodyWidth: bodyStyle.width,
+      bodyTop: bodyStyle.top,
+      bodyHeight: bodyStyle.height,
+      htmlOverflow: htmlStyle.overflow,
+      htmlHeight: htmlStyle.height,
+    };
+
+    htmlStyle.overflow = "hidden";
+    htmlStyle.height = "100%";
+    bodyStyle.overflow = "hidden";
+    bodyStyle.position = "fixed";
+    bodyStyle.width = "100%";
+    bodyStyle.height = "100%";
+    bodyStyle.top = `-${scrollY}px`;
+
+    return () => {
+      htmlStyle.overflow = prev.htmlOverflow;
+      htmlStyle.height = prev.htmlHeight;
+      bodyStyle.overflow = prev.bodyOverflow;
+      bodyStyle.position = prev.bodyPosition;
+      bodyStyle.width = prev.bodyWidth;
+      bodyStyle.height = prev.bodyHeight;
+      bodyStyle.top = prev.bodyTop;
+      window.scrollTo(0, scrollY);
+    };
+  }, []);
+
   useEffect(() => {
     const el = messagesRef.current;
     if (!el) return;
