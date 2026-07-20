@@ -21,16 +21,46 @@ import { usePathname, useSearchParams } from "next/navigation";
 // bottom of window-scrolled flow on those pages) are the ones this
 // bites, since nothing was ever forcing the window itself back to 0.
 //
-// Fix: on every pathname change from an actual forward navigation
-// (link click / router.push), force window scroll to 0. True
-// browser Back/Forward (popstate) is left alone so the platform's own
-// scroll-position restoration for that specific gesture still works —
-// this only intervenes for new navigations, matching how a traditional
-// multi-page site always starts a freshly-navigated-to page at the top.
+// Previous fix attempt just trusted the browser's native scroll
+// restoration on Back/Forward (popstate) and only forced scrollTo(0,0)
+// on forward navigations. That doesn't actually work for the footer
+// case: native restoration remembers wherever the window was scrolled
+// to at the moment you navigated away — which, if you clicked a footer
+// link, IS the footer position. So Back "restores" you right back to
+// the footer, reproducing the exact bug this was meant to fix.
+//
+// Real fix: track our own scroll memory per pathname in sessionStorage.
+// Right before any forward navigation, save the current page's scroll
+// position under its own pathname key. On Back/Forward (popstate),
+// restore from OUR saved value for the page being returned to (which
+// was captured back when the user was still reading that page, before
+// they scrolled down to click a link) instead of the browser's native
+// value (which reflects click-time position, not read-time position).
+const SCROLL_KEY_PREFIX = "srf_scrollpos:";
+
+function saveScrollPos(pathname: string) {
+  try {
+    sessionStorage.setItem(SCROLL_KEY_PREFIX + pathname, String(window.scrollY));
+  } catch {
+    // sessionStorage unavailable (private mode, etc.) — safe to no-op,
+    // this is a UX nicety, not a hard dependency.
+  }
+}
+
+function readScrollPos(pathname: string): number {
+  try {
+    const raw = sessionStorage.getItem(SCROLL_KEY_PREFIX + pathname);
+    return raw ? parseInt(raw, 10) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export default function ScrollToTop() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isPopState = useRef(false);
+  const prevPathname = useRef(pathname);
 
   useEffect(() => {
     const onPopState = () => {
@@ -40,11 +70,27 @@ export default function ScrollToTop() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
+  // Capture scroll position for the page we're LEAVING, the instant a
+  // link is clicked — before the route actually changes. Click
+  // (capture phase) fires on any <a>/<Link> press, well before the
+  // pathname effect below runs, so this always records read-time
+  // position rather than whatever scroll a later effect might see.
+  useEffect(() => {
+    const onClickCapture = () => {
+      saveScrollPos(prevPathname.current);
+    };
+    document.addEventListener("click", onClickCapture, true);
+    return () => document.removeEventListener("click", onClickCapture, true);
+  }, []);
+
   useEffect(() => {
     if (isPopState.current) {
-      // Browser back/forward — let the browser/Next restore whatever
-      // scroll position it already has for that history entry.
+      // Browser back/forward — restore OUR remembered position for
+      // the page being returned to, not the browser's native one.
       isPopState.current = false;
+      const saved = readScrollPos(pathname);
+      window.scrollTo(0, saved);
+      prevPathname.current = pathname;
       return;
     }
     // Any other navigation (Link click, router.push, router.replace):
@@ -60,6 +106,7 @@ export default function ScrollToTop() {
     document.querySelectorAll<HTMLElement>("#mpBody, #detailPanel, #mpModalBody").forEach((el) => {
       el.scrollTop = 0;
     });
+    prevPathname.current = pathname;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, searchParams]);
 
