@@ -25,20 +25,27 @@ const THEME_OPTIONS: Array<
     id: "color-navy",
     type: "color",
     label: "Dark Blue",
-    color: "#0a1128",
-    overlay: "rgba(0,0,0,0)",
+    // Darkened from #0a1128 — that was already a dark navy, but next to
+    // the pure-black default it still read as noticeably "blue" rather
+    // than "black with a hint of blue". Dropped further toward black
+    // and paired with a light overlay tint (below) so cards/panels that
+    // sit on rgba(0,0,0,X) surfaces still read as dark UI, not a
+    // colored background.
+    color: "#05070f",
+    overlay: "rgba(4,8,20,0.35)",
     textmode: "dark",
-    swatchBg: "#0a1128",
+    swatchBg: "#05070f",
     swatchLabelColor: "rgba(255,255,255,0.8)",
   },
   {
     id: "color-plum",
     type: "color",
     label: "Dark Purple",
-    color: "#1a0b2e",
-    overlay: "rgba(0,0,0,0)",
+    // Same treatment as Dark Blue — darkened from #1a0b2e toward black.
+    color: "#0c0512",
+    overlay: "rgba(16,4,24,0.35)",
     textmode: "dark",
-    swatchBg: "#1a0b2e",
+    swatchBg: "#0c0512",
     swatchLabelColor: "rgba(255,255,255,0.8)",
   },
 ];
@@ -119,17 +126,6 @@ export default function ThemeModal({
     };
   }, []);
 
-  // Lock background scroll while the modal is up — the page underneath
-  // shouldn't scroll behind this overlay (same pattern as SearchOverlay).
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
-
   function showUpgradeNudge() {
     setNudge(true);
     nudgeTimers.current.forEach(clearTimeout);
@@ -153,7 +149,6 @@ export default function ThemeModal({
     setSelectedId(opt.id);
     applyTheme(theme);
     persistTheme(theme);
-    onClose();
   }
 
   function handleImgError(id: string) {
