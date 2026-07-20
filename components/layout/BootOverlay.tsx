@@ -153,10 +153,10 @@ export default function BootOverlay() {
         <div className="boot-mark-wrap">
           <div className="boot-mark-glyph">
             <img
-              src="https://www.image2url.com/r2/default/images/1783717278670-ca484861-c917-4fdb-b330-a2baf612127e.svg"
+              src="/boot-mark-glyph.png"
               alt="Siterifty"
-              width={22}
-              height={22}
+              width={40}
+              height={40}
               style={{ display: "block" }}
             />
           </div>
