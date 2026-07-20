@@ -49,10 +49,17 @@ export default function Footer() {
 
       <div className="srf-footer-inner">
         <div className="srf-footer-brand">
+          {/* Self-hosted at our own domain (was pulled from an
+              external CDN with a random UUID filename before) — real
+              filename + real alt text + width/height, so it's a
+              proper crawlable, indexable image tied to our own site
+              rather than a third party's. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="https://cdn.phototourl.com/member/2026-07-19-ffcaa670-d57c-44f6-8415-ab73856860b2.png"
-            alt="Siterifty.com"
+            src="/images/siterifty-logo.png"
+            alt="Siterifty.com — Buy, Sell, Build, Trust"
+            width={622}
+            height={163}
           />
           <p className="srf-footer-tagline">
             A marketplace built for independent developers — list, sell, and get paid, every deal
