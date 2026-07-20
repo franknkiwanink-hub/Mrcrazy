@@ -7,6 +7,7 @@ import NavDrawer from "@/components/layout/NavDrawer";
 import NavDrawerOverlay from "@/components/layout/NavDrawerOverlay";
 import { NavDrawerProvider } from "@/components/layout/NavDrawerProvider";
 import HomeMarketplaceOnly from "@/components/layout/HomeMarketplaceOnly";
+import Footer from "@/components/layout/Footer";
 import AnnouncementBar from "@/components/layout/AnnouncementBar";
 import BootOverlay from "@/components/layout/BootOverlay";
 import PushServiceWorkerRegister from "@/components/layout/PushServiceWorkerRegister";
@@ -188,6 +189,12 @@ export default function RootLayout({
                     <NavDrawer />
                     <AnnouncementBar />
                     <main>{children}</main>
+                    {/* Real, always-crawlable footer — every page, sits
+                        in normal document flow right after page
+                        content. See Footer.tsx's own top comment for
+                        why this exists alongside (not instead of) the
+                        nav drawer. */}
+                    <Footer />
                     {/* BottomNav + the floating feedback launcher only
                         belong on the two "browse" surfaces (Home,
                         Marketplace) — see HomeMarketplaceOnly's own
