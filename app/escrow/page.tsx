@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
+import { staticOgImage, SUPPORT_OG_IMAGE } from "@/lib/og/staticOgImage";
 import StaticPage, { StaticSection } from "@/components/layout/StaticPage";
 
 // Reuses the page's own eyebrow/title/intro verbatim as SEO copy.
@@ -13,8 +14,19 @@ export function generateMetadata(): Metadata {
     title: TITLE,
     description: DESCRIPTION,
     alternates: { canonical: url },
-    openGraph: { title: TITLE, description: DESCRIPTION, url, type: "website" },
-    twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION },
+    openGraph: {
+      title: TITLE,
+      description: DESCRIPTION,
+      url,
+      type: "website",
+      images: staticOgImage(SUPPORT_OG_IMAGE, "Siterifty Support").openGraphImages,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: TITLE,
+      description: DESCRIPTION,
+      images: staticOgImage(SUPPORT_OG_IMAGE, "Siterifty Support").twitterImages,
+    },
   };
 }
 
