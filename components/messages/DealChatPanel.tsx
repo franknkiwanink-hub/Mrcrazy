@@ -16,6 +16,7 @@ import {
 import { doc, deleteDoc, collection, getDocs, writeBatch, addDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import TransferDealModal from "./TransferDealModal";
+import SignInRequired from "@/components/auth/SignInRequired";
 import { buildListingSlug } from "@/lib/slug";
 
 // Ports the deal chat panel from Js/inbox.js (lines 937-2774): sticky
@@ -387,8 +388,12 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
 
   if (!user) {
     return (
-      <div style={{ position: "fixed", inset: 0, background: "#06060e", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
-        Sign in to view this chat.
+      <div style={{ position: "fixed", inset: 0, background: "#06060e", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <SignInRequired
+          withHeaderOffset={false}
+          title="Sign in to view this chat"
+          description="Deal conversations, offers, and file transfers are only visible once you're signed in."
+        />
       </div>
     );
   }
