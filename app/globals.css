@@ -2132,11 +2132,19 @@
          #appBootOverlay {
          position: fixed; inset: 0; width: 100%; height: 100vh; height: 100dvh;
          z-index: 999999;
-         background: #06060a;
+         background: rgba(6,6,10,0.62);
+         backdrop-filter: blur(28px) saturate(140%);
+         -webkit-backdrop-filter: blur(28px) saturate(140%);
          display: flex; flex-direction: column; align-items: center; justify-content: center;
          gap: 0; overflow: hidden;
          overscroll-behavior: none; touch-action: none;
          transition: opacity 0.5s ease, visibility 0.5s ease;
+         }
+         #appBootOverlay::before {
+         content: ""; position: absolute; inset: 0; pointer-events: none;
+         background:
+           radial-gradient(circle at 30% 20%, rgba(163,230,53,0.10) 0%, rgba(163,230,53,0) 45%),
+           radial-gradient(circle at 75% 80%, rgba(163,230,53,0.07) 0%, rgba(163,230,53,0) 50%);
          }
          #appBootOverlay.boot-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
 
@@ -2152,7 +2160,9 @@
          #maintenanceOverlay {
          position: fixed; inset: 0; width: 100%; height: 100vh; height: 100dvh;
          z-index: 9999999;
-         background: #050508;
+         background: rgba(5,5,8,0.66);
+         backdrop-filter: blur(28px) saturate(140%);
+         -webkit-backdrop-filter: blur(28px) saturate(140%);
          display: none;
          flex-direction: column; align-items: center; justify-content: center;
          overflow: hidden; padding: 24px;
@@ -2168,7 +2178,9 @@
          #acctStatusOverlay, #acctAppealOverlay {
            position: fixed; inset: 0; width: 100%; height: 100vh; height: 100dvh;
            z-index: 9999998;
-           background: #050508;
+           background: rgba(5,5,8,0.66);
+           backdrop-filter: blur(28px) saturate(140%);
+           -webkit-backdrop-filter: blur(28px) saturate(140%);
            display: none;
            flex-direction: column; align-items: center; justify-content: center;
            padding: 24px;
@@ -2211,6 +2223,11 @@
          display: flex; flex-direction: column; align-items: center;
          gap: 1.7rem; max-width: 440px; width: 100%; text-align: center;
          animation: boot-fade-up .7s ease both;
+         padding: 40px 36px 34px;
+         border-radius: 24px;
+         background: rgba(255,255,255,0.045);
+         border: 1px solid rgba(255,255,255,0.09);
+         box-shadow: 0 8px 40px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
          }
          .mnt-status-pill {
          display: inline-flex; align-items: center; gap: 7px;
@@ -2231,13 +2248,12 @@
          }
          .mnt-mark { display: flex; align-items: center; gap: 0.55rem; }
          .mnt-mark-glyph {
-         width: 46px; height: 46px; border-radius: 13px;
-         background: #14140f; border: 1px solid rgba(255,255,255,0.12);
+         width: 56px; height: 56px;
          display: flex; align-items: center; justify-content: center;
-         overflow: hidden;
+         filter: drop-shadow(0 4px 16px rgba(163,230,53,0.25));
          }
          .mnt-mark-glyph img {
-         width: 100%; height: 100%; object-fit: cover;
+         width: 100%; height: 100%; object-fit: contain;
          }
          .mnt-mark-text {
          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -2344,6 +2360,11 @@
          .boot-content {
          position: relative; display: flex; flex-direction: column; align-items: center;
          gap: 1.6rem; animation: boot-fade-up .6s ease both;
+         padding: 40px 36px 34px;
+         border-radius: 24px;
+         background: rgba(255,255,255,0.045);
+         border: 1px solid rgba(255,255,255,0.09);
+         box-shadow: 0 8px 40px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
          }
          @keyframes boot-fade-up {
          from { opacity: 0; transform: translateY(10px); }
@@ -2357,15 +2378,13 @@
          }
          .boot-mark span { color: #a3e635; }
          .boot-mark-glyph {
-         width: 46px; height: 46px; border-radius: 13px;
-         background: #14140f;
-         border: 1px solid rgba(255,255,255,0.12);
+         width: 56px; height: 56px;
          display: flex; align-items: center; justify-content: center;
          margin-bottom: 2px;
-         overflow: hidden;
+         filter: drop-shadow(0 4px 16px rgba(163,230,53,0.25));
          }
          .boot-mark-glyph img {
-         width: 100%; height: 100%; object-fit: cover;
+         width: 100%; height: 100%; object-fit: contain;
          }
          .boot-tagline {
          font-size: 12.5px; font-weight: 600; color: rgba(255,255,255,0.34);
