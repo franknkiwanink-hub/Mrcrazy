@@ -12,6 +12,7 @@ import {
 import DashboardChart from "@/components/dashboard/DashboardChart";
 import DashboardWebhooksModal from "@/components/dashboard/DashboardWebhooksModal";
 import { useBoostModal } from "@/components/boost/BoostModalProvider";
+import SignInRequired from "@/components/auth/SignInRequired";
 import type { ChartConfiguration } from "chart.js";
 
 // Ports Js/dashboard.js — the Seller Dashboard. Every number here comes
@@ -341,32 +342,32 @@ export default function SellerDashboard() {
           </div>
         </div>
 
-        <button className="sd-date-trigger" id="sdDateTrigger" onClick={openDateModal}>
-          <div className="sd-date-trigger-left">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <rect x={3} y={4} width={18} height={18} rx={2} />
-              <path d="M16 2v4M8 2v4M3 10h18" />
-            </svg>
-            <span>
-              <strong id="sdDateRangeStrong">{rangeMeta.label}</strong>
-              <span className="sd-date-trigger-sub" id="sdDateRangeSub">
-                {dateSub}
+        {isSignedIn !== false && (
+          <button className="sd-date-trigger" id="sdDateTrigger" onClick={openDateModal}>
+            <div className="sd-date-trigger-left">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <rect x={3} y={4} width={18} height={18} rx={2} />
+                <path d="M16 2v4M8 2v4M3 10h18" />
+              </svg>
+              <span>
+                <strong id="sdDateRangeStrong">{rangeMeta.label}</strong>
+                <span className="sd-date-trigger-sub" id="sdDateRangeSub">
+                  {dateSub}
+                </span>
               </span>
-            </span>
-          </div>
-          <svg className="sd-date-trigger-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-            <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+            </div>
+            <svg className="sd-date-trigger-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
 
         {isSignedIn === false ? (
-          <div className="sd-empty-state">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}>
-              <circle cx={12} cy={12} r={10} />
-              <path d="M12 8v4M12 16h.01" />
-            </svg>
-            <p>Sign in to see your dashboard.</p>
-          </div>
+          <SignInRequired
+            fullScreen={false}
+            title="Sign in to see your dashboard"
+            description="Your sales, listings, and performance stats are only visible once you're signed in."
+          />
         ) : error && error !== "signed-out" ? (
           <div className="sd-empty-state" style={{ gridColumn: "1/-1" }}>
             <p>Couldn&apos;t load your dashboard.</p>
