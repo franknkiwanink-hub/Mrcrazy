@@ -37,6 +37,7 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
         { url: `${baseUrl}/marketplace`, changeFrequency: "hourly", priority: 0.9 },
         { url: `${baseUrl}/sellers`, changeFrequency: "daily", priority: 0.6 },
         { url: `${baseUrl}/leaderboard`, changeFrequency: "daily", priority: 0.4 },
+        { url: `${baseUrl}/gallery`, changeFrequency: "monthly", priority: 0.4 },
       ];
     }
     return [];
@@ -50,6 +51,7 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
       { url: `${baseUrl}/marketplace`, changeFrequency: "hourly", priority: 0.9 },
       { url: `${baseUrl}/sellers`, changeFrequency: "daily", priority: 0.6 },
       { url: `${baseUrl}/leaderboard`, changeFrequency: "daily", priority: 0.4 },
+      { url: `${baseUrl}/gallery`, changeFrequency: "monthly", priority: 0.4 },
     ];
 
     // Public sellers only — mirrors the same privacy gate used in
