@@ -81,6 +81,45 @@ export default function MarketplaceGrid({
     return () => observer.disconnect();
   }, [loadMore, preview]);
 
+  // Preview mode's end-of-list sentinel: reaching it auto-transitions
+  // into /marketplace, no button tap needed. A short settle delay (not
+  // an instant fire) means someone scrolling fast past the end just
+  // sees the end of the list like normal, rather than getting yanked
+  // into a navigation mid-flick — it only actually triggers once the
+  // sentinel has stayed in view for a beat, i.e. the user has actually
+  // stopped there. rootMargin is tighter than the real infinite-scroll's
+  // (0px vs 200px) so it also can't fire before the sentinel is genuinely
+  // on screen.
+  const previewSentinelRef = useRef<HTMLDivElement>(null);
+  const previewTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!preview || !onSeeFullMarketplace) return;
+    const sentinel = previewSentinelRef.current;
+    if (!sentinel) return;
+    let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (previewTriggeredRef.current) return;
+        if (entries[0].isIntersecting) {
+          settleTimer = setTimeout(() => {
+            if (previewTriggeredRef.current) return;
+            previewTriggeredRef.current = true;
+            onSeeFullMarketplace();
+          }, 500);
+        } else if (settleTimer) {
+          clearTimeout(settleTimer);
+          settleTimer = null;
+        }
+      },
+      { rootMargin: "0px" }
+    );
+    observer.observe(sentinel);
+    return () => {
+      observer.disconnect();
+      if (settleTimer) clearTimeout(settleTimer);
+    };
+  }, [preview, onSeeFullMarketplace]);
+
   // First-load state — same client-side fetch (useFeed) the old small
   // in-grid spinner covered, now using the shared full-screen skeleton
   // instead so it matches the loading treatment used everywhere else in
@@ -178,25 +217,33 @@ export default function MarketplaceGrid({
         </div>
 
         {preview ? (
-          <div style={{ display: "flex", justifyContent: "center", padding: "28px 0 8px" }}>
-            <button
-              type="button"
-              onClick={onSeeFullMarketplace}
-              style={{
-                padding: "0.7rem 1.8rem",
-                background: "rgba(163,230,53,0.1)",
-                border: "1.5px solid rgba(163,230,53,0.4)",
-                borderRadius: "2rem",
-                color: "#a3e635",
-                fontSize: "0.88rem",
-                fontWeight: 700,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                letterSpacing: "0.02em",
-              }}
+          <div
+            ref={previewSentinelRef}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 6,
+              padding: "28px 0 8px",
+              opacity: 0.6,
+            }}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#a3e635"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ animation: "mp-bounce 1.4s ease-in-out infinite" }}
             >
-              See full marketplace →
-            </button>
+              <path d="M12 5v14M5 12l7 7 7-7" />
+            </svg>
+            <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "#a3e635", letterSpacing: "0.02em" }}>
+              Heading to the full marketplace…
+            </div>
           </div>
         ) : (
           <>
