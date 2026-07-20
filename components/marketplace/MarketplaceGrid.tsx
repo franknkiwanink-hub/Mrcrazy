@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useFeed } from "@/lib/useFeed";
 import { useSearchResults } from "@/lib/useSearchResults";
-import { useMarketplaceFilters } from "@/lib/useMarketplaceFilters";
+import { useMarketplaceFilters, type MarketplaceFiltersInitial } from "@/lib/useMarketplaceFilters";
 import { buildInterleavedFeed } from "@/lib/feedInterleave";
 import type { Listing } from "@/lib/listings";
 import ListingCard from "@/components/marketplace/ListingCard";
@@ -24,6 +24,8 @@ export default function MarketplaceGrid({
   onExitTakeover,
   preview = false,
   onSeeFullMarketplace,
+  initialFilters,
+  syncUrl = false,
 }: {
   autoOpenSearch?: boolean;
   onExitTakeover?: () => void;
@@ -33,8 +35,18 @@ export default function MarketplaceGrid({
   // the one place with the real, unrestricted infinite-scroll feed.
   preview?: boolean;
   onSeeFullMarketplace?: () => void;
+  // Seeds filter state from a parsed server route (e.g.
+  // /marketplace/websites/under-500) — only ever passed by
+  // app/marketplace/page.tsx and its [type]/[bracket] children.
+  initialFilters?: MarketplaceFiltersInitial;
+  // Pushes the canonical URL for the current filters via router.replace.
+  // Defaults false: the homepage's preview grid and MarketplaceModal's
+  // takeover grid are NOT the /marketplace route and must never hijack
+  // the address bar just because they render the same component — see
+  // useMarketplaceFilters' header comment for the full rationale.
+  syncUrl?: boolean;
 } = {}) {
-  const filters = useMarketplaceFilters();
+  const filters = useMarketplaceFilters(initialFilters, syncUrl);
   const type = filters.typeFilter === "all" ? undefined : filters.typeFilter;
   const { listings, loading, loadingMore, error, exhausted, loadMore, reset } = useFeed({ pageSize: 24, type });
 
