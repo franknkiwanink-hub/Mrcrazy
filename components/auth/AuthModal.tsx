@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   loginWithEmail,
   signupWithEmail,
@@ -9,6 +9,7 @@ import {
   sendForgotPasswordEmail,
   friendlyAuthError,
 } from "@/lib/authActions";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 interface AuthModalProps {
   open: boolean;
@@ -37,6 +38,27 @@ export default function AuthModal({ open, onClose, onSignupComplete }: AuthModal
   const [signupPassword, setSignupPassword] = useState("");
   const [signupError, setSignupError] = useState("");
   const [signupLoading, setSignupLoading] = useState(false);
+
+  // Locks wheel/keyboard scroll on the page behind the modal for as
+  // long as it's open.
+  useScrollLock(open);
+
+  // `overflow:hidden` on body doesn't stop iOS Safari from rubber-band
+  // scrolling the page behind a fixed-position modal via touch drag.
+  // Block touchmove at the document level while open — but only for
+  // touches that start outside the modal's own scrollable content
+  // area (data-sr-modal-scroll), so the form itself can still be
+  // scrolled normally on a small screen.
+  useEffect(() => {
+    if (!open) return;
+    const blockTouch = (e: TouchEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && target.closest("[data-sr-modal-scroll]")) return;
+      e.preventDefault();
+    };
+    document.addEventListener("touchmove", blockTouch, { passive: false });
+    return () => document.removeEventListener("touchmove", blockTouch);
+  }, [open]);
 
   if (!open) return null;
 
@@ -131,7 +153,14 @@ export default function AuthModal({ open, onClose, onSignupComplete }: AuthModal
         WebkitBackdropFilter: "blur(12px)",
         justifyContent: "center",
         alignItems: "center",
-        zIndex: 9999,
+        // Above the nav drawer (#navOverlay/#navDrawer are 10500/10501)
+        // so AuthModal is never hidden behind an open drawer no matter
+        // what triggers it — NavDrawer's requireAuth now closes the
+        // drawer itself before opening this, but this is the
+        // belt-and-braces fix for any other caller.
+        zIndex: 10600,
+        touchAction: "none",
+        overscrollBehavior: "none",
         fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
       }}
     >
@@ -185,7 +214,7 @@ export default function AuthModal({ open, onClose, onSignupComplete }: AuthModal
           </button>
         </header>
 
-        <div style={{ padding: 24, overflowY: "auto", flexGrow: 1 }}>
+        <div data-sr-modal-scroll style={{ padding: 24, overflowY: "auto", flexGrow: 1, touchAction: "pan-y" }}>
           {oauthError && (
             <div
               style={{
