@@ -12,8 +12,12 @@ const COLUMNS: { heading: string; links: { label: string; href: string }[] }[] =
   {
     heading: "Company",
     links: [
-      { label: "About", href: "/about" },
       { label: "Marketplace", href: "/marketplace" },
+      { label: "Home", href: "/" },
+      { label: "My Profile", href: "/myprofile" },
+      { label: "Dashboard", href: "/dashboard" },
+      { label: "Settings", href: "/settings" },
+      { label: "About", href: "/about" },
       { label: "Sellers", href: "/sellers" },
       { label: "Leaderboard", href: "/leaderboard" },
     ],
@@ -49,7 +53,6 @@ export default function Footer() {
           <img
             src="https://cdn.phototourl.com/member/2026-07-19-ffcaa670-d57c-44f6-8415-ab73856860b2.png"
             alt="Siterifty.com"
-            className="srf-footer-logo"
           />
           <p className="srf-footer-tagline">
             A marketplace built for independent developers — list, sell, and get paid, every deal
