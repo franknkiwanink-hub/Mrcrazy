@@ -507,7 +507,7 @@
             main now participates in the root stacking order by document
             position, and #dealChatPanel's 9997 is compared directly
             against header's 9990 and wins as intended. */
-         main { position: relative; min-height: 100vh; }
+         main { position: relative; }
 
          /* ── VALUATION SECTION ── */
          .val-section {
