@@ -1,6 +1,9 @@
-import { Suspense } from "react";
+"use client";
+
+import { Suspense, useState } from "react";
 import Hero from "@/components/home/Hero";
 import MarketplaceGrid from "@/components/marketplace/MarketplaceGrid";
+import MarketplaceModal from "@/components/marketplace/MarketplaceModal";
 import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 
 // The original site renders the hero and the marketplace grid on the same
@@ -11,18 +14,21 @@ import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 // .hero-content, matching how the original's hero already accounts for
 // the header without an extra margin on the section after it).
 //
-// /marketplace also exists as its own standalone, linkable route (for
-// share links, SEO, and the header's own nav link) — it renders the same
-// MarketplaceGrid component, just with its own top margin since there's
-// no hero above it there. Keeping the grid in one shared component means
-// both stay in sync automatically as it gets built out further.
+// The homepage grid runs in `preview` mode — a fixed dozen listings, no
+// infinite scroll — ending in a "See full marketplace" CTA that opens the
+// same full-screen MarketplaceModal Hero's own search bar already uses.
+// The real, unrestricted infinite-scroll feed lives only on /marketplace
+// itself (both inline as its own route, and here inside the modal).
 export default function HomePage() {
+  const [marketplaceModalOpen, setMarketplaceModalOpen] = useState(false);
+
   return (
     <>
       <Hero />
       <Suspense fallback={<SiteriftyLoader />}>
-        <MarketplaceGrid />
+        <MarketplaceGrid preview onSeeFullMarketplace={() => setMarketplaceModalOpen(true)} />
       </Suspense>
+      <MarketplaceModal open={marketplaceModalOpen} onClose={() => setMarketplaceModalOpen(false)} />
     </>
   );
 }
