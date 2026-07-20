@@ -115,6 +115,11 @@ export interface SimilarResponse {
   listings: Listing[];
 }
 
+export interface SearchResponse {
+  listings: Listing[];
+  query: string;
+}
+
 interface ApiEnvelopeOk<T> {
   ok: true;
   data: T;
@@ -184,6 +189,26 @@ export async function fetchSimilarListings(params: {
   idToken?: string | null;
 }): Promise<SimilarResponse> {
   return callListingsApi<SimilarResponse>("listing.similar", params);
+}
+
+// action: 'listing.search' — public, no auth required. Server-side search
+// against the FULL cached catalog pool (see _handler.js's handleSearch),
+// not just whatever page of the feed happens to be loaded in the browser
+// already. Replaces filtering `applyClientFilters`'s searchQuery branch
+// against an in-memory `listings` array (see useMarketplaceFilters.ts) —
+// that approach could only ever find listings the infinite-scroll feed had
+// already fetched, so anything past the currently-loaded page was
+// invisible to search. Empty/whitespace `q` returns an empty result
+// immediately without a network call — see callers (SearchOverlay,
+// MarketplaceFilterBar) for the debounce that wraps this.
+export async function fetchSearchResults(params: {
+  q: string;
+  type?: ListingType;
+  limit?: number;
+  idToken?: string | null;
+}): Promise<SearchResponse> {
+  if (!params.q || !params.q.trim()) return { listings: [], query: "" };
+  return callListingsApi<SearchResponse>("listing.search", params);
 }
 
 // Fire-and-forget analytics beacon — mirrors _mpTrackListing. Never throws
