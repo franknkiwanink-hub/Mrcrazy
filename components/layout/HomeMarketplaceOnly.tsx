@@ -20,15 +20,15 @@ import FeedbackWidget from "@/components/support/FeedbackWidget";
 
 const VISIBLE_PATHS = new Set<string>(["/", "/marketplace"]);
 
-// globals.css reserves space for .fnav via a blanket mobile media-query
-// rule (`body { padding-bottom: calc(66px + safe-area-inset-bottom) }`)
-// that assumed .fnav was always mounted, same as in the original
-// single-page site. Now that .fnav only renders on Home/Marketplace,
-// that same body padding was still being applied globally — leaving a
-// blank 66px gap at the bottom of every other page (Settings, Listing,
-// Profile, etc). Toggling this class keeps that reserved space scoped to
-// only the two routes that actually render the nav.
-const BODY_CLASS = "srf-fnav-space";
+// .fnav is a floating position:fixed pill nav (see globals.css) — it
+// doesn't take up real document space, so it doesn't push page content
+// up. But it does visually sit on top of whatever's at the very bottom
+// of the page, which on Home/Marketplace is now the footer's last row.
+// This class only pads the footer itself (see .srf-footer-nav-clear in
+// globals.css) so that one row clears the floating bar — it is not the
+// same mechanism as the old body-wide padding-bottom rule that was
+// removed for reserving space no floating nav actually needs.
+const BODY_CLASS = "srf-fnav-active";
 
 export default function HomeMarketplaceOnly() {
   const pathname = usePathname();
