@@ -8,6 +8,10 @@
 // this logic can drift.
 import type { Metadata } from "next";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
+import { staticOgImage, MARKETPLACE_OG_IMAGE } from "@/lib/og/staticOgImage";
+
+const { openGraphImages: MARKETPLACE_OG_IMAGES, twitterImages: MARKETPLACE_TWITTER_IMAGES } =
+  staticOgImage(MARKETPLACE_OG_IMAGE, "Siterifty Marketplace");
 
 const SITE_NAME = "Siterifty Marketplace";
 const BASE_TITLE = `${SITE_NAME} | Buy & Sell Websites, Apps & Games`;
@@ -84,7 +88,7 @@ export function buildMarketplaceMetadata(input: MarketplaceMetaInput): Metadata 
     // indexing on its own).
     robots: input.noindex ? { index: false, follow: true } : undefined,
     alternates: { canonical: url },
-    openGraph: { title, description, url, type: "website" },
-    twitter: { card: "summary_large_image", title, description },
+    openGraph: { title, description, url, type: "website", images: MARKETPLACE_OG_IMAGES },
+    twitter: { card: "summary_large_image", title, description, images: MARKETPLACE_TWITTER_IMAGES },
   };
 }
