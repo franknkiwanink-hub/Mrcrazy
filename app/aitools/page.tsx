@@ -27,7 +27,7 @@
 
 import { useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/AuthContext";
-import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import SignInRequired from "@/components/auth/SignInRequired";
 import { aiStudioCall, aiPlanCap } from "@/lib/aiStudio";
 import { useAiLengthPicker } from "@/lib/useAiLengthPicker";
 
@@ -479,7 +479,6 @@ function StubCard({ icon, name, desc }: { icon: ReactNode; name: string; desc: s
 // ══════════════════════════════════════════════════════════════════════
 export default function AiToolsPage() {
   const { user, profile, loading } = useAuth();
-  const { openAuthModal } = useAuthModal();
 
   return (
     <div className="srf-tools">
@@ -503,13 +502,11 @@ export default function AiToolsPage() {
           Loading…
         </div>
       ) : !user ? (
-        <div className="srf-tools-login-prompt">
-          <h3>Sign in to use tools</h3>
-          <p>You need to be signed in to generate verification snippets and use seller tools.</p>
-          <button className="srf-tools-btn-signin" onClick={openAuthModal}>
-            Sign In / Sign Up
-          </button>
-        </div>
+        <SignInRequired
+          fullScreen={false}
+          title="Sign in to use tools"
+          description="You need to be signed in to generate verification snippets and use seller tools."
+        />
       ) : (
         <>
           <VerifyOwnershipCard />
