@@ -1,20 +1,27 @@
 "use client";
 
-// New feature (no legacy equivalent — see lib/useRecentSearches.ts's
-// comment). Reuses MarketplaceSearchBar's existing match-scoring
-// (startsWith=100 / includes=80 / type=60 / desc=40) and highlight-first-
-// match logic rather than re-implementing it, so results here are
-// identical to what the old small popover showed — this only changes the
-// *presentation* (full-screen takeover, YouTube-style recent-searches
-// list) and *persistence* (localStorage history), not the matching
-// behavior. Driven entirely by the same `searchQuery` React state
-// MarketplaceFilterBar already threads down to useMarketplaceFilters —
-// opening/closing/typing here never navigates or refetches, same as the
-// small popover it replaces.
+// Reuses the server's match-scoring (startsWith=100 / includes=80 /
+// type=60 / desc=40 — see _handler.js's _searchScore) and highlight-first-
+// match logic, so results here are identical to what handleSearch returns
+// — this only changes the *presentation* (full-screen takeover,
+// YouTube-style recent-searches list) and *persistence* (localStorage
+// history), not the matching behavior.
+//
+// Previously this scored the `listings` prop (whatever page of the feed
+// MarketplaceGrid had already loaded into memory) synchronously in render.
+// That meant a listing the infinite-scroll feed hadn't reached yet was
+// invisible to search no matter how well it matched. Now it debounces the
+// typed query and calls fetchSearchResults (action: 'listing.search'),
+// which searches the FULL cached catalog pool server-side at zero extra
+// Firestore cost (see _handler.js's handleSearch) — same shape of fix as
+// handleFeed's own cached pool, just applied to search instead of browse.
+// The empty-query "Recommended for you" list still uses the `listings`
+// prop (a handful of already-loaded feed items is a fine source for that,
+// and it needs no server round-trip at all).
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Listing } from "@/lib/listings";
-import { isBoosted } from "@/lib/listings";
+import { isBoosted, fetchSearchResults } from "@/lib/listings";
 import { useRecentSearches } from "@/lib/useRecentSearches";
 
 interface Suggestion {
@@ -218,28 +225,51 @@ export default function SearchOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, value]);
 
+  // Debounced server-side search (action: 'listing.search') — 200ms mirrors
+  // a typical "search as you type" debounce and keeps rapid keystrokes
+  // from firing a request per character; the server call itself costs
+  // nothing extra beyond ordinary browsing (see handleSearch's cache
+  // reuse), but debouncing still avoids piling up redundant in-flight
+  // requests while someone is still typing.
+  const [matches, setMatches] = useState<Suggestion[]>([]);
+  useEffect(() => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setMatches([]);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const { listings: results } = await fetchSearchResults({ q: trimmed, limit: 20 });
+        if (cancelled) return;
+        setMatches(
+          results.map((listing) => ({
+            listing,
+            title: listing.title || "Untitled",
+            type: listing.type || "website",
+            // Score itself isn't used for anything after the server has
+            // already sorted results — kept on the Suggestion shape only
+            // because `highlight()` and the render below don't need it,
+            // but other callers of this type might; 0 is a harmless filler.
+            score: 0,
+          }))
+        );
+      } catch {
+        // A failed search shouldn't crash the overlay — just show no
+        // results, same as a genuine zero-match query.
+        if (!cancelled) setMatches([]);
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [value]);
+
   if (!open || !mounted) return null;
 
   const q = value.trim().toLowerCase();
-
-  const matches: Suggestion[] = q
-    ? listings
-        .map((l) => {
-          const title = l.title || "Untitled";
-          const type = l.type || "website";
-          const desc = l.description || "";
-          const tl = title.toLowerCase();
-          let score = -1;
-          if (tl.startsWith(q)) score = 100;
-          else if (tl.includes(q)) score = 80;
-          else if (type.toLowerCase().includes(q)) score = 60;
-          else if (desc.toLowerCase().includes(q)) score = 40;
-          return { listing: l, title, type, score };
-        })
-        .filter((m) => m.score >= 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 20)
-    : [];
 
   const recs: Listing[] = !q ? recommended(listings, 8) : [];
 
