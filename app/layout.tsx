@@ -31,16 +31,6 @@ import { DisputePickerProvider } from "@/components/dispute/DisputePickerProvide
 import { ImageLightboxProvider } from "@/components/listing/ImageLightboxProvider";
 import { MarketplaceSearchProvider } from "@/components/marketplace/MarketplaceSearchProvider";
 
-// This project has no dedicated favicon file (confirmed: no public/favicon*
-// and no prior icons/favicon metadata). BootOverlay.tsx already renders this
-// same external SVG as the boot-screen brand glyph, so it's the de facto
-// brand mark used elsewhere on the site — reused here as the favicon/icon
-// rather than introducing a new image asset. Also reused as the OG image
-// logo in the ogCard component for the same reason: one brand asset, used
-// consistently.
-const BRAND_GLYPH_URL =
-  "https://www.image2url.com/r2/default/images/1783717278670-ca484861-c917-4fdb-b330-a2baf612127e.svg";
-
 const SITE_TITLE =
   "Siterifty — Buy & Sell Websites, Apps & Games";
 const SITE_DESCRIPTION =
@@ -68,9 +58,15 @@ export const metadata: Metadata = {
   },
   description: SITE_DESCRIPTION,
   icons: {
-    icon: BRAND_GLYPH_URL,
-    shortcut: BRAND_GLYPH_URL,
-    apple: BRAND_GLYPH_URL,
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
   },
   openGraph: {
     siteName: "Siterifty",
