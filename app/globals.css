@@ -2132,6 +2132,7 @@
          background: #06060a;
          display: flex; flex-direction: column; align-items: center; justify-content: center;
          gap: 0; overflow: hidden;
+         overscroll-behavior: none; touch-action: none;
          transition: opacity 0.5s ease, visibility 0.5s ease;
          }
          #appBootOverlay.boot-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
@@ -3229,6 +3230,14 @@
                overflow: hidden;
                }
                .sr-ad-slot.sr-ad-banner { padding: 10px; }
+               /* Shimmer placeholder shown in .sr-ad-slot while the ad
+                  network's iframe hasn't fired its load event yet (or on
+                  a genuine no-fill) — see AdSlot.tsx's AdPlaceholder —
+                  so a slot never reads as a bare empty box. */
+               @keyframes sr-ad-shimmer {
+               0% { background-position: 100% 0; }
+               100% { background-position: 0 0; }
+               }
                /* ── Desktop leaderboard ad (728x90) — much wider than a
                   single grid cell (290px), so unlike the small rect/banner
                   ads above it needs to span the full row like the
@@ -11702,8 +11711,68 @@ body.theme-active .sd-header { background: color-mix(in srgb, var(--app-theme-co
     display: flex;
     align-items: stretch;
     justify-content: center;
+    overscroll-behavior: none;
+    touch-action: none;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+/* Intro screen (shown before the wizard proper) had no CSS at all
+   before — it rendered in normal document flow instead of as a
+   full-screen overlay, which is also why the page behind it looked
+   scrollable: it wasn't actually covering the viewport. Given the
+   same fixed/full-screen treatment as .ob-wizard so the two states
+   are visually consistent and the scroll-lock behavior (see
+   OnboardingWizard.tsx's useScrollLock) has a full-screen surface to
+   actually sit on top of. */
+.ob-intro {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: #0a0a0c;
+    display: flex;
+    flex-direction: column;
+    overscroll-behavior: none;
+    touch-action: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.ob-intro-image {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #050506;
+}
+.ob-intro-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.ob-intro-bottom {
+    flex-shrink: 0;
+    padding: 18px 20px calc(18px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    justify-content: center;
+    background: #0a0a0c;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ob-intro-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 32px;
+    background: #a3e635;
+    color: #0a0a0a;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+    font-family: inherit;
 }
 
 .ob-container {
@@ -12544,6 +12613,7 @@ body.theme-active .sd-header { background: color-mix(in srgb, var(--app-theme-co
    surface/border/text scale used everywhere else in the app. */
 .srf-footer {
   position: relative;
+  z-index: 1;
   background: var(--mp-surface);
   border-top: 1px solid var(--mp-border);
   margin-top: 48px;
@@ -12579,10 +12649,23 @@ body.theme-active .sd-header { background: color-mix(in srgb, var(--app-theme-co
   max-width: 320px;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 12px;
 }
 
-.srf-footer-brand img { height: 22px; width: auto; display: block; }
+/* Fixed height + auto width, same as the header's .brand img — and
+   align-self/flex-shrink pinned so this flex child never stretches to
+   fill .srf-footer-brand's cross-axis width the way a bare flex child
+   with no explicit sizing can in a column flex container. */
+.srf-footer-brand img {
+  height: 22px;
+  width: auto;
+  max-width: 100%;
+  display: block;
+  align-self: flex-start;
+  flex-shrink: 0;
+  object-fit: contain;
+}
 
 .srf-footer-tagline {
   font-size: 13px;
