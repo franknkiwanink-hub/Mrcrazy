@@ -19,19 +19,19 @@ const AD_UNITS = {
     invokeSrc: "https://beavercolourfuldelinquent.com/02d530955f964bb754200c047d5cab26/invoke.js",
   },
   banner: {
-    key: "837d8d50ffa851dddd18e0f1d01833aa",
+    key: "8a5b6bbea4b7fc182c78002d81437da5",
     width: 320,
     height: 50,
-    invokeSrc: "https://beavercolourfuldelinquent.com/837d8d50ffa851dddd18e0f1d01833aa/invoke.js",
+    invokeSrc: "https://beavercolourfuldelinquent.com/8a5b6bbea4b7fc182c78002d81437da5/invoke.js",
   },
   // Desktop-only 728x90 leaderboard unit — the 320x50 mobile banner
   // stretched across a wide desktop column looks thin/blurry, so desktop
   // gets its own properly-sized unit instead of the mobile one scaled up.
   leaderboard: {
-    key: "559a8663eb3162420e74616104bd3044",
+    key: "6d213ffdfee222af5882958436920a49",
     width: 728,
     height: 90,
-    invokeSrc: "https://beavercolourfuldelinquent.com/559a8663eb3162420e74616104bd3044/invoke.js",
+    invokeSrc: "https://beavercolourfuldelinquent.com/6d213ffdfee222af5882958436920a49/invoke.js",
   },
 } as const;
 
