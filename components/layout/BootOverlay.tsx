@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useAuth } from "@/lib/AuthContext";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the "BOOT OVERLAY — hidden once, after the first auth resolution
 // + a 1.5s cooldown" block from firebase-init.js, plus the appBootOverlay
@@ -82,6 +83,26 @@ export default function BootOverlay() {
   const [removed, setRemoved] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [mounted, setMounted] = useState(false);
+
+  // Locks body scroll (wheel/keyboard) for as long as the overlay is
+  // still in the DOM. `hidden` only starts the fade-out transition —
+  // the overlay is still visually on screen during that transition, so
+  // the lock stays on until `removed` (fully unmounted), not `hidden`.
+  useScrollLock(!removed);
+
+  // `overflow:hidden` on body stops wheel/keyboard scrolling, but iOS
+  // Safari can still rubber-band the page underneath via touch drag even
+  // behind a position:fixed full-screen overlay. Blocking touchmove at
+  // the document level while the overlay is up closes that gap so the
+  // page truly can't be scrolled or panned until boot finishes.
+  useEffect(() => {
+    if (removed) return;
+    const blockTouch = (e: TouchEvent) => {
+      e.preventDefault();
+    };
+    document.addEventListener("touchmove", blockTouch, { passive: false });
+    return () => document.removeEventListener("touchmove", blockTouch);
+  }, [removed]);
 
   // Particles use Math.random(), so they must not be generated during
   // SSR/the first client render (which has to match the server's HTML).
