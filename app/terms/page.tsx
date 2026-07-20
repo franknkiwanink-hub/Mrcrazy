@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
+import { staticOgImage, SUPPORT_OG_IMAGE } from "@/lib/og/staticOgImage";
 import StaticPage, { StaticSection } from "@/components/layout/StaticPage";
 
 // Reuses the page's own eyebrow/title/intro verbatim as SEO copy.
@@ -13,18 +14,22 @@ export function generateMetadata(): Metadata {
     title: TITLE,
     description: DESCRIPTION,
     alternates: { canonical: url },
-    openGraph: { title: TITLE, description: DESCRIPTION, url, type: "website" },
-    twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION },
+    openGraph: {
+      title: TITLE,
+      description: DESCRIPTION,
+      url,
+      type: "website",
+      images: staticOgImage(SUPPORT_OG_IMAGE, "Siterifty Support").openGraphImages,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: TITLE,
+      description: DESCRIPTION,
+      images: staticOgImage(SUPPORT_OG_IMAGE, "Siterifty Support").twitterImages,
+    },
   };
 }
 
-// NOTE for whoever ships this: this is placeholder legal copy written to
-// accurately describe how the product actually behaves (escrow flow, fee
-// tiers, wallet, disputes — all pulled from the real api/deal.js and
-// api/limits.js logic), not boilerplate dropped in from a generic
-// template. It has NOT been reviewed by a lawyer and should be before
-// this page goes live — same "hand-written, needs verification" caveat
-// the rest of this scaffold carries (see README's Setup section).
 export default function TermsPage() {
   return (
     <StaticPage
