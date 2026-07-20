@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useFeed } from "@/lib/useFeed";
+import { useSearchResults } from "@/lib/useSearchResults";
 import { useMarketplaceFilters } from "@/lib/useMarketplaceFilters";
 import { buildInterleavedFeed } from "@/lib/feedInterleave";
 import type { Listing } from "@/lib/listings";
@@ -36,6 +37,18 @@ export default function MarketplaceGrid({
   const filters = useMarketplaceFilters();
   const type = filters.typeFilter === "all" ? undefined : filters.typeFilter;
   const { listings, loading, loadingMore, error, exhausted, loadMore, reset } = useFeed({ pageSize: 24, type });
+
+  // When a search query is active, the grid's data source switches from
+  // the browse feed to real server-side search results (the FULL cached
+  // catalog pool, not just whatever feed page happened to be loaded — see
+  // useSearchResults' header comment). Template/price filters still apply
+  // client-side on top of whichever source is active, same as before.
+  const hasSearch = !!filters.searchQuery.trim();
+  const search = useSearchResults(filters.searchQuery, type);
+  const sourceListings = hasSearch ? search.listings : listings;
+  const sourceLoading = hasSearch ? search.loading : loading;
+  const sourceError = hasSearch ? search.error : error;
+  const retry = hasSearch ? search.refetch : reset;
   const router = useRouter();
   const onOpen = (listing: Listing) => {
     if (listing?.id) router.push(`/listing/${buildListingSlug(listing.title, listing.id)}`);
@@ -54,21 +67,30 @@ export default function MarketplaceGrid({
   };
 
   // Client-side portion of mpApplyAndRender: template/price filters apply
-  // on top of whatever the server already returned for the current type.
+  // on top of whatever the active source (feed or search) already
+  // returned. Search itself is no longer a client-side filter here (see
+  // useSearchResults) — applyClientFilters' searchQuery branch becomes a
+  // no-op in that path since the source listings are already the exact
+  // search results, but harmlessly re-checking title/desc/type against
+  // the same query it was fetched with is a cheap no-op, not a bug.
   const filteredListings = useMemo(() => {
-    const applied = filters.applyClientFilters(listings);
+    const applied = filters.applyClientFilters(sourceListings);
     return preview ? applied.slice(0, PREVIEW_COUNT) : applied;
-  }, [filters.applyClientFilters, listings, preview]);
+  }, [filters.applyClientFilters, sourceListings, preview]);
   const listingById = useMemo(() => new Map(filteredListings.map((l) => [l.id, l])), [filteredListings]);
 
   // Ports mpRenderCards' ad/promo interleaving off the filtered set.
   const feedItems = useMemo(() => buildInterleavedFeed(filteredListings.map((l) => l.id)), [filteredListings]);
 
   // Infinite scroll — mirrors _setupSentinel's IntersectionObserver +
-  // rootMargin: '200px' pattern exactly.
+  // rootMargin: '200px' pattern exactly. Disabled while a search is
+  // active: search results are a bounded top-N list (see
+  // useSearchResults), not a paginated feed, so there's nothing to load
+  // more of and firing loadMore() here would just re-trigger unrelated
+  // feed pagination underneath the search results.
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (preview) return;
+    if (preview || hasSearch) return;
     const sentinel = sentinelRef.current;
     if (!sentinel) return;
     const observer = new IntersectionObserver(
@@ -79,7 +101,7 @@ export default function MarketplaceGrid({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [loadMore, preview]);
+  }, [loadMore, preview, hasSearch]);
 
   // Preview mode's end-of-list sentinel: reaching it auto-transitions
   // into /marketplace, no button tap needed. A short settle delay (not
@@ -164,7 +186,7 @@ export default function MarketplaceGrid({
 
       <div className="mp-grid-wrap">
         <div className="mp-grid" id="mpGrid">
-          {error ? (
+          {sourceError ? (
             <div className="mp-state" id="mpError" style={{ display: "flex" }}>
               <svg viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8" />
@@ -188,10 +210,26 @@ export default function MarketplaceGrid({
                   fontFamily: "inherit",
                   letterSpacing: "0.02em",
                 }}
-                onClick={reset}
+                onClick={retry}
               >
                 Try Again
               </button>
+            </div>
+          ) : hasSearch && sourceLoading ? (
+            <div className="mp-state" style={{ display: "flex" }}>
+              <svg
+                width="28"
+                height="28"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="rgba(255,255,255,0.35)"
+                strokeWidth="2.2"
+                style={{ animation: "mp-spin 1s linear infinite" }}
+              >
+                <circle cx="12" cy="12" r="10" strokeOpacity="0.2" />
+                <path d="M12 2a10 10 0 0110 10" strokeLinecap="round" />
+              </svg>
+              <div className="mp-state-title">Searching…</div>
             </div>
           ) : !filteredListings.length ? (
             <div className="mp-state" id="mpEmpty" style={{ display: "flex" }}>
@@ -200,7 +238,9 @@ export default function MarketplaceGrid({
                 <path d="M9 9l6 6M15 9l-6 6" stroke="currentColor" strokeWidth="1.8" />
               </svg>
               <div className="mp-state-title">No listings found</div>
-              <div className="mp-state-desc">Try adjusting your search or filters.</div>
+              <div className="mp-state-desc">
+                {hasSearch ? "Try a different search term." : "Try adjusting your search or filters."}
+              </div>
             </div>
           ) : (
             feedItems.map((item) => {
@@ -245,7 +285,7 @@ export default function MarketplaceGrid({
               Heading to the full marketplace…
             </div>
           </div>
-        ) : (
+        ) : hasSearch ? null : (
           <>
             <div ref={sentinelRef} id="mpLoadSentinel" />
             {loadingMore ? (
