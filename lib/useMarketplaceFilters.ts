@@ -6,8 +6,24 @@
 // original passes mpTypeFilter into /api/listings — everything else
 // (template/price) is client-side only in the original too, since
 // handleFeed has no template/price params at all.
-import { useCallback, useMemo, useState } from "react";
+//
+// SEO URL sync: filter state now also drives the address bar (see
+// lib/marketplaceSeoUrls.ts for the path scheme —
+// /marketplace/websites/under-500 etc.). Two directions:
+//   1. Server route segments (app/marketplace/[type]/[bracket]/page.tsx)
+//      parse the URL and pass the matching filters in as `initial`, so
+//      the hook's very first render already reflects the URL instead of
+//      always starting from "all"/cache and snapping a moment later.
+//   2. Whenever filters change after that (via the UI), an effect below
+//      computes the canonical path for the new state and router.replaces
+//      to it — shallow, no scroll, no server round-trip, same UX as
+//      before, just with the address bar staying in sync for
+//      sharing/refresh/SEO. router.replace (not push) because filter
+//      tweaks are not meant to pile up back-button history entries.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Listing, ListingType } from "@/lib/listings";
+import { buildMarketplacePath, formatMarketplacePath } from "@/lib/marketplaceSeoUrls";
 
 export type TemplateFilter = "all" | "template" | "not-template";
 
@@ -16,6 +32,14 @@ export interface MarketplaceFilters {
   templateFilter: TemplateFilter;
   priceMin: number;
   priceMax: number | null;
+}
+
+export interface MarketplaceFiltersInitial {
+  typeFilter?: ListingType | "all";
+  templateFilter?: TemplateFilter;
+  priceMin?: number;
+  priceMax?: number | null;
+  searchQuery?: string;
 }
 
 // FALLBACK_PRICE_CAP is used only until useLimits() resolves the live value
@@ -47,16 +71,40 @@ interface FiltersCacheEntry {
 }
 let filtersCache: FiltersCacheEntry | null = null;
 
-export function useMarketplaceFilters() {
-  const [typeFilter, setTypeFilterState] = useState<ListingType | "all">(filtersCache?.typeFilter ?? "all");
-  const [templateFilter, setTemplateFilterState] = useState<TemplateFilter>(filtersCache?.templateFilter ?? "all");
-  const [priceMin, setPriceMinState] = useState(filtersCache?.priceMin ?? 0);
-  const [priceMax, setPriceMaxState] = useState<number | null>(filtersCache?.priceMax ?? null);
+// `initial` — passed by a server route segment that parsed a real URL
+// (e.g. /marketplace/websites/under-500) — takes priority over the
+// cross-navigation cache on first mount: landing on a specific indexed
+// URL should show exactly what that URL promises, not whatever filters
+// happened to be cached from browsing before. The cache still governs
+// plain /marketplace (no `initial`), preserving the original
+// "marketplace never forgets your filters" behavior for that route.
+//
+// `syncUrl` — MUST be true only for the one MarketplaceGrid mount that IS
+// the /marketplace route itself (app/marketplace/page.tsx and its
+// [type]/[bracket] children). MarketplaceGrid is also mounted on the
+// homepage (preview mode, still sitting on "/") and inside
+// MarketplaceModal (a portaled overlay that can open from any page) —
+// neither of those should ever router.replace the address bar to
+// /marketplace/..., since the user isn't actually on that route. Passing
+// syncUrl defaults to false specifically so a caller has to opt in
+// deliberately rather than the homepage/modal silently inheriting it.
+export function useMarketplaceFilters(initial?: MarketplaceFiltersInitial, syncUrl = false) {
+  const router = useRouter();
+  const [typeFilter, setTypeFilterState] = useState<ListingType | "all">(
+    initial?.typeFilter ?? filtersCache?.typeFilter ?? "all"
+  );
+  const [templateFilter, setTemplateFilterState] = useState<TemplateFilter>(
+    initial?.templateFilter ?? filtersCache?.templateFilter ?? "all"
+  );
+  const [priceMin, setPriceMinState] = useState(initial?.priceMin ?? filtersCache?.priceMin ?? 0);
+  const [priceMax, setPriceMaxState] = useState<number | null>(
+    initial?.priceMax !== undefined ? initial.priceMax : filtersCache?.priceMax ?? null
+  );
   // Mirrors mpSearchQuery — trimmed/lowercased in the input handler, not
   // here, same as the original. Deliberately excluded from mpUpdateActiveTags
   // / activeTags below (confirmed: search never appears as an active-filter
   // chip in the original).
-  const [searchQuery, setSearchQueryState] = useState(filtersCache?.searchQuery ?? "");
+  const [searchQuery, setSearchQueryState] = useState(initial?.searchQuery ?? filtersCache?.searchQuery ?? "");
 
   // Keep the cache in sync with every change so the next mount (after a
   // navigate-away-and-back) rehydrates from the latest values.
@@ -127,10 +175,16 @@ export function useMarketplaceFilters() {
     return tags;
   }, [typeFilter, templateFilter, priceMin, priceMax, clearType, clearTemplate, clearPrice]);
 
-  // Client-side portion of mpApplyAndRender's filter chain — template,
-  // price, and now search (ported verbatim from mpApplyAndRender's
-  // mpSearchQuery filter: title/description/type substring match). Type
-  // itself is still applied server-side via useFeed's `type` param.
+  // Client-side portion of mpApplyAndRender's filter chain — template and
+  // price only. Type itself is still applied server-side via useFeed's
+  // `type` param. Search is deliberately NOT re-applied here: when a
+  // search query is active, MarketplaceGrid's sourceListings are already
+  // the server's scored/matched results (see useSearchResults +
+  // _handler.js's handleSearch), which don't necessarily contain a raw
+  // lowercase substring match of `searchQuery` in title/description/type
+  // (server scoring can differ from a literal .includes() check). Re-
+  // filtering those results against searchQuery here was silently
+  // dropping every legitimate match back out to an empty list.
   const applyClientFilters = useCallback(
     (listings: Listing[]) => {
       let f = listings;
@@ -145,18 +199,31 @@ export function useMarketplaceFilters() {
           return true;
         });
       }
-      if (searchQuery) {
-        f = f.filter(
-          (l) =>
-            (l.title || "").toLowerCase().includes(searchQuery) ||
-            (l.description || "").toLowerCase().includes(searchQuery) ||
-            (l.type || "").toLowerCase().includes(searchQuery)
-        );
-      }
       return f;
     },
-    [templateFilter, priceMin, priceMax, searchQuery]
+    [templateFilter, priceMin, priceMax]
   );
+
+  const currentPath = useMemo(
+    () => buildMarketplacePath({ type: typeFilter, templateFilter, priceMin, priceMax, searchQuery }),
+    [typeFilter, templateFilter, priceMin, priceMax, searchQuery]
+  );
+
+  // Keeps the address bar in sync with filter state (see file header).
+  // Skips the very first render when that render's state came from
+  // `initial` — the URL the server already rendered for is already
+  // correct, so replacing it again on mount would be a wasted
+  // history/route transition with no visible effect, just extra work.
+  const skipNextSync = useRef(!!initial);
+  useEffect(() => {
+    if (!syncUrl) return;
+    if (skipNextSync.current) {
+      skipNextSync.current = false;
+      return;
+    }
+    router.replace(formatMarketplacePath(currentPath), { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPath, syncUrl]);
 
   return {
     typeFilter,
@@ -174,5 +241,6 @@ export function useMarketplaceFilters() {
     setSearchQuery,
     activeTags,
     applyClientFilters,
+    currentPath,
   };
 }
