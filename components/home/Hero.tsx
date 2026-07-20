@@ -33,7 +33,22 @@ export default function Hero() {
 
   return (
     <section className="hero" ref={heroRef}>
-      <div className="hero-bg" />
+      {/* Was a pure CSS background-image on this div — invisible to
+          Google Images (no <img> tag = nothing to index, no alt text
+          possible, no filename credit, regardless of hosting). Now a
+          real <img> filling the same box with the same blur/scale
+          styling applied directly to it via .hero-bg, so it's
+          visually identical but actually crawlable. Self-hosted at a
+          descriptive path instead of the external CDN/UUID filename —
+          same-domain hosting is the biggest single lever for a brand-
+          search image ranking. */}
+      <div className="hero-bg">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/images/siterifty-hero-marketplace.jpg"
+          alt="Siterifty marketplace — buy, sell, and discover apps, games, and websites"
+        />
+      </div>
       <div className="hero-overlay" />
       <CreditsTicker heroRef={heroRef} ctaRef={ctaRef} />
       <div className="hero-content">
