@@ -12534,3 +12534,141 @@ body.theme-active .sd-header { background: color-mix(in srgb, var(--app-theme-co
     gap: 16px;
   }
 }
+
+/* ===== SITE FOOTER ===== */
+/* Extends the app's existing dark/lime identity (see :root's --mp-*
+   tokens) rather than introducing a new palette — this is the same
+   surface/border/text scale used everywhere else in the app. */
+.srf-footer {
+  position: relative;
+  background: var(--mp-surface);
+  border-top: 1px solid var(--mp-border);
+  margin-top: 48px;
+}
+
+/* Signature hairline — a quiet echo of the lime accent used sparingly
+   elsewhere (stat pills, CTA buttons), rather than a plain flat border. */
+.srf-footer-top {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(163, 230, 53, 0.35) 50%,
+    transparent 100%
+  );
+}
+
+.srf-footer-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 48px 32px 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 40px;
+  justify-content: space-between;
+}
+
+.srf-footer-brand {
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.srf-footer-logo {
+  height: 22px;
+  display: block;
+}
+
+.srf-footer-tagline {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--mp-text-sec);
+  margin: 0;
+}
+
+.srf-footer-cols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 40px;
+}
+
+.srf-footer-col {
+  min-width: 130px;
+}
+
+.srf-footer-col-heading {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mp-text-muted);
+  margin-bottom: 14px;
+}
+
+.srf-footer-col-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.srf-footer-col-list a {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--mp-text-sec);
+  text-decoration: none;
+  transition: color var(--mp-transition);
+}
+
+.srf-footer-col-list a:hover {
+  color: var(--mp-accent);
+}
+
+.srf-footer-bottom {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 32px calc(20px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--mp-border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--mp-text-muted);
+}
+
+.srf-footer-bottom-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--mp-text-muted);
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .srf-footer-inner {
+    padding: 36px 20px 24px;
+    gap: 32px;
+  }
+  .srf-footer-cols {
+    gap: 28px;
+  }
+  .srf-footer-bottom {
+    padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0px));
+    flex-wrap: wrap;
+  }
+}
+
+/* Home and Marketplace mount a fixed BottomNav bar (see
+   HomeMarketplaceOnly.tsx) on top of page content on mobile — give the
+   footer's own bottom edge the same clearance so its last row (and the
+   safe-area padding above) isn't hidden underneath that bar. */
+.srf-fnav-space .srf-footer {
+  margin-bottom: calc(66px + env(safe-area-inset-bottom, 0px));
+}
