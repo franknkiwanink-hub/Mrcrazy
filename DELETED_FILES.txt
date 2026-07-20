@@ -1,10 +1,4 @@
-These files were deleted in this session (not included in the zip — delete them manually when merging):
+Delete these two files from your project (not included in this zip — zips can't carry deletions):
 
-app/about/opengraph-image.tsx
-app/contact/opengraph-image.tsx
-app/help/opengraph-image.tsx
-app/how-it-works/opengraph-image.tsx
-app/escrow/opengraph-image.tsx
-app/buyer-protection/opengraph-image.tsx
-app/terms/opengraph-image.tsx
-app/marketplace/opengraph-image.tsx
+app/listing/[id]/opengraph-image.tsx
+app/seller/[id]/opengraph-image.tsx
