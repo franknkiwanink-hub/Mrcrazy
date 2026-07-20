@@ -11285,7 +11285,6 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
       }
       @media (max-width: 900px), (pointer: coarse) and (max-width: 1024px) {
       .fnav { display: flex; }
-      body.srf-fnav-space { padding-bottom: calc(66px + env(safe-area-inset-bottom, 0px)); }
       }
       .fnav-pill {
       pointer-events: auto;
@@ -12581,6 +12580,7 @@ body.theme-active .sd-header { background: color-mix(in srgb, var(--app-theme-co
 
 .srf-footer-logo {
   height: 22px;
+  width: auto;
   display: block;
 }
 
@@ -12663,12 +12663,4 @@ body.theme-active .sd-header { background: color-mix(in srgb, var(--app-theme-co
     padding: 16px 20px calc(16px + env(safe-area-inset-bottom, 0px));
     flex-wrap: wrap;
   }
-}
-
-/* Home and Marketplace mount a fixed BottomNav bar (see
-   HomeMarketplaceOnly.tsx) on top of page content on mobile — give the
-   footer's own bottom edge the same clearance so its last row (and the
-   safe-area padding above) isn't hidden underneath that bar. */
-.srf-fnav-space .srf-footer {
-  margin-bottom: calc(66px + env(safe-area-inset-bottom, 0px));
 }
