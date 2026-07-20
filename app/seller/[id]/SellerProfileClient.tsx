@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
+import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { fetchFullSeller, fetchSellerDealStats, type FullSeller, type SellerDealStats } from "@/lib/useSeller";
 import SellerProfileHeader from "@/components/seller/SellerProfileHeader";
 import SellerListingsGrid from "@/components/seller/SellerListingsGrid";
@@ -33,6 +34,7 @@ export default function SellerProfileClient({
   initialSeller?: FullSeller | null;
 }) {
   const { user } = useAuth();
+  const { openAuthModal } = useAuthModal();
 
   const [seller, setSeller] = useState<FullSeller | null>(initialSeller);
   const [notFoundState, setNotFoundState] = useState(false);
@@ -193,8 +195,23 @@ export default function SellerProfileClient({
                 <span id="spModalName">{seller.username}</span>
               </div>
               <div id="spModalBio">
-                <div id="spModalBioText" style={{ color: "#555" }}>
-                  Sign in to view this profile.
+                <div id="spModalBioText" style={{ color: "rgba(255,255,255,0.5)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span>This profile is only visible to signed-in members.</span>
+                  <button
+                    onClick={openAuthModal}
+                    style={{
+                      background: "#a3e635",
+                      color: "#0a0a0a",
+                      fontWeight: 700,
+                      fontSize: 12.5,
+                      border: "none",
+                      borderRadius: 999,
+                      padding: "6px 16px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Sign In / Sign Up
+                  </button>
                 </div>
               </div>
             </div>
