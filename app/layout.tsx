@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import Script from "next/script";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
 import "./globals.css";
@@ -8,6 +9,7 @@ import NavDrawerOverlay from "@/components/layout/NavDrawerOverlay";
 import { NavDrawerProvider } from "@/components/layout/NavDrawerProvider";
 import HomeMarketplaceOnly from "@/components/layout/HomeMarketplaceOnly";
 import Footer from "@/components/layout/Footer";
+import ScrollToTop from "@/components/layout/ScrollToTop";
 import AnnouncementBar from "@/components/layout/AnnouncementBar";
 import BootOverlay from "@/components/layout/BootOverlay";
 import PushServiceWorkerRegister from "@/components/layout/PushServiceWorkerRegister";
@@ -115,6 +117,16 @@ export default function RootLayout({
             paint into. Sits outside every provider since it's pure CSS,
             no state needed here. */}
         <div id="appThemeBg" aria-hidden="true" />
+        {/* Resets window (and known inner overflow-y:auto panels) scroll
+            to top on every real navigation — see ScrollToTop.tsx's own
+            comment for the footer-link-leaves-page-scrolled bug this
+            fixes. Mounted outside every provider since it has no
+            dependency on auth/theme/etc, just route + search params;
+            wrapped in Suspense because useSearchParams requires one in
+            the App Router. */}
+        <Suspense fallback={null}>
+          <ScrollToTop />
+        </Suspense>
         <PushServiceWorkerRegister />
         {/* Image lightbox — zoomable/pannable full-screen image viewer,
             opened by clicking any element carrying .srf-lightbox-trigger
