@@ -2,6 +2,7 @@
 
 import { useSeller } from "@/lib/useSeller";
 import Stars from "./Stars";
+import SellerBadges from "@/components/seller/SellerBadges";
 
 interface SellerStripProps {
   ownerId?: string;
@@ -13,8 +14,11 @@ interface SellerStripProps {
 }
 
 // Shared avatar/name/stars strip, reused across all three card types.
-// Deliberately NOT the full trust-badge cluster (sellerBadgesHtml) — that
-// needs follower/deal data the lightweight useSeller fetch doesn't pull.
+// Now includes the plan/deal-tier trust badges (SellerBadges) using
+// whatever plan/dealsCompleted useSeller's lightweight fetch already
+// pulled — see useSeller.ts's own comment for why followerCount (and
+// therefore the follower-based verified-blue tier) is intentionally
+// left out here and only shown on the full seller profile page.
 export default function SellerStrip({ ownerId, fallbackHandle, onViewSeller }: SellerStripProps) {
   const seller = useSeller(ownerId);
   const displayName = seller?.username || fallbackHandle;
@@ -38,6 +42,7 @@ export default function SellerStrip({ ownerId, fallbackHandle, onViewSeller }: S
       <div className="sr-seller-txt">
         <span className="sr-seller-name">
           <span className="sr-seller-name-text">{displayName}</span>
+          {seller ? <SellerBadges seller={{ plan: seller.plan, dealsCompleted: seller.dealsCompleted }} /> : null}
         </span>
         <span className="sr-seller-stars">
           <Stars rating={seller?.rating || 0} count={seller?.ratingCount || 0} />
