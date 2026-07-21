@@ -8,6 +8,9 @@ import SellerBlock from "./SellerBlock";
 import TransferMethodsBlock from "./TransferMethodsBlock";
 import AttachedRepoBlock from "./AttachedRepoBlock";
 import DealCtaBar from "@/components/deal/DealCtaBar";
+import { useAdGatedPreview } from "@/lib/useAdGatedPreview";
+import ShareButton from "@/components/listing/ShareButton";
+import { listingShareUrl } from "@/lib/share";
 
 // Ports the `type === 'website'` branch of mpOpenModal (marketplace.js,
 // ~line 1774) 1:1 — same accent color, same hero/gallery layout, same
@@ -40,6 +43,8 @@ export default function WebsiteListingBody({ listing }: { listing: Listing }) {
   const galleryShots = [listing.images?.[0], listing.images?.[1]].filter(Boolean) as string[];
   const landscape2 = listing.images?.[3] || "";
 
+  const { openPreview, AdOverlayHost, PreviewHost } = useAdGatedPreview();
+
   return (
     <>
       <div className="modal-hero srf-lightbox-trigger" data-src={cover}>
@@ -64,7 +69,10 @@ export default function WebsiteListingBody({ listing }: { listing: Listing }) {
             >
               {isTemplate ? "Template" : "Website"}
             </span>
-            <span className="modal-price-badge" title={priceTooltip}>{priceStr}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="modal-price-badge" title={priceTooltip}>{priceStr}</span>
+              <ShareButton url={listingShareUrl(listing.id, title)} title={title} accentColor={ACCENT} />
+            </div>
           </div>
           <div className="modal-hero-bottom-row">
             <div className="modal-hero-title-block">
@@ -111,15 +119,10 @@ export default function WebsiteListingBody({ listing }: { listing: Listing }) {
               <a href={url} target="_blank" rel="noopener" className="modal-url">
                 {url}
               </a>
-              {/* Original wires this through mpShowAdThenAction (ad-gated
-                  interstitial) before opening an in-page preview iframe via
-                  mpOpenPreview. Same Layer B deferral already applied to
-                  AppListingBody's store links/demo preview — acts
-                  immediately here instead of ad-gating. */}
               <button
                 type="button"
                 className="modal-view-btn"
-                onClick={() => window.open(url, "_blank", "noopener")}
+                onClick={() => openPreview({ title: `Preview: ${title}`, url })}
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                   <circle cx="12" cy="12" r="10" />
@@ -200,6 +203,8 @@ export default function WebsiteListingBody({ listing }: { listing: Listing }) {
         <SellerBlock listing={listing} accentColor={ACCENT} />
       </div>
       <DealCtaBar listing={listing} />
+      <AdOverlayHost />
+      <PreviewHost />
     </>
   );
 }
