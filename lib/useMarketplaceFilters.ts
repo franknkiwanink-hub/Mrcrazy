@@ -71,6 +71,18 @@ interface FiltersCacheEntry {
 }
 let filtersCache: FiltersCacheEntry | null = null;
 
+// Exported so a caller that needs a genuine reset — not just navigating
+// away — can clear the cache before pushing. Without this, "Back to
+// marketplace" from a ?q= search would push to /marketplace, but the
+// next mount there still reads the stale filtersCache.searchQuery (since
+// plain /marketplace has no `initial` to override it), and the syncUrl
+// effect below would then router.replace that same query straight back
+// into the address bar — the query "clearing" and then immediately
+// reappearing.
+export function clearMarketplaceFiltersCache() {
+  filtersCache = null;
+}
+
 // `initial` — passed by a server route segment that parsed a real URL
 // (e.g. /marketplace/websites/under-500) — takes priority over the
 // cross-navigation cache on first mount: landing on a specific indexed
