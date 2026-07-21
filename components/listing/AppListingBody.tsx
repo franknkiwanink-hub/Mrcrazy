@@ -9,6 +9,8 @@ import TransferMethodsBlock from "./TransferMethodsBlock";
 import AttachedRepoBlock from "./AttachedRepoBlock";
 import DealCtaBar from "@/components/deal/DealCtaBar";
 import { useCurrency } from "@/lib/CurrencyContext";
+import ShareButton from "@/components/listing/ShareButton";
+import { listingShareUrl } from "@/lib/share";
 
 const ACCENT = "#a78bfa"; // app accent color, matches tc for type==='app'
 
@@ -169,7 +171,10 @@ export default function AppListingBody({ listing }: { listing: Listing }) {
             >
               App{isTemplate ? " · Template" : ""}
             </span>
-            <span className="modal-price-badge" title={priceTooltip}>{priceStr}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="modal-price-badge" title={priceTooltip}>{priceStr}</span>
+              <ShareButton url={listingShareUrl(listing.id, title)} title={title} accentColor={ACCENT} />
+            </div>
           </div>
           <div className="modal-hero-bottom-row">
             {appIcon ? (
