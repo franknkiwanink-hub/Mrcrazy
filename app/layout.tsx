@@ -30,6 +30,7 @@ import { DealPopupProvider } from "@/components/deal/DealPopupProvider";
 import { DisputePickerProvider } from "@/components/dispute/DisputePickerProvider";
 import { ImageLightboxProvider } from "@/components/listing/ImageLightboxProvider";
 import { MarketplaceSearchProvider } from "@/components/marketplace/MarketplaceSearchProvider";
+import { SrToastProvider } from "@/components/system/SrToastProvider";
 
 const SITE_TITLE =
   "Siterifty — Buy & Sell Websites, Apps & Games";
@@ -143,6 +144,7 @@ export default function RootLayout({
             screens, matching the original's always-present global DOM
             node behavior). */}
         <ImageLightboxProvider>
+        <SrToastProvider>
         <AuthProvider>
           {/* Boot overlay — first thing rendered, removed only after auth
               resolves once + a cooldown, same comment/positioning as the
@@ -232,6 +234,7 @@ export default function RootLayout({
           </ThemeModalProvider>
           </CurrencyProvider>
         </AuthProvider>
+        </SrToastProvider>
         </ImageLightboxProvider>
       </body>
     </html>
