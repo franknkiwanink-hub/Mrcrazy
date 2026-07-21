@@ -11,16 +11,23 @@
 // MarketplaceFilterBar (client-side fetchSearchResults), not this
 // component — this only ever renders the query the page was loaded with.
 //
-// "Back to marketplace" does router.push("/marketplace") followed by
-// router.refresh() — a real client-side navigation (no full-page reload,
-// unlike a previous window.location.assign approach) that also forces
-// the server component to re-run so it reliably lands on the plain
-// no-query marketplace grid instead of re-rendering this search branch.
+// "Back to marketplace" clears the module-level filters cache (see
+// clearMarketplaceFiltersCache in useMarketplaceFilters.ts), THEN does
+// router.push("/marketplace") followed by router.refresh() — a real
+// client-side navigation (no full-page reload, unlike a previous
+// window.location.assign approach) that also forces the server
+// component to re-run so it reliably lands on the plain no-query
+// marketplace grid. Clearing the cache first is required: without it,
+// the /marketplace grid's own filters hook (syncUrl=true) would
+// rehydrate searchQuery from the stale cache on mount and immediately
+// router.replace the URL right back to ?q=... — the bug where the query
+// param appeared to "come back" after being cleared.
 import { useRouter } from "next/navigation";
 import type { Listing } from "@/lib/listings";
 import ListingCard from "@/components/marketplace/ListingCard";
 import { buildListingSlug } from "@/lib/slug";
 import { useSrToast } from "@/components/system/SrToastProvider";
+import { clearMarketplaceFiltersCache } from "@/lib/useMarketplaceFilters";
 
 export default function SearchResultsGrid({
   listings,
@@ -61,7 +68,9 @@ export default function SearchResultsGrid({
             // forces the server component to actually re-run after the
             // push, so we land on the real no-query marketplace grid —
             // without the full browser reload window.location.assign
-            // caused.
+            // caused. clearMarketplaceFiltersCache() first is required —
+            // see file header comment for why.
+            clearMarketplaceFiltersCache();
             router.push("/marketplace");
             router.refresh();
           }}
@@ -116,6 +125,7 @@ export default function SearchResultsGrid({
               <button
                 type="button"
                 onClick={() => {
+                  clearMarketplaceFiltersCache();
                   router.push("/marketplace");
                   router.refresh();
                   showToast("Showing all listings", "info");
