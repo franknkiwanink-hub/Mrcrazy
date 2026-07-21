@@ -372,6 +372,13 @@ export default function NavDrawer() {
             </svg>
             Marketplace
           </a>
+          <a href="/blog" className="nav-link" id="navBlogLink" onClick={(e) => { e.preventDefault(); go("/blog"); }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+            Blog
+          </a>
           <a href="/sell" className="nav-link" id="navStartSellingLink" onClick={(e) => { e.preventDefault(); requireAuth(() => go("/sell")); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <path d="M12 2l3.5 7 7.5 1-5.5 5 1.5 7.5L12 18.5 5 22.5l1.5-7.5L1 8l7.5-1z" />
