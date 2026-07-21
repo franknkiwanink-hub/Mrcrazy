@@ -15,6 +15,7 @@ import AdSlot from "@/components/marketplace/AdSlot";
 import SellerPromoCard from "@/components/marketplace/SellerPromoCard";
 import AiPromoCard from "@/components/marketplace/AiPromoCard";
 import { buildListingSlug } from "@/lib/slug";
+import { buildMarketplacePath, formatMarketplacePath } from "@/lib/marketplaceSeoUrls";
 import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 
 const PREVIEW_COUNT = 12;
@@ -49,6 +50,35 @@ export default function MarketplaceGrid({
   const filters = useMarketplaceFilters(initialFilters, syncUrl);
   const type = filters.typeFilter === "all" ? undefined : filters.typeFilter;
   const { listings, loading, loadingMore, error, exhausted, loadMore, reset } = useFeed({ pageSize: 24, type });
+  const router = useRouter();
+
+  // Homepage preview grid only: search or any filter interaction should
+  // land the visitor on the real, URL-driven /marketplace page instead
+  // of re-filtering the fixed 12-item preview in place — the preview is
+  // a taste of the catalog, not a second copy of the full browse/search
+  // experience. Reuses buildMarketplacePath/formatMarketplacePath (the
+  // same single source of truth /marketplace's own route segments and
+  // useMarketplaceFilters use) so the URL landed on is byte-identical
+  // to what typing the same search or picking the same filter directly
+  // on /marketplace would produce — never a mismatched/noindexed one.
+  // Not wired up when preview is false: /marketplace's own grid must
+  // keep applying filters normally, not redirect to itself.
+  function goToMarketplaceWith(next: {
+    typeFilter?: typeof filters.typeFilter;
+    templateFilter?: typeof filters.templateFilter;
+    priceMin?: number;
+    priceMax?: number | null;
+    searchQuery?: string;
+  }) {
+    const path = buildMarketplacePath({
+      type: next.typeFilter ?? filters.typeFilter,
+      templateFilter: next.templateFilter ?? filters.templateFilter,
+      priceMin: next.priceMin ?? filters.priceMin,
+      priceMax: next.priceMax !== undefined ? next.priceMax : filters.priceMax,
+      searchQuery: next.searchQuery ?? filters.searchQuery,
+    });
+    router.push(formatMarketplacePath(path));
+  }
 
   // When a search query is active, the grid's data source switches from
   // the browse feed to real server-side search results (the FULL cached
@@ -61,9 +91,18 @@ export default function MarketplaceGrid({
   const sourceLoading = hasSearch ? search.loading : loading;
   const sourceError = hasSearch ? search.error : error;
   const retry = hasSearch ? search.refetch : reset;
-  const router = useRouter();
   const onOpen = (listing: Listing) => {
-    if (listing?.id) router.push(`/listing/${buildListingSlug(listing.title, listing.id)}`);
+    if (!listing?.id) return;
+    // Homepage preview grid only: swap this history entry for
+    // /marketplace before pushing the listing page, so the back
+    // button returns to the full marketplace instead of back to the
+    // homepage preview it was actually clicked from. router.replace
+    // is a client-side history swap (no reload/flash) — the visitor
+    // never sees /marketplace render before the listing page takes
+    // over. /marketplace's own grid (preview=false) is unaffected —
+    // its own history entry is already /marketplace, nothing to swap.
+    if (preview) router.replace("/marketplace");
+    router.push(`/listing/${buildListingSlug(listing.title, listing.id)}`);
   };
   // Seller profile page now exists (app/seller/[id]/page.tsx) — cards
   // navigate straight there, same as onOpen does for listings. Signature
@@ -166,16 +205,20 @@ export default function MarketplaceGrid({
     <div>
       <MarketplaceFilterBar
         typeFilter={filters.typeFilter}
-        onTypeChange={filters.setTypeFilter}
+        onTypeChange={preview ? (v) => goToMarketplaceWith({ typeFilter: v }) : filters.setTypeFilter}
         templateFilter={filters.templateFilter}
-        onTemplateChange={filters.setTemplateFilter}
+        onTemplateChange={preview ? (v) => goToMarketplaceWith({ templateFilter: v }) : filters.setTemplateFilter}
         priceMin={filters.priceMin}
         priceMax={filters.priceMax}
-        onPriceChange={filters.setPriceRange}
+        onPriceChange={
+          preview
+            ? (min, max) => goToMarketplaceWith({ priceMin: min, priceMax: max })
+            : filters.setPriceRange
+        }
         activeTags={filters.activeTags}
         searchListings={listings}
         searchQuery={filters.searchQuery}
-        onSearchChange={filters.setSearchQuery}
+        onSearchChange={preview ? (v) => goToMarketplaceWith({ searchQuery: v }) : filters.setSearchQuery}
         onOpenListing={onOpen}
         onOpenSeller={onOpenSeller}
         autoOpenSearch={autoOpenSearch}
