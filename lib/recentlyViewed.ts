@@ -22,6 +22,11 @@ export interface RecentlyViewedEntry {
   type: ListingType;
   image: string;
   price: number | null;
+  revenue: number | null;
+  expenses: number | null;
+  profit: number | null;
+  ownerId: string | null;
+  ownerEmail: string | null;
   viewedAt: number;
 }
 
@@ -50,6 +55,14 @@ function writeAll(entries: RecentlyViewedEntry[]) {
 // trackListing("listing.view", ...) analytics beacon. Moves the listing
 // to the front if already present (most-recently-viewed first) instead
 // of duplicating it.
+//
+// Snapshots the full financials trio (price/revenue/expenses/profit) —
+// not just price — plus ownerId/ownerEmail, so a reconstructed card can
+// show real revenue/expenses/profit instead of "—", and so "View seller"
+// on a recently-viewed card actually has an id to navigate to. An
+// earlier version only stored price, which meant every recently-viewed
+// card showed blank financials and its seller strip's "View seller"
+// silently did nothing (onOpenSeller received undefined).
 export function recordRecentlyViewed(listing: Listing) {
   if (typeof window === "undefined" || !listing.id) return;
   const snapshot: RecentlyViewedEntry = {
@@ -58,6 +71,11 @@ export function recordRecentlyViewed(listing: Listing) {
     type: listing.type || "website",
     image: listing.images?.[2] || listing.imageCover || listing.images?.[0] || listing.appIcon || "",
     price: typeof listing.financials?.price === "number" ? listing.financials.price : null,
+    revenue: typeof listing.financials?.revenue === "number" ? listing.financials.revenue : null,
+    expenses: typeof listing.financials?.expenses === "number" ? listing.financials.expenses : null,
+    profit: typeof listing.financials?.profit === "number" ? listing.financials.profit : null,
+    ownerId: listing.ownerId || null,
+    ownerEmail: listing.ownerEmail || null,
     viewedAt: Date.now(),
   };
   const existing = readAll().filter((e) => e.id !== listing.id);
@@ -79,15 +97,25 @@ export function clearRecentlyViewed() {
 
 // Reconstructs a minimal Listing-shaped object from a stored snapshot —
 // enough for ListingCard's Site/App/Game variants to render correctly
-// (title, image, price), same posture as SaveButton's favorites-tab
-// comment about rendering "a full card instantly without an extra
-// per-item listing fetch".
+// (title, image, full financials, owner), same posture as SaveButton's
+// favorites-tab comment about rendering "a full card instantly without
+// an extra per-item listing fetch". Includes ownerId/ownerEmail so
+// SellerStrip's useSeller(ownerId) can resolve a real seller (name,
+// avatar, badges) and so "View seller" has an id to navigate to —
+// without ownerId there, onOpenSeller(undefined) was a no-op.
 export function entryToListing(entry: RecentlyViewedEntry): Listing {
   return {
     id: entry.id,
     type: entry.type,
     title: entry.title,
     images: entry.image ? [entry.image, entry.image, entry.image] : [],
-    financials: entry.price !== null ? { price: entry.price } : {},
+    financials: {
+      ...(entry.price !== null ? { price: entry.price } : {}),
+      ...(entry.revenue !== null ? { revenue: entry.revenue } : {}),
+      ...(entry.expenses !== null ? { expenses: entry.expenses } : {}),
+      ...(entry.profit !== null ? { profit: entry.profit } : {}),
+    },
+    ownerId: entry.ownerId || undefined,
+    ownerEmail: entry.ownerEmail || undefined,
   };
 }
