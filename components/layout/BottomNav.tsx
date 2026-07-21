@@ -8,7 +8,12 @@ export default function BottomNav() {
   return (
     <nav className="fnav" id="fnav">
       <div className="fnav-pill">
-        <button className="fnav-btn" id="fnavSell" aria-label="Sell Now">
+        <button
+          className="fnav-btn"
+          id="fnavSell"
+          aria-label="Sell Now"
+          onClick={() => router.push("/sell")}
+        >
           <svg
             className="fnav-icon"
             viewBox="0 0 24 24"
@@ -22,7 +27,12 @@ export default function BottomNav() {
           </svg>
           <span className="fnav-label">Sell Now</span>
         </button>
-        <button className="fnav-btn fnav-active" id="fnavMarket" aria-label="Marketplace">
+        <button
+          className="fnav-btn fnav-active"
+          id="fnavMarket"
+          aria-label="Marketplace"
+          onClick={() => router.push("/marketplace")}
+        >
           <svg
             className="fnav-icon"
             viewBox="0 0 24 24"
@@ -38,7 +48,12 @@ export default function BottomNav() {
           </svg>
           <span className="fnav-label">Marketplace</span>
         </button>
-        <button className="fnav-btn" id="fnavSellers" aria-label="Sellers">
+        <button
+          className="fnav-btn"
+          id="fnavSellers"
+          aria-label="Sellers"
+          onClick={() => router.push("/sellers")}
+        >
           <svg
             className="fnav-icon"
             viewBox="0 0 24 24"
