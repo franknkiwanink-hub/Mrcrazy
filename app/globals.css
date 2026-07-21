@@ -9868,6 +9868,57 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
             #aspSendBtn:disabled { opacity: 0.5; cursor: not-allowed; }
             #aspSendBtn svg { width: 17px; height: 17px; stroke: #000; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 
+/* Lightweight UI-confirmation toasts (SrToastProvider / useSrToast) —
+   deliberately separate from #ntfStack above: #ntfStack is the
+   notifications system (deal updates, messages — persisted, has an
+   inbox/missed panel). These are instant, disposable feedback for a
+   just-performed UI action (link copied, filters cleared, etc.), so a
+   different visual language (compact pill, bottom-center, no accent
+   bar/click-to-open) makes that distinction obvious rather than
+   visually implying every toast here is a real notification. */
+#srToastStack {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 10060;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 8px;
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.sr-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(20, 20, 26, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f2f2f5;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  transform: translateY(12px) scale(0.96);
+  opacity: 0;
+  transition: transform 0.24s cubic-bezier(.16,.84,.44,1), opacity 0.24s;
+  white-space: nowrap;
+}
+.sr-toast.show { transform: translateY(0) scale(1); opacity: 1; }
+.sr-toast.leaving { transform: translateY(8px) scale(0.98); opacity: 0; }
+.sr-toast-icon { display: flex; flex-shrink: 0; width: 15px; height: 15px; }
+.sr-toast.t-success .sr-toast-icon { color: #a3e635; }
+.sr-toast.t-error .sr-toast-icon { color: #f87171; }
+.sr-toast.t-info .sr-toast-icon { color: #60a5fa; }
+@media (max-width: 560px) {
+  #srToastStack { bottom: 84px; }
+}
+
 /* ── extracted style block 13 (originally around char offset 1903360) ── */
 #ntfStack {
             position: fixed; top: 16px; right: 16px; z-index: 10050;
@@ -12550,6 +12601,36 @@ body.theme-active .sd-header { background: color-mix(in srgb, var(--app-theme-co
   position: relative;
   overflow: hidden;
 }
+
+/* Globally-scoped twin of #siterifty-loader .skel above, same look/
+   animation — used by ListingCardSkeleton (in-grid card placeholders)
+   and RecentlyViewedStrip, which render outside #siterifty-loader so
+   the scoped selector above doesn't reach them. */
+.sr-skel {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.sr-skel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.04) 35%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.04) 65%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: srfLoaderShimmer 2.2s ease-in-out infinite;
+}
+
+.sr-site-skeleton { pointer-events: none; }
 
 #siterifty-loader .skel::after {
   content: '';
