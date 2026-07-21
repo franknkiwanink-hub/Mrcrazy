@@ -13094,9 +13094,9 @@ body.theme-active .sd-header { background: color-mix(in srgb, var(--app-theme-co
 }
 
 @media (max-width: 560px) {
-  .sr-blog-page { padding: 84px 16px 60px; }
+  .sr-blog-page { padding: 92px 16px 60px; }
   .sr-blog-h1 { font-size: 26px; }
   .sr-blog-grid { grid-template-columns: 1fr; gap: 18px; }
-  .sr-blog-post { margin-top: 84px; }
+  .sr-blog-post { margin-top: 92px; }
   .sr-blog-post-title { font-size: 22px; }
 }
