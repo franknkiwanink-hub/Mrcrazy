@@ -10,10 +10,17 @@
 // after the page has loaded is handled separately by SearchOverlay /
 // MarketplaceFilterBar (client-side fetchSearchResults), not this
 // component — this only ever renders the query the page was loaded with.
+//
+// "Back to marketplace" does router.push("/marketplace") followed by
+// router.refresh() — a real client-side navigation (no full-page reload,
+// unlike a previous window.location.assign approach) that also forces
+// the server component to re-run so it reliably lands on the plain
+// no-query marketplace grid instead of re-rendering this search branch.
 import { useRouter } from "next/navigation";
 import type { Listing } from "@/lib/listings";
 import ListingCard from "@/components/marketplace/ListingCard";
 import { buildListingSlug } from "@/lib/slug";
+import { useSrToast } from "@/components/system/SrToastProvider";
 
 export default function SearchResultsGrid({
   listings,
@@ -23,6 +30,7 @@ export default function SearchResultsGrid({
   query: string;
 }) {
   const router = useRouter();
+  const { show: showToast } = useSrToast();
   const onOpen = (listing: Listing) => {
     if (listing?.id) router.push(`/listing/${buildListingSlug(listing.title, listing.id)}`);
   };
@@ -45,14 +53,17 @@ export default function SearchResultsGrid({
         <button
           type="button"
           onClick={() => {
-            // A soft client-side push to the same /marketplace route
-            // segment (even with the ?q= param dropped) doesn't reliably
-            // re-run this page's server-side branch — Next treats it as
-            // a navigation within the same segment, so it can appear to
-            // just "refresh" back onto this same search-results view.
-            // A full navigation guarantees we land on the real
-            // no-query marketplace grid.
-            window.location.assign("/marketplace");
+            // A plain router.push to the same /marketplace route segment
+            // (even with ?q= dropped) doesn't reliably re-run this page's
+            // server-side branch — Next can treat it as a navigation
+            // within the same segment, so it looks like it "refreshes"
+            // back onto this same search-results view. router.refresh()
+            // forces the server component to actually re-run after the
+            // push, so we land on the real no-query marketplace grid —
+            // without the full browser reload window.location.assign
+            // caused.
+            router.push("/marketplace");
+            router.refresh();
           }}
           style={{
             display: "inline-flex",
@@ -60,13 +71,25 @@ export default function SearchResultsGrid({
             gap: 6,
             fontSize: 13,
             fontWeight: 600,
-            color: "var(--mp-text-sec)",
-            background: "var(--mp-surface)",
-            border: "1px solid var(--mp-border)",
+            color: "rgba(255,255,255,0.92)",
+            background: "rgba(255,255,255,0.10)",
+            border: "1px solid rgba(255,255,255,0.22)",
             borderRadius: 999,
             padding: "7px 14px",
             cursor: "pointer",
             whiteSpace: "nowrap",
+            backdropFilter: "blur(14px) saturate(160%)",
+            WebkitBackdropFilter: "blur(14px) saturate(160%)",
+            boxShadow: "0 1px 0 rgba(255,255,255,0.12) inset, 0 4px 14px rgba(0,0,0,0.18)",
+            transition: "background 0.15s ease, border-color 0.15s ease",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.16)";
+            e.currentTarget.style.borderColor = "rgba(255,255,255,0.32)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.10)";
+            e.currentTarget.style.borderColor = "rgba(255,255,255,0.22)";
           }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
@@ -90,6 +113,30 @@ export default function SearchResultsGrid({
               </svg>
               <div className="mp-state-title">No listings found</div>
               <div className="mp-state-desc">Try a different search term.</div>
+              <button
+                type="button"
+                onClick={() => {
+                  router.push("/marketplace");
+                  router.refresh();
+                  showToast("Showing all listings", "info");
+                }}
+                style={{
+                  marginTop: 14,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "#0b0f0a",
+                  background: "#a3e635",
+                  border: "none",
+                  borderRadius: 999,
+                  padding: "9px 18px",
+                  cursor: "pointer",
+                }}
+              >
+                Browse all listings
+              </button>
             </div>
           )}
         </div>
