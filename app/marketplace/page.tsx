@@ -18,7 +18,7 @@ import { buildMarketplaceMetadata } from "./marketplaceMetadata";
 // [type]/page.tsx and [type]/[bracket]/page.tsx — see
 // lib/marketplaceSeoUrls.ts for the full scheme. This page only ever
 // handles typeFilter === "all".
-type SearchParams = { q?: string | string[] };
+type SearchParams = { q?: string | string[]; search?: string | string[] };
 
 function firstParam(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
@@ -53,7 +53,9 @@ export default async function MarketplacePage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const q = firstParam((await searchParams).q)?.trim();
+  const resolved = await searchParams;
+  const q = firstParam(resolved.q)?.trim();
+  const wantsSearchOpen = firstParam(resolved.search) === "1";
 
   if (q) {
     const { listings, query } = await searchListingsServer(q);
@@ -67,7 +69,7 @@ export default async function MarketplacePage({
   return (
     <div style={{ marginTop: 92 }}>
       <Suspense fallback={<SiteriftyLoader />}>
-        <MarketplaceGrid syncUrl />
+        <MarketplaceGrid syncUrl autoOpenSearch={wantsSearchOpen} />
       </Suspense>
     </div>
   );
