@@ -1,17 +1,19 @@
 import type { MetadataRoute } from "next";
 import { getAdminDb, getPublicBaseUrl } from "@/lib/server/adminDb";
 import { buildListingSlug } from "@/lib/slug";
+import { buildBlogSlug } from "@/lib/blog";
 
-// Two sitemap "shards" by convention here: id 0 = static top-level pages
-// + all public sellers, id 1 = all active listings. Kept as two fixed
-// entries rather than range-splitting each collection by count, since
-// neither collection is anywhere near the 50k-URL-per-file cap yet — but
-// generateSitemaps is what lets this grow into real pagination later
-// (e.g. splitting id 1 into listings-0/listings-1/...) without a
-// breaking route shape change, so it's built this way from the start
-// rather than as a single flat sitemap.ts that silently breaks past 50k.
+// Three sitemap "shards" by convention here: id 0 = static top-level
+// pages + all public sellers, id 1 = all active listings, id 2 = all
+// blog posts. Kept as fixed entries rather than range-splitting each
+// collection by count, since none of them are anywhere near the
+// 50k-URL-per-file cap yet — but generateSitemaps is what lets this
+// grow into real pagination later (e.g. splitting id 1 into
+// listings-0/listings-1/...) without a breaking route shape change, so
+// it's built this way from the start rather than as a single flat
+// sitemap.ts that silently breaks past 50k.
 export async function generateSitemaps() {
-  return [{ id: 0 }, { id: 1 }];
+  return [{ id: 0 }, { id: 1 }, { id: 2 }];
 }
 
 function toDate(ts: unknown): Date | undefined {
@@ -35,6 +37,7 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
       return [
         { url: `${baseUrl}/`, changeFrequency: "daily", priority: 1 },
         { url: `${baseUrl}/marketplace`, changeFrequency: "hourly", priority: 0.9 },
+        { url: `${baseUrl}/blog`, changeFrequency: "daily", priority: 0.6 },
         { url: `${baseUrl}/sellers`, changeFrequency: "daily", priority: 0.6 },
         { url: `${baseUrl}/leaderboard`, changeFrequency: "daily", priority: 0.4 },
         { url: `${baseUrl}/gallery`, changeFrequency: "monthly", priority: 0.4 },
@@ -49,6 +52,7 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
     const staticEntries: MetadataRoute.Sitemap = [
       { url: `${baseUrl}/`, changeFrequency: "daily", priority: 1 },
       { url: `${baseUrl}/marketplace`, changeFrequency: "hourly", priority: 0.9 },
+      { url: `${baseUrl}/blog`, changeFrequency: "daily", priority: 0.6 },
       { url: `${baseUrl}/sellers`, changeFrequency: "daily", priority: 0.6 },
       { url: `${baseUrl}/leaderboard`, changeFrequency: "daily", priority: 0.4 },
       { url: `${baseUrl}/gallery`, changeFrequency: "monthly", priority: 0.4 },
@@ -83,15 +87,33 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
   // id === 1 — active listings only, same status gate as the listing
   // page's isPubliclyVisible() and every other active-only query in the
   // app (feed, seller listing grid, etc.).
-  const listingsSnap = await db.collection("listings").where("status", "==", "active").limit(45000).get();
+  if (id === 1) {
+    const listingsSnap = await db.collection("listings").where("status", "==", "active").limit(45000).get();
 
-  return listingsSnap.docs.map((d) => {
+    return listingsSnap.docs.map((d) => {
+      const data = d.data();
+      return {
+        url: `${baseUrl}/listing/${buildListingSlug(data.title, d.id)}`,
+        lastModified: toDate(data.updatedAt) || toDate(data.createdAt),
+        changeFrequency: "daily",
+        priority: 0.7,
+      };
+    });
+  }
+
+  // id === 2 — every blog post. No status/visibility gate needed: a
+  // post only exists once POST /api/blog has already written it (see
+  // that route's admin check), so every doc in this collection is
+  // meant to be public the moment it's created.
+  const blogSnap = await db.collection("blogPosts").limit(45000).get();
+
+  return blogSnap.docs.map((d) => {
     const data = d.data();
     return {
-      url: `${baseUrl}/listing/${buildListingSlug(data.title, d.id)}`,
-      lastModified: toDate(data.updatedAt) || toDate(data.createdAt),
-      changeFrequency: "daily",
-      priority: 0.7,
+      url: `${baseUrl}/blog/${buildBlogSlug(data.title, d.id)}`,
+      lastModified: toDate(data.createdAt),
+      changeFrequency: "monthly",
+      priority: 0.6,
     };
   });
 }
