@@ -125,7 +125,7 @@ export default async function ListingDetailPage({
           in mpOpenModal. Kept as a tiny client component since it's a
           fire-once-on-mount browser beacon, not something that belongs
           in a Server Component. */}
-      <ListingViewBeacon listingId={listing.id} />
+      <ListingViewBeacon listing={listing} />
 
       {type === "app" && (
         <div style={{ marginTop: 92, maxWidth: 760, margin: "92px auto 0", padding: "0 0 80px" }}>
