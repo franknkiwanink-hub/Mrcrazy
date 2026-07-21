@@ -8,6 +8,9 @@ import TransferMethodsBlock from "./TransferMethodsBlock";
 import AttachedRepoBlock from "./AttachedRepoBlock";
 import DealCtaBar from "@/components/deal/DealCtaBar";
 import { useCurrency } from "@/lib/CurrencyContext";
+import { useAdGatedPreview } from "@/lib/useAdGatedPreview";
+import ShareButton from "@/components/listing/ShareButton";
+import { listingShareUrl } from "@/lib/share";
 
 // Ports the `type === 'game'` branch of mpOpenModal (marketplace.js,
 // ~line 2026) — same accent color, same hero/gallery layout, same
@@ -41,6 +44,7 @@ export default function GameListingBody({ listing }: { listing: Listing }) {
   const galleryShots = [portrait0, portrait1].filter(Boolean);
 
   const canPlay = !!url;
+  const { openPreview, AdOverlayHost, PreviewHost } = useAdGatedPreview();
 
   return (
     <>
@@ -66,7 +70,10 @@ export default function GameListingBody({ listing }: { listing: Listing }) {
             >
               Game{isTemplate ? " · Template" : ""}
             </span>
-            <span className="modal-price-badge" title={priceTooltip}>{priceStr}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="modal-price-badge" title={priceTooltip}>{priceStr}</span>
+              <ShareButton url={listingShareUrl(listing.id, title)} title={title} accentColor={ACCENT} />
+            </div>
           </div>
           <div className="modal-hero-bottom-row">
             <div className="modal-hero-title-block">
@@ -132,19 +139,14 @@ export default function GameListingBody({ listing }: { listing: Listing }) {
 
         {canPlay ? (
           <div className="modal-section modal-game-play-section">
-            {/* Original wires this through mpShowAdThenAction (ad-gated
-                interstitial) into mpOpenGameFullscreen — a full-screen game
-                runner that fetches/unzips browser-upload builds or embeds
-                the external link in an iframe. That's a heavier Layer B
-                sub-feature (deferred, same category as the lightbox and
-                per-listing SEO). This just opens the URL directly in a new
-                tab, same simplification already applied to the Website/App
-                bodies' preview buttons. */}
+            {/* Ad-gated (free plan) fullscreen preview via useAdGatedPreview
+                — mirrors mpShowAdThenAction -> mpOpenGameFullscreen, incl.
+                the gameType==='upload' srcdoc branch. */}
             <button
               type="button"
               className="modal-game-play-btn"
               style={{ width: "100%" }}
-              onClick={() => window.open(url, "_blank", "noopener")}
+              onClick={() => openPreview({ title: `Launching: ${title}`, url, gameType })}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <polygon points="5 3 19 12 5 21 5 3" />
@@ -207,6 +209,8 @@ export default function GameListingBody({ listing }: { listing: Listing }) {
         <SellerBlock listing={listing} accentColor={ACCENT} />
       </div>
       <DealCtaBar listing={listing} />
+      <AdOverlayHost />
+      <PreviewHost />
     </>
   );
 }
