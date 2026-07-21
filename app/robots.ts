@@ -18,6 +18,8 @@ export default function robots(): MetadataRoute.Robots {
         "/seller/",
         "/leaderboard",
         "/marketplace",
+        "/blog",
+        "/blog/",
         "/about",
         "/contact",
         "/help",
