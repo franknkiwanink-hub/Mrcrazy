@@ -17,6 +17,8 @@ import AiPromoCard from "@/components/marketplace/AiPromoCard";
 import { buildListingSlug } from "@/lib/slug";
 import { buildMarketplacePath, formatMarketplacePath } from "@/lib/marketplaceSeoUrls";
 import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
+import ListingCardSkeleton from "@/components/marketplace/ListingCardSkeleton";
+import { useSrToast } from "@/components/system/SrToastProvider";
 
 const PREVIEW_COUNT = 12;
 
@@ -51,6 +53,7 @@ export default function MarketplaceGrid({
   const type = filters.typeFilter === "all" ? undefined : filters.typeFilter;
   const { listings, loading, loadingMore, error, exhausted, loadMore, reset } = useFeed({ pageSize: 24, type });
   const router = useRouter();
+  const { show: showToast } = useSrToast();
 
   // Homepage preview grid only: search or any filter interaction should
   // land the visitor on the real, URL-driven /marketplace page instead
@@ -154,50 +157,37 @@ export default function MarketplaceGrid({
     return () => observer.disconnect();
   }, [loadMore, preview, hasSearch]);
 
-  // Preview mode's end-of-list sentinel: reaching it auto-transitions
-  // into /marketplace, no button tap needed. A short settle delay (not
-  // an instant fire) means someone scrolling fast past the end just
-  // sees the end of the list like normal, rather than getting yanked
-  // into a navigation mid-flick — it only actually triggers once the
-  // sentinel has stayed in view for a beat, i.e. the user has actually
-  // stopped there. rootMargin is tighter than the real infinite-scroll's
-  // (0px vs 200px) so it also can't fire before the sentinel is genuinely
-  // on screen.
-  const previewSentinelRef = useRef<HTMLDivElement>(null);
-  const previewTriggeredRef = useRef(false);
-  useEffect(() => {
-    if (!preview || !onSeeFullMarketplace) return;
-    const sentinel = previewSentinelRef.current;
-    if (!sentinel) return;
-    let settleTimer: ReturnType<typeof setTimeout> | null = null;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (previewTriggeredRef.current) return;
-        if (entries[0].isIntersecting) {
-          settleTimer = setTimeout(() => {
-            if (previewTriggeredRef.current) return;
-            previewTriggeredRef.current = true;
-            onSeeFullMarketplace();
-          }, 500);
-        } else if (settleTimer) {
-          clearTimeout(settleTimer);
-          settleTimer = null;
-        }
-      },
-      { rootMargin: "0px" }
-    );
-    observer.observe(sentinel);
-    return () => {
-      observer.disconnect();
-      if (settleTimer) clearTimeout(settleTimer);
-    };
-  }, [preview, onSeeFullMarketplace]);
+  // Preview mode no longer auto-navigates on scroll — that relied on an
+  // IntersectionObserver "settle" trigger that was unreliable (fired
+  // inconsistently depending on scroll speed/position) and felt like an
+  // unexpected redirect. Replaced with a plain, explicit "View more
+  // listings" CTA button below the preview grid — same destination
+  // (onSeeFullMarketplace), just user-driven instead of automatic.
 
   // First-load state — same client-side fetch (useFeed) the old small
-  // in-grid spinner covered, now using the shared full-screen skeleton
-  // instead so it matches the loading treatment used everywhere else in
-  // the app (route navigation via app/loading.tsx).
+  // in-grid spinner covered. /marketplace's own grid (preview=false)
+  // uses the shared full-screen skeleton, matching the loading treatment
+  // used everywhere else in the app (route navigation via
+  // app/loading.tsx). The homepage's preview grid sits below an already-
+  // rendered Hero though, so a full-screen takeover there would blank
+  // out content that's already on screen — it shows a row of in-grid
+  // card skeletons (ListingCardSkeleton) in the same spot the real cards
+  // will render instead.
   if (loading) {
+    if (preview) {
+      return (
+        <div>
+          <div className="mp-results">Fresh listings</div>
+          <div className="mp-grid-wrap">
+            <div className="mp-grid">
+              {Array.from({ length: PREVIEW_COUNT }).map((_, i) => (
+                <ListingCardSkeleton key={i} />
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
     return <SiteriftyLoader />;
   }
 
@@ -296,6 +286,33 @@ export default function MarketplaceGrid({
               <div className="mp-state-desc">
                 {hasSearch ? "Try a different search term." : "Try adjusting your search or filters."}
               </div>
+              {hasSearch || filters.activeTags.length ? (
+                <button
+                  type="button"
+                  className="mp-state-cta"
+                  onClick={() => {
+                    filters.activeTags.forEach((tag) => tag.clear());
+                    if (hasSearch) filters.setSearchQuery("");
+                    showToast("Filters cleared", "info");
+                  }}
+                  style={{
+                    marginTop: 14,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: "#0b0f0a",
+                    background: "#a3e635",
+                    border: "none",
+                    borderRadius: 999,
+                    padding: "9px 18px",
+                    cursor: "pointer",
+                  }}
+                >
+                  Clear filters &amp; search
+                </button>
+              ) : null}
             </div>
           ) : (
             feedItems.map((item) => {
@@ -313,32 +330,45 @@ export default function MarketplaceGrid({
 
         {preview ? (
           <div
-            ref={previewSentinelRef}
             style={{
               display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 6,
+              justifyContent: "center",
               padding: "28px 0 8px",
-              opacity: 0.6,
             }}
           >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#a3e635"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{ animation: "mp-bounce 1.4s ease-in-out infinite" }}
+            <button
+              type="button"
+              onClick={onSeeFullMarketplace}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 14,
+                fontWeight: 700,
+                letterSpacing: "0.01em",
+                color: "#0b0f0a",
+                background: "#a3e635",
+                border: "none",
+                borderRadius: 999,
+                padding: "12px 24px",
+                cursor: "pointer",
+                boxShadow: "0 6px 18px rgba(163,230,53,0.25)",
+                transition: "transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.filter = "brightness(1.06)";
+                e.currentTarget.style.boxShadow = "0 8px 22px rgba(163,230,53,0.32)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.filter = "brightness(1)";
+                e.currentTarget.style.boxShadow = "0 6px 18px rgba(163,230,53,0.25)";
+              }}
             >
-              <path d="M12 5v14M5 12l7 7 7-7" />
-            </svg>
-            <div style={{ fontSize: "0.8rem", fontWeight: 600, color: "#a3e635", letterSpacing: "0.02em" }}>
-              Heading to the full marketplace…
-            </div>
+              View more listings
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6}>
+                <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
           </div>
         ) : hasSearch ? null : (
           <>
