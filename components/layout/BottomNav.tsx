@@ -1,31 +1,14 @@
 "use client";
 
-import { useRouter, usePathname } from "next/navigation";
-import { useMarketplaceSearch } from "@/components/marketplace/MarketplaceSearchProvider";
-import { useAuth } from "@/lib/AuthContext";
-import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { useRouter } from "next/navigation";
 
 export default function BottomNav() {
-  const { openSearch } = useMarketplaceSearch();
-  const { user } = useAuth();
-  const { openAuthModal } = useAuthModal();
   const router = useRouter();
-  const pathname = usePathname();
-
-  function requireAuth(fn: () => void) {
-    if (user) fn();
-    else openAuthModal();
-  }
 
   return (
     <nav className="fnav" id="fnav">
       <div className="fnav-pill">
-        <button
-          className="fnav-btn"
-          id="fnavSell"
-          aria-label="Sell Now"
-          onClick={() => requireAuth(() => router.push("/sell"))}
-        >
+        <button className="fnav-btn" id="fnavSell" aria-label="Sell Now">
           <svg
             className="fnav-icon"
             viewBox="0 0 24 24"
@@ -39,12 +22,7 @@ export default function BottomNav() {
           </svg>
           <span className="fnav-label">Sell Now</span>
         </button>
-        <button
-          className={`fnav-btn${pathname === "/marketplace" ? " fnav-active" : ""}`}
-          id="fnavMarket"
-          aria-label="Marketplace"
-          onClick={() => router.push("/marketplace")}
-        >
+        <button className="fnav-btn fnav-active" id="fnavMarket" aria-label="Marketplace">
           <svg
             className="fnav-icon"
             viewBox="0 0 24 24"
@@ -60,12 +38,7 @@ export default function BottomNav() {
           </svg>
           <span className="fnav-label">Marketplace</span>
         </button>
-        <button
-          className={`fnav-btn${pathname === "/sellers" ? " fnav-active" : ""}`}
-          id="fnavSellers"
-          aria-label="Sellers"
-          onClick={() => router.push("/sellers")}
-        >
+        <button className="fnav-btn" id="fnavSellers" aria-label="Sellers">
           <svg
             className="fnav-icon"
             viewBox="0 0 24 24"
@@ -86,7 +59,12 @@ export default function BottomNav() {
           <span className="fnav-label">Sellers</span>
         </button>
       </div>
-      <button className="fnav-search" id="fnavSearch" aria-label="Search" onClick={openSearch}>
+      <button
+        className="fnav-search"
+        id="fnavSearch"
+        aria-label="Search"
+        onClick={() => router.push("/marketplace?search=1")}
+      >
         <svg
           viewBox="0 0 24 24"
           fill="none"
