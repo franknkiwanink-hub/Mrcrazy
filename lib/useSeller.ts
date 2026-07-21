@@ -5,18 +5,25 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 // Lightweight seller summary for a card's SellerStrip — just what's
-// visually needed (avatar/name/stars). This is deliberately NOT a port of
-// mpGetSeller, which also fetches the seller's listings, follower count,
-// and lifetime deals for the full seller-profile popup — that's a
-// separate, heavier feature to build later (see original marketplace.js
-// mpGetSeller). Trust badges (sellerBadgesHtml) need that heavier data
-// too, so cards intentionally don't show them yet.
+// visually needed (avatar/name/stars), plus `plan` and `dealsCompleted`
+// for SellerBadges since both are plain fields already sitting on the
+// same user doc this hook already fetches, at no extra query cost.
+// Deliberately still NOT a port of mpGetSeller's full fetch — this
+// intentionally excludes `followerCount`, which needs a separate
+// getCountFromServer subcollection query per seller; running that once
+// per card across a full grid (dozens of cards) would be a real cost
+// increase for a badge most sellers won't hit anyway (the 1000+
+// follower verified-blue tier). Cards fall back to showing the
+// plan/deal-tier badges only; the seller profile page still shows the
+// complete badge set via fetchFullSeller below.
 export interface SellerSummary {
   uid: string;
   username: string;
   profilePic: string;
   rating: number;
   ratingCount: number;
+  plan?: string;
+  dealsCompleted?: number;
 }
 
 const cache = new Map<string, SellerSummary>();
@@ -209,6 +216,8 @@ export function useSeller(uid: string | undefined | null): SellerSummary | null 
           profilePic: d.profilePic || "",
           rating: typeof d.rating === "number" ? d.rating : 0,
           ratingCount: typeof d.ratingCount === "number" ? d.ratingCount : 0,
+          plan: d.plan || "free",
+          dealsCompleted: typeof d.dealsCompleted === "number" ? d.dealsCompleted : 0,
         };
         cache.set(uid, summary);
         if (!cancelled) setSeller(summary);
