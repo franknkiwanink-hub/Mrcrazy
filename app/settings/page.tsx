@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 import SettingsSidebar, { type SettingsPanelId } from "@/components/settings/SettingsSidebar";
 import { useSettingsState } from "@/lib/useSettingsState";
+import { useAuth } from "@/lib/AuthContext";
+import SignInRequired from "@/components/auth/SignInRequired";
 import AccountPanel from "@/components/settings/panels/AccountPanel";
 import SecurityPanel from "@/components/settings/panels/SecurityPanel";
 import NotificationsPanel from "@/components/settings/panels/NotificationsPanel";
@@ -52,6 +54,7 @@ function SettingsPageInner() {
   const [activePanel, setActivePanel] = useState<SettingsPanelId>(
     initialPanel && VALID_PANELS.has(initialPanel) ? (initialPanel as SettingsPanelId) : "account"
   );
+  const { user, loading: authLoading } = useAuth();
   const { state, setState, loading } = useSettingsState();
   const { openDisputePicker } = useDisputePicker();
 
@@ -66,7 +69,14 @@ function SettingsPageInner() {
   // mobile Safari/Chrome per that rule's own comment) — so the document
   // can't move at all while Settings is open, and only
   // .settings-sidebar / .detail-panel (each overflow-y:auto) can scroll.
+  //
+  // Only applied once a signed-in user is actually confirmed (`user`
+  // truthy) — a logged-out visitor renders SignInRequired below instead
+  // of the fixed sidebar+panel layout this lock exists for, and locking
+  // document scroll under a plain centered sign-in message would trap
+  // them on a page they can't scroll away from for no reason.
   useEffect(() => {
+    if (!user) return;
     const html = document.documentElement;
     const { body } = document;
     const prevHtmlOverflow = html.style.overflow;
@@ -88,7 +98,7 @@ function SettingsPageInner() {
       (html.style as any).overscrollBehavior = prevOverscroll;
       (html.style as any).touchAction = prevTouchAction;
     };
-  }, []);
+  }, [user]);
 
   function renderPanel() {
     if (loading) {
@@ -132,6 +142,39 @@ function SettingsPageInner() {
           </div>
         );
     }
+  }
+
+  // Direct visits (bookmark, deep link, browser back) have no prior
+  // click to have already gated this behind requireAuth — same gap
+  // /myprofile had before SignInRequired was added there (see that
+  // page's own comment). auth.loading / user === undefined is the
+  // "we don't know yet" state — same check useAuth's own docs specify —
+  // so a page refresh doesn't flash the sign-in prompt for a visitor
+  // who actually is signed in, just before their session resolves.
+  if (authLoading || user === undefined) {
+    return (
+      <div
+        style={{
+          marginTop: 92,
+          minHeight: "60vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "rgba(255,255,255,0.4)",
+        }}
+      >
+        Loading…
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <SignInRequired
+        title="Sign in to view your settings"
+        description="Your account, security, billing, and privacy settings are only visible once you're signed in."
+      />
+    );
   }
 
   return (
