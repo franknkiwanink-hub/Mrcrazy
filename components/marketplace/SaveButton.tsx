@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { doc, setDoc, deleteDoc, updateDoc, increment, serverTimestamp, getDocs, collection } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { useSrToast } from "@/components/system/SrToastProvider";
 import type { Listing } from "@/lib/listings";
 
 const HEART_PATH =
@@ -38,6 +39,7 @@ async function loadSavedCache(): Promise<Set<string>> {
 export default function SaveButton({ listing }: { listing: Listing }) {
   const [saved, setSaved] = useState(false);
   const { openAuthModal } = useAuthModal();
+  const { show: showToast } = useSrToast();
 
   useEffect(() => {
     if (!listing.id) return;
@@ -85,12 +87,14 @@ export default function SaveButton({ listing }: { listing: Listing }) {
         });
         await updateDoc(listingRef, { saves: increment(1) });
       }
+      showToast(alreadySaved ? "Removed from favorites" : "Saved to favorites", "success");
     } catch (err) {
       console.error("[SaveButton] toggle failed", err);
       // Revert optimistic state on failure.
       setSaved(alreadySaved);
       if (alreadySaved) savedCache.add(listingId);
       else savedCache.delete(listingId);
+      showToast("Couldn't update favorites — try again", "error");
     }
   }
 
