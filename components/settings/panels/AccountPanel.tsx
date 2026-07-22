@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { doc, updateDoc, serverTimestamp, collection, query, where, getDocs, limit, arrayUnion } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type { SettingsState } from "@/lib/useSettingsState";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
 import { useLimits } from "@/lib/useLimits";
 
 // Imgur Client-ID used specifically by the Account panel's avatar upload
@@ -48,7 +48,7 @@ export default function AccountPanel({
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
   const { limits } = useLimits();
   const USERNAME_LIMITS = {
     minLength: limits.username.minLength ?? FALLBACK_USERNAME_LIMITS.minLength,
@@ -74,16 +74,16 @@ export default function AccountPanel({
     e.target.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      toast("Please choose an image file.");
+      toast("Please choose an image file.", "error");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      toast("Image must be under 10MB.");
+      toast("Image must be under 10MB.", "error");
       return;
     }
     const user = auth.currentUser;
     if (!user) {
-      toast("Not signed in.");
+      toast("Not signed in.", "error");
       return;
     }
 
@@ -126,34 +126,34 @@ export default function AccountPanel({
   async function handleSave() {
     const user = auth.currentUser;
     if (!user) {
-      toast("Not signed in.");
+      toast("Not signed in.", "error");
       return;
     }
     const dispName = displayName.trim();
     const uname = username.trim();
 
     if (!dispName) {
-      toast("Display name cannot be empty.");
+      toast("Display name cannot be empty.", "error");
       return;
     }
     if (uname) {
       if (uname.length < USERNAME_LIMITS.minLength) {
-        toast(`Username must be at least ${USERNAME_LIMITS.minLength} characters.`);
+        toast(`Username must be at least ${USERNAME_LIMITS.minLength} characters.`, "error");
         return;
       }
       if (uname.length > USERNAME_LIMITS.maxLength) {
-        toast(`Username cannot exceed ${USERNAME_LIMITS.maxLength} characters.`);
+        toast(`Username cannot exceed ${USERNAME_LIMITS.maxLength} characters.`, "error");
         return;
       }
       if (!new RegExp(limits.username.pattern || "^[a-zA-Z0-9_.-]+$").test(uname)) {
-        toast(limits.username.patternHint || "Username can only contain letters, numbers, underscores, hyphens, and dots.");
+        toast(limits.username.patternHint || "Username can only contain letters, numbers, underscores, hyphens, and dots.", "error");
         return;
       }
       const lower = uname.toLowerCase().replace(/\s+/g, "_");
       const snap = await getDocs(query(collection(db, "users"), where("usernameLower", "==", lower), limit(2)));
       const takenByOther = !snap.empty && !(snap.docs.length === 1 && snap.docs[0].id === user.uid);
       if (takenByOther) {
-        toast("That username is already taken. Please choose another.");
+        toast("That username is already taken. Please choose another.", "error");
         return;
       }
     }
@@ -174,18 +174,18 @@ export default function AccountPanel({
       });
       const checkJson = await checkRes.json().catch(() => ({}));
       if (!checkRes.ok) {
-        toast(checkJson.error || "Couldn't check your username cooldown — try again.");
+        toast(checkJson.error || "Couldn't check your username cooldown — try again.", "error");
         return;
       }
       if (!checkJson.allowed) {
         const d = checkJson.daysLeft;
-        toast(`You can change your username again in ${d} day${d !== 1 ? "s" : ""}.`);
+        toast(`You can change your username again in ${d} day${d !== 1 ? "s" : ""}.`, "error");
         return;
       }
     }
     if (emailChanged) {
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        toast("Enter a valid email address.");
+        toast("Enter a valid email address.", "error");
         return;
       }
       const checkRes = await fetch("/api/limits", {
@@ -195,12 +195,12 @@ export default function AccountPanel({
       });
       const checkJson = await checkRes.json().catch(() => ({}));
       if (!checkRes.ok) {
-        toast(checkJson.error || "Couldn't check your email change limit — try again.");
+        toast(checkJson.error || "Couldn't check your email change limit — try again.", "error");
         return;
       }
       if (!checkJson.allowed) {
         const d = checkJson.daysLeft;
-        toast(`You've used all your contact email changes for this period. Try again in ${d} day${d !== 1 ? "s" : ""}.`);
+        toast(`You've used all your contact email changes for this period. Try again in ${d} day${d !== 1 ? "s" : ""}.`, "error");
         return;
       }
     }
@@ -225,7 +225,7 @@ export default function AccountPanel({
       setState((prev) => ({ ...prev, displayName: dispName, username: uname || dispName, email, timezone, language: "en" }));
       setSaveState("saved");
     } catch (err: any) {
-      toast(`Save failed: ${err.message}`);
+      toast(`Save failed: ${err.message}`, "error");
       setSaveState("error");
     }
   }
@@ -367,7 +367,6 @@ export default function AccountPanel({
         {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : "Save Account Changes"}
       </button>
 
-      <ToastHost />
     </>
   );
 }
