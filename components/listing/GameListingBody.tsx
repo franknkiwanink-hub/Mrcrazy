@@ -10,6 +10,7 @@ import DealCtaBar from "@/components/deal/DealCtaBar";
 import { useCurrency } from "@/lib/CurrencyContext";
 import { useAdGatedPreview } from "@/lib/useAdGatedPreview";
 import ShareButton from "@/components/listing/ShareButton";
+import VerifiedBadge from "@/components/marketplace/VerifiedBadge";
 import { listingShareUrl } from "@/lib/share";
 
 // Ports the `type === 'game'` branch of mpOpenModal (marketplace.js,
@@ -77,7 +78,10 @@ export default function GameListingBody({ listing }: { listing: Listing }) {
           </div>
           <div className="modal-hero-bottom-row">
             <div className="modal-hero-title-block">
-              <h2 className="modal-hero-title">{title}</h2>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <h2 className="modal-hero-title">{title}</h2>
+                <VerifiedBadge listing={listing} />
+              </div>
               <div className="modal-hero-pills">
                 {platform ? <span className="modal-hero-pill">{platform}</span> : null}
                 {genre ? <span className="modal-hero-pill">{genre}</span> : null}
