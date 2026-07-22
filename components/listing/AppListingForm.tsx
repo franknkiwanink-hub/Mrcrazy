@@ -42,6 +42,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { createListing, checkStoreLink, type ListingBuildFile } from "@/lib/listings";
 import { aiStudioCall, aiPlanCap } from "@/lib/aiStudio";
 import { useAiLengthPicker } from "@/lib/useAiLengthPicker";
+import { useConfirm } from "@/lib/useConfirm";
 import { useLimits } from "@/lib/useLimits";
 import Select from "./shared/Select";
 import TransferMethodPicker from "./shared/TransferMethodPicker";
@@ -208,6 +209,7 @@ export default function AppListingForm() {
 
   // ── AI auto-description (ports afmAutoGenBtn from ai-support-chat.js) ──
   const { pick, AiLengthPickerHost } = useAiLengthPicker();
+  const { confirm, alert, ConfirmHost } = useConfirm();
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
@@ -303,42 +305,51 @@ export default function AppListingForm() {
 
   // ── Draft restore on mount ──
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (!raw) return;
-      const ok = window.confirm("You have a saved draft for an app listing. Restore it?");
-      if (!ok) {
-        localStorage.removeItem(DRAFT_KEY);
-        return;
+    async function restoreDraft() {
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (!raw) return;
+        const ok = await confirm({
+          theme: "info",
+          title: "Restore Draft?",
+          msg: "You have a saved draft for an app listing. Restore it?",
+          confirmText: "Restore",
+          cancelText: "Discard",
+        });
+        if (!ok) {
+          localStorage.removeItem(DRAFT_KEY);
+          return;
+        }
+        const d: Draft = JSON.parse(raw);
+        if (d.name) setName(d.name);
+        if (d.desc) setDesc(d.desc);
+        if (d.category) setCategory(d.category);
+        if (d.age) setAge(d.age);
+        if (d.structure) setStructure(d.structure);
+        if (d.reason) setReason(d.reason);
+        if (d.videoUrl) setVideoUrl(d.videoUrl);
+        if (d.previewUrl) setPreviewUrl(d.previewUrl);
+        if (d.price) setPrice(d.price);
+        if (d.revenue) setRevenue(d.revenue);
+        if (d.expenses) setExpenses(d.expenses);
+        if (d.techFrontend) setTechFrontend(d.techFrontend);
+        if (d.techBackend) setTechBackend(d.techBackend);
+        if (d.techDatabase) setTechDatabase(d.techDatabase);
+        if (d.platforms?.length) setPlatforms(new Set(d.platforms));
+        if (d.iosStoreUrl || d.androidStoreUrl || d.webSiteUrl) {
+          setPlatformUrls({ ios: d.iosStoreUrl || "", android: d.androidStoreUrl || "", web: d.webSiteUrl || "" });
+        }
+        if (d.globalNotLive) setGlobalNotLive(true);
+        if (d.transferMethods?.length) setTransferMethods(d.transferMethods);
+        if (d.monetization) setMonetization(d.monetization);
+        if (d.subMonthly) setSubMonthly(d.subMonthly);
+        if (d.subAnnual) setSubAnnual(d.subAnnual);
+        if (d.step && d.step > 1) setStep(d.step);
+      } catch {
+        // ignore corrupt draft
       }
-      const d: Draft = JSON.parse(raw);
-      if (d.name) setName(d.name);
-      if (d.desc) setDesc(d.desc);
-      if (d.category) setCategory(d.category);
-      if (d.age) setAge(d.age);
-      if (d.structure) setStructure(d.structure);
-      if (d.reason) setReason(d.reason);
-      if (d.videoUrl) setVideoUrl(d.videoUrl);
-      if (d.previewUrl) setPreviewUrl(d.previewUrl);
-      if (d.price) setPrice(d.price);
-      if (d.revenue) setRevenue(d.revenue);
-      if (d.expenses) setExpenses(d.expenses);
-      if (d.techFrontend) setTechFrontend(d.techFrontend);
-      if (d.techBackend) setTechBackend(d.techBackend);
-      if (d.techDatabase) setTechDatabase(d.techDatabase);
-      if (d.platforms?.length) setPlatforms(new Set(d.platforms));
-      if (d.iosStoreUrl || d.androidStoreUrl || d.webSiteUrl) {
-        setPlatformUrls({ ios: d.iosStoreUrl || "", android: d.androidStoreUrl || "", web: d.webSiteUrl || "" });
-      }
-      if (d.globalNotLive) setGlobalNotLive(true);
-      if (d.transferMethods?.length) setTransferMethods(d.transferMethods);
-      if (d.monetization) setMonetization(d.monetization);
-      if (d.subMonthly) setSubMonthly(d.subMonthly);
-      if (d.subAnnual) setSubAnnual(d.subAnnual);
-      if (d.step && d.step > 1) setStep(d.step);
-    } catch {
-      // ignore corrupt draft
     }
+    restoreDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -367,11 +378,15 @@ export default function AppListingForm() {
     return [name, desc, price].some((v) => v.trim().length > 0);
   }
 
-  function handleBack() {
+  async function handleBack() {
     if (hasAnyData()) {
-      const save = window.confirm(
-        "You have unsaved app listing info. Save as a draft so you can pick up where you left off?\n\nOK = Save Draft, Cancel = Discard & Close"
-      );
+      const save = await confirm({
+        theme: "warning",
+        title: "Save as Draft?",
+        msg: "You have unsaved app listing info. Save as a draft so you can pick up where you left off?",
+        confirmText: "Save Draft",
+        cancelText: "Discard & Close",
+      });
       if (save) saveDraft();
       else clearDraft();
     }
@@ -392,7 +407,7 @@ export default function AppListingForm() {
     e.target.value = "";
     if (!f) return;
     if (!f.type.startsWith("image/")) {
-      window.alert("Please select an image file.");
+      await alert({ theme: "warning", title: "Invalid File", msg: "Please select an image file." });
       return;
     }
     setBanner(await readImage(f));
@@ -402,7 +417,7 @@ export default function AppListingForm() {
     e.target.value = "";
     if (!f) return;
     if (!f.type.startsWith("image/")) {
-      window.alert("Please select an image file.");
+      await alert({ theme: "warning", title: "Invalid File", msg: "Please select an image file." });
       return;
     }
     setIcon(await readImage(f));
@@ -768,6 +783,7 @@ export default function AppListingForm() {
   return (
     <div style={{ minHeight: "100vh", marginTop: 92, background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
       <AiLengthPickerHost />
+      <ConfirmHost />
       <input ref={bannerInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onBannerChange} />
       <input ref={iconInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onIconChange} />
       <input ref={screenshotInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={onScreenshotsChange} />
@@ -1374,7 +1390,7 @@ const fileTagStyle: React.CSSProperties = {
   borderRadius: 8, padding: "5px 10px", fontSize: 11.5, color: "rgba(255,255,255,0.75)",
 };
 const nextBtnStyle: React.CSSProperties = {
-  flex: 1, height: 48, background: ACCENT, color: "#09090b", border: "none", borderRadius: 10,
+  flex: 1, width: "100%", height: 48, background: ACCENT, color: "#09090b", border: "none", borderRadius: 10,
   fontSize: 14, fontWeight: 800, cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.04em",
 };
 const prevBtnStyle: React.CSSProperties = {
