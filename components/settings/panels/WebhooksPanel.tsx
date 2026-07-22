@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebase";
 import type { SettingsState, Webhook } from "@/lib/useSettingsState";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
 
 const PlusIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -83,7 +83,7 @@ export default function WebhooksPanel({
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
 
   const [webhookUrl, setWebhookUrl] = useState("");
   const [webhookEvents, setWebhookEvents] = useState("");
@@ -103,7 +103,7 @@ export default function WebhooksPanel({
     let cancelled = false;
     Promise.all([
       apiWebhooks("webhook.list").catch((e) => {
-        toast(`Error loading webhooks: ${e.message}`);
+        toast(`Error loading webhooks: ${e.message}`, "error");
         return { webhooks: [] as Webhook[] };
       }),
       apiWebhooks("webhook.logs", { limit: 50 }).catch((e) => {
@@ -132,7 +132,7 @@ export default function WebhooksPanel({
     const url = webhookUrl.trim();
     const events = webhookEvents.trim();
     if (!url) {
-      toast("Please enter a webhook URL.");
+      toast("Please enter a webhook URL.", "error");
       return;
     }
     setAdding(true);
@@ -141,9 +141,9 @@ export default function WebhooksPanel({
       setState((prev) => ({ ...prev, webhooks: prev.webhooks.concat([webhook]) }));
       setWebhookUrl("");
       setWebhookEvents("");
-      toast("Webhook added.");
+      toast("Webhook added.", "success");
     } catch (err: any) {
-      toast(`Error: ${err.message}`);
+      toast(`Error: ${err.message}`, "error");
     } finally {
       setAdding(false);
     }
@@ -156,13 +156,14 @@ export default function WebhooksPanel({
       toast(
         delivery.ok
           ? `Test delivered · HTTP ${delivery.statusCode}`
-          : `Test failed: ${delivery.errorMessage || "HTTP " + delivery.statusCode}`
+          : `Test failed: ${delivery.errorMessage || "HTTP " + delivery.statusCode}`,
+        delivery.ok ? "success" : "error"
       );
       const { logs: freshLogs } = await apiWebhooks("webhook.logs", { limit: 50 });
       setLogs(freshLogs || []);
       setState((prev) => ({ ...prev, webhookLogs: freshLogs || [] }));
     } catch (err: any) {
-      toast(`Error: ${err.message}`);
+      toast(`Error: ${err.message}`, "error");
     } finally {
       setTestingId(null);
     }
@@ -173,9 +174,9 @@ export default function WebhooksPanel({
     try {
       await apiWebhooks("webhook.delete", { id });
       setState((prev) => ({ ...prev, webhooks: prev.webhooks.filter((w) => w.id !== id) }));
-      toast("Webhook removed.");
+      toast("Webhook removed.", "success");
     } catch (err: any) {
-      toast(`Error: ${err.message}`);
+      toast(`Error: ${err.message}`, "error");
       setDeletingId(null);
     }
   }
@@ -304,7 +305,6 @@ export default function WebhooksPanel({
         )
       ) : null}
 
-      <ToastHost />
     </>
   );
 }
