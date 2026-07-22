@@ -146,9 +146,10 @@ export const TDM_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 const TDM_IMGUR_CLIENT_ID = "891e5bb4aa94282";
 
 export type TdmPayload =
-  | { kind: "files"; label: string; files: File[] }
+  | { kind: "files"; label: string; files: File[]; buildInfo?: string }
   | { kind: "text"; label: string; textValue: string }
-  | { kind: "credentials"; label: string; loginUrl: string; loginEmail: string; loginPassword: string };
+  | { kind: "credentials"; label: string; loginUrl: string; loginEmail: string; loginPassword: string }
+  | { kind: "screenshot_proof"; label: string; files: File[]; recipientEmail: string };
 
 export type GithubCollaboratorStatus = "none" | "invited" | "added";
 
@@ -349,9 +350,14 @@ export function useTransferDeal(args: UseTransferDealArgs) {
             zipFileCount++;
           }
           if (imgurLinks.length) imageLinksOut[item.label] = imgurLinks;
+          if (payload.buildInfo && payload.buildInfo.trim()) {
+            zip.file(`${folder}/BUILD_INFO.txt`, payload.buildInfo.trim());
+            zipFileCount++;
+          }
           const parts: string[] = [];
           if (bundledNames.length) parts.push(`${bundledNames.length} file(s) — see "${folder}/"`);
           if (imgurLinks.length) parts.push(`${imgurLinks.length} image(s) — see "images.json"`);
+          if (payload.buildInfo && payload.buildInfo.trim()) parts.push(`build info — see "${folder}/BUILD_INFO.txt"`);
           manifestLines.push(`• ${item.label}: ${parts.join(", ") || "no files"}`);
         } else if (payload.kind === "text") {
           zip.file(`${folder}/credential.txt`, payload.textValue || "");
@@ -360,6 +366,29 @@ export function useTransferDeal(args: UseTransferDealArgs) {
         } else if (payload.kind === "credentials") {
           credentialsOut[item.label] = { url: payload.loginUrl || "", email: payload.loginEmail || "", password: payload.loginPassword || "" };
           manifestLines.push(`• ${item.label}: login credentials — see "credentials.json"`);
+        } else if (payload.kind === "screenshot_proof") {
+          const imgurLinks: { name: string; url: string }[] = [];
+          const bundledNames: string[] = [];
+          for (const f of payload.files) {
+            if (TDM_IMAGE_EXT_RE.test(f.name)) {
+              try {
+                const link = await uploadToImgur(f);
+                imgurLinks.push({ name: f.name, url: link });
+                continue;
+              } catch (e) {
+                console.warn("Imgur upload failed, bundling into zip instead:", f.name, e);
+              }
+            }
+            zip.file(`${folder}/${f.name}`, f);
+            bundledNames.push(f.name);
+            zipFileCount++;
+          }
+          if (imgurLinks.length) imageLinksOut[item.label] = imgurLinks;
+          zip.file(`${folder}/RECIPIENT.txt`, `Transferred to: ${payload.recipientEmail || "(not recorded)"}`);
+          zipFileCount++;
+          const parts: string[] = [`transferred to ${payload.recipientEmail || "buyer"}`];
+          if (bundledNames.length || imgurLinks.length) parts.push("proof attached");
+          manifestLines.push(`• ${item.label}: ${parts.join(", ")}`);
         }
       }
 
