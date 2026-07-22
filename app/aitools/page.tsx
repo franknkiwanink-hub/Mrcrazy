@@ -8,10 +8,24 @@
 //   - No page-local header: components/layout/Header.tsx is already global
 //     (rendered from app/layout.tsx), so the original's brand/back-link/
 //     user-avatar header markup was dropped, not re-implemented here.
-//   - The one working tool (site ownership verification) is ported as-is,
-//     calling the same external API — but the `diag +=` string-building
-//     debug scaffolding and the final `alert('...' + diag)` from the
-//     original are gone; failures now just set an error string in state.
+//   - Site ownership verification (VerifyOwnershipCard) was REBUILT, not
+//     ported as-is. The original called an external, Siterifty-unowned
+//     domain (dlsvalue.site/api/verify.js) for both minting AND checking
+//     tokens, and was never wired into the listing flow at all — nothing
+//     stopped anyone from listing a URL they didn't own. This version:
+//       - calls our own /api/listings actions (listing.verify-generate /
+//         listing.verify-check — see _handler.js), so verification is
+//         actually backed by our own Admin SDK check of the live page,
+//         not a third party we don't control;
+//       - is scoped to a specific listing the signed-in user owns (picked
+//         from a dropdown of their own listings via fetchMyListings), with
+//         the token bound to BOTH that listing's domain AND its listingId
+//         server-side, so one verified listing's tag can't be reused to
+//         wave through a second, different listing on the same domain;
+//       - is optional everywhere — publishing a listing never requires
+//         this; completing it only earns the green "Verified" badge shown
+//         on the listing (see WebsiteListingForm.tsx and the listing
+//         detail page).
 //   - Of the six "Coming soon" cards, three already have real backends in
 //     app/api/aistudio/_handler.js (auto-description, scam-check,
 //     deal-message-assist) that were simply never wired into this page —
@@ -25,24 +39,13 @@
 // components/marketplace/AiPromoCard.tsx's "Start using AI tools" CTA
 // points at /aitools.
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import SignInRequired from "@/components/auth/SignInRequired";
 import { aiStudioCall, aiPlanCap } from "@/lib/aiStudio";
 import { useAiLengthPicker } from "@/lib/useAiLengthPicker";
+import { fetchMyListings, generateVerification, checkVerification, type Listing } from "@/lib/listings";
 
-const VERIFY_API_BASE = "https://dlsvalue.site/api/verify.js";
-
-function normalizeUrl(v: string): string | null {
-  const trimmed = v.trim();
-  if (!trimmed) return null;
-  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  try {
-    return new URL(withScheme).hostname.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
-}
 
 // ── Icons (ported inline from the original page's inline SVGs) ──
 const IconVerify = (
@@ -89,36 +92,58 @@ const IconCopy = (
 );
 
 // ══════════════════════════════════════════════════════════════════════
-// Working tool: site ownership verification
+// Working tool: site ownership verification — rebuilt on our own backend
+// (see /api/listings' listing.verify-generate / listing.verify-check).
+// Scoped to one of the signed-in user's own listings at a time, since the
+// verification token is bound to a domain+listingId pair server-side —
+// there's no meaningful "verify a domain" independent of which listing
+// it's for.
 // ══════════════════════════════════════════════════════════════════════
-function VerifyOwnershipCard() {
-  const [urlValue, setUrlValue] = useState("");
-  const [inputErr, setInputErr] = useState(false);
+function VerifyOwnershipCard({ user }: { user: NonNullable<ReturnType<typeof useAuth>["user"]> }) {
+  const [listings, setListings] = useState<Listing[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string>("");
   const [generating, setGenerating] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [snippet, setSnippet] = useState<{ domain: string; token: string } | null>(null);
+  const [snippet, setSnippet] = useState<{ domain: string; token: string; snippetText: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [checkResult, setCheckResult] = useState<{ verified: boolean; domain: string } | null>(null);
+
+  // Only listings with a verifiable domain (a website listing's own `url`,
+  // or an app/game listing's platforms.webUrl) can go through this — a
+  // pure Play Store/App Store/itch.io link has nowhere to put a meta tag
+  // (see the store-link plausibility check on the listing form instead).
+  const verifiableListings = (listings || []).filter((l) => Boolean(l.url || l.platforms?.webUrl));
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const idToken = await user.getIdToken();
+        const { listings: mine } = await fetchMyListings({ idToken });
+        if (!cancelled) setListings(mine);
+      } catch (e) {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Could not load your listings.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const selected = verifiableListings.find((l) => l.id === selectedId) || null;
 
   async function generateTag() {
-    const domain = normalizeUrl(urlValue);
-    if (!domain) {
-      setInputErr(true);
-      setTimeout(() => setInputErr(false), 1200);
-      return;
-    }
+    if (!selected) return;
     setGenerating(true);
     setError(null);
+    setCheckResult(null);
     try {
-      const res = await fetch(VERIFY_API_BASE, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "generate", domain }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.token) {
-        throw new Error(data?.error || "The verification service didn't return a token.");
-      }
-      setSnippet({ domain, token: data.token });
+      const idToken = await user.getIdToken();
+      const result = await generateVerification({ idToken, listingId: selected.id });
+      setSnippet({ domain: result.domain, token: result.token, snippetText: result.snippet });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not generate a snippet — please try again.");
       setSnippet(null);
@@ -127,9 +152,27 @@ function VerifyOwnershipCard() {
     }
   }
 
+  async function runCheck() {
+    if (!selected) return;
+    setChecking(true);
+    setError(null);
+    try {
+      const idToken = await user.getIdToken();
+      const result = await checkVerification({ idToken, listingId: selected.id });
+      setCheckResult(result);
+      if (!result.verified) {
+        setError("We couldn't find the verification tag on your site yet. Make sure it's saved and live, then try again.");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not check verification right now — please try again.");
+    } finally {
+      setChecking(false);
+    }
+  }
+
   function copySnippet() {
     if (!snippet) return;
-    navigator.clipboard.writeText(snippetText(snippet.token)).then(() => {
+    navigator.clipboard.writeText(snippet.snippetText).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -142,54 +185,78 @@ function VerifyOwnershipCard() {
         <h2>Verify site ownership</h2>
       </div>
       <p className="srf-tools-verify-desc">
-        Enter your live website URL to generate a unique verification snippet. Paste it into your site&apos;s{" "}
-        <code className="mono">&lt;head&gt;</code> — it will auto-verify your ownership and show a confirmation alert.
+        Pick one of your listings, then paste the generated snippet into that domain&apos;s{" "}
+        <code className="mono">&lt;head&gt;</code>. This is optional — your listing stays published either
+        way — but a verified domain gets a green &quot;Verified&quot; badge buyers can see.
       </p>
-      <div className="srf-tools-url-row">
-        <input
-          type="text"
-          className={`srf-tools-url-input${inputErr ? " srf-tools-input-err" : ""}`}
-          placeholder="yourwebsite.com"
-          autoComplete="off"
-          value={urlValue}
-          onChange={(e) => setUrlValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") generateTag();
-          }}
-        />
-        <button className="srf-tools-btn-lime" disabled={generating} onClick={generateTag}>
-          {generating ? "Generating…" : "Generate snippet"}
-        </button>
-      </div>
-      {error && <div className="srf-tools-error">{error}</div>}
-      {snippet && (
-        <div className="srf-tools-result">
-          <div className="srf-tools-result-label">Copy everything below into your site&apos;s &lt;head&gt;</div>
-          <div className="srf-tools-code-block">
-            <code>{snippetText(snippet.token)}</code>
-            <button className={`srf-tools-copy-btn${copied ? " copied" : ""}`} onClick={copySnippet}>
-              {IconCopy}
+
+      {loadError && <div className="srf-tools-error">{loadError}</div>}
+
+      {listings !== null && verifiableListings.length === 0 && !loadError && (
+        <div className="srf-tools-result-box">
+          None of your listings have a website URL to verify yet. Website listings verify their own URL;
+          app/game listings can verify their &quot;Web&quot; platform URL if they have one.
+        </div>
+      )}
+
+      {verifiableListings.length > 0 && (
+        <>
+          <div className="srf-tools-url-row">
+            <select
+              className="srf-tools-url-input"
+              value={selectedId}
+              onChange={(e) => {
+                setSelectedId(e.target.value);
+                setSnippet(null);
+                setCheckResult(null);
+                setError(null);
+              }}
+            >
+              <option value="">Select a listing…</option>
+              {verifiableListings.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.title || "Untitled"} {l.verified ? "✓ Verified" : ""}
+                </option>
+              ))}
+            </select>
+            <button className="srf-tools-btn-lime" disabled={!selected || generating} onClick={generateTag}>
+              {generating ? "Generating…" : "Generate snippet"}
             </button>
           </div>
-          <div className="srf-tools-verify-steps">
-            <b>1.</b> Paste the snippet into your homepage&apos;s <code className="mono">&lt;head&gt;</code> &nbsp;•&nbsp;
-            <b>2.</b> Save and publish your site &nbsp;•&nbsp;
-            <b>3.</b> Visit your site — you&apos;ll see a &quot;Thanks!&quot; alert when it&apos;s verified
-          </div>
-        </div>
+
+          {selected?.verified && (
+            <div className="srf-tools-result-box">✓ This listing is already verified for {selected.verifiedDomain}.</div>
+          )}
+
+          {error && <div className="srf-tools-error">{error}</div>}
+
+          {snippet && (
+            <div className="srf-tools-result">
+              <div className="srf-tools-result-label">Copy everything below into your site&apos;s &lt;head&gt;</div>
+              <div className="srf-tools-code-block">
+                <code>{snippet.snippetText}</code>
+                <button className={`srf-tools-copy-btn${copied ? " copied" : ""}`} onClick={copySnippet}>
+                  {IconCopy}
+                </button>
+              </div>
+              <div className="srf-tools-verify-steps">
+                <b>1.</b> Paste the snippet into {snippet.domain}&apos;s homepage <code className="mono">&lt;head&gt;</code>{" "}
+                &nbsp;•&nbsp; <b>2.</b> Save and publish &nbsp;•&nbsp; <b>3.</b> Come back and click &quot;Check now&quot;
+              </div>
+              <button className="srf-tools-btn-lime" disabled={checking} onClick={runCheck} style={{ marginTop: 10 }}>
+                {checking ? "Checking…" : "Check now"}
+              </button>
+              {checkResult?.verified && (
+                <div className="srf-tools-result-box" style={{ marginTop: 10 }}>
+                  ✓ Verified! {checkResult.domain} now shows the green Verified badge on this listing.
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
-}
-
-// Rebuilds the same self-verifying <meta>/<script> snippet the original
-// page generated, minus the diag-building wrapper around it.
-function snippetText(token: string): string {
-  return `<!-- Siterifty verification -->
-<meta name="siterifty-site-verification" content="${token}" />
-<script>
-!function(){var t="${token}",d=location.hostname.replace("www.","");fetch("${VERIFY_API_BASE}",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"verify",domain:d,token:t})}).then(function(r){return r.json()}).then(function(r){if(r.verified)console.log("Siterifty: verified")}).catch(console.error)}();
-</script>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -509,7 +576,7 @@ export default function AiToolsPage() {
         />
       ) : (
         <>
-          <VerifyOwnershipCard />
+          <VerifyOwnershipCard user={user} />
 
           <div className="srf-tools-section-head">
             <h3>More tools</h3>
