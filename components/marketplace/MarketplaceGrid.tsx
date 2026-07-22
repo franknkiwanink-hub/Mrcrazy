@@ -227,7 +227,7 @@ export default function MarketplaceGrid({
         )}
       </div>
 
-      <BoostedRow listings={filteredListings} onOpen={onOpen} onOpenSeller={onOpenSeller} />
+      <BoostedRow onOpen={onOpen} onOpenSeller={onOpenSeller} />
 
       <div className="mp-grid-wrap">
         <div className="mp-grid" id="mpGrid">
