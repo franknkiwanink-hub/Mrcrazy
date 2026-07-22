@@ -58,6 +58,7 @@ const GAME_PLATFORM_KEYS: PlatformKey[] = ["web", "ios", "android", "steam", "de
 const GENRE_OPTIONS = ["Action", "Adventure", "RPG", "Shooter", "Strategy", "Simulation", "Sports", "Puzzle", "Other"];
 const AGE_OPTIONS = ["< 3 months", "3–5 months", "6–11 months", "1+ year", "2+ years", "3+ years", "5+ years", "10+ years"];
 const STRUCTURE_OPTIONS = ["Sole Proprietorship", "LLC", "Corporation", "Partnership", "Other"];
+const GAME_MONETIZATION_OPTIONS = ["Premium (one-time purchase)", "Free-to-play + Ads", "In-app purchases", "Subscription", "DLC / Expansions", "Free / Not monetized", "Other"];
 
 const SLOT_LABELS = ["Portrait 1", "Portrait 2", "Landscape 16:9"];
 
@@ -690,7 +691,7 @@ export default function GameListingForm() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", marginTop: 92, background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
+    <div style={{ marginTop: 92, background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
       <AiLengthPickerHost />
       <ConfirmHost />
       <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFileInputChange} />
@@ -909,7 +910,7 @@ export default function GameListingForm() {
                   style={inputStyle}
                 />
                 {(p === "ios" || p === "android") && (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                  <div className="sr-lf-row-2" style={{ marginTop: 10 }}>
                     <Field label="Installs">
                       <input
                         type="number"
@@ -936,7 +937,7 @@ export default function GameListingForm() {
             ))}
 
             <span style={sectionLabelStyle}>Details</span>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+            <div className="sr-lf-row-2" style={{ marginBottom: 16 }}>
               <Field label="Genre">
                 <Select value={genre} onChange={setGenre} options={GENRE_OPTIONS} accent={ACCENT} />
               </Field>
@@ -944,9 +945,14 @@ export default function GameListingForm() {
                 <Select value={age} onChange={setAge} options={AGE_OPTIONS} accent={ACCENT} />
               </Field>
             </div>
-            <Field label="Monetization" required>
-              <input value={monetization} onChange={(e) => setMonetization(e.target.value)} placeholder="e.g. Ads, In-app purchases, One-time purchase" style={inputStyle} />
-            </Field>
+            <SelectWithOther
+              label="Monetization"
+              required
+              value={monetization}
+              onChange={setMonetization}
+              options={GAME_MONETIZATION_OPTIONS}
+              accent={ACCENT}
+            />
 
             <Field label="Business Structure">
               <Select value={structure} onChange={setStructure} options={STRUCTURE_OPTIONS} accent={ACCENT} />
@@ -979,32 +985,40 @@ export default function GameListingForm() {
         {step === 3 && (
           <div>
             {errors.fin && <ErrorBox>{errors.fin}</ErrorBox>}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
-              <Field label="Asking Price ($)">
-                <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="1000" style={inputStyle} />
-              </Field>
-              <Field label="Monthly Revenue ($)">
-                <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} placeholder="200" style={inputStyle} />
-              </Field>
-              <Field label="Monthly Expenses ($)">
-                <input type="number" min="0" value={expenses} onChange={(e) => setExpenses(e.target.value)} placeholder="20" style={inputStyle} />
-              </Field>
-            </div>
+            <div className="sr-lf-fin-card">
+              <div className="sr-lf-row-3">
+                <Field label="Asking Price ($)">
+                  <div className="sr-lf-money">
+                    <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="1000" style={inputStyle} />
+                  </div>
+                </Field>
+                <Field label="Monthly Revenue ($)">
+                  <div className="sr-lf-money">
+                    <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} placeholder="200" style={inputStyle} />
+                  </div>
+                </Field>
+                <Field label="Monthly Expenses ($)">
+                  <div className="sr-lf-money">
+                    <input type="number" min="0" value={expenses} onChange={(e) => setExpenses(e.target.value)} placeholder="20" style={inputStyle} />
+                  </div>
+                </Field>
+              </div>
 
-            <div style={{ padding: 16, background: "rgba(255,255,255,0.03)", borderRadius: 12, marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", fontWeight: 600 }}>Monthly Profit</span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: profit >= 0 ? ACCENT : "#f87171" }}>
-                {profit >= 0 ? "+" : ""}${profit.toFixed(2)}
-              </span>
+              <div style={{ padding: 14, background: "rgba(255,255,255,0.03)", borderRadius: 10, marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", fontWeight: 600 }}>Monthly Profit</span>
+                <span style={{ fontSize: 20, fontWeight: 800, color: profit >= 0 ? ACCENT : "#f87171" }}>
+                  {profit >= 0 ? "+" : ""}${profit.toFixed(2)}
+                </span>
+              </div>
             </div>
 
             {(parseFloat(revenue) || 0) > 0 && (
-              <div style={{ marginBottom: 24 }}>
+              <div className="sr-lf-proof-card">
                 <span style={sectionLabelStyle}>
                   Proof of Revenue <span style={{ color: "#f87171" }}>*</span>
                 </span>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
-                  Upload a screenshot of your Steam, App Store Connect, Play Console, or payment processor dashboard showing this revenue. Buyers trust listings with verified numbers.
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 10 }}>
+                  Upload a screenshot of your Steam, App Store Connect, Play Console, or payment processor dashboard showing this revenue. Listings without proof can't be published.
                 </div>
                 <ProofUploader
                   images={revenueProof}
@@ -1029,8 +1043,8 @@ export default function GameListingForm() {
                 />
               </Field>
               {(parseFloat(monthlyVisits) || 0) > 0 && (
-                <div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
+                <div className="sr-lf-proof-card">
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 10 }}>
                     Since you entered a visits number, upload 1–3 analytics screenshots (Google Analytics, Steam stats, or your host's dashboard) to back it up. <span style={{ color: "#f87171" }}>Required.</span>
                   </div>
                   <ProofUploader
@@ -1190,6 +1204,61 @@ function Field({
   );
 }
 
+// Dropdown-of-presets + "Other" fallback text input — same pattern as
+// TechField in WebsiteListingForm.tsx/AppListingForm.tsx, used here for
+// Monetization since Game listings don't have separate Frontend/Backend/
+// Database fields. `forcedOther` tracks an explicit "Other" pick since
+// choosing it clears value to "", which can't be told apart from "nothing
+// selected yet" by value alone.
+function SelectWithOther({
+  label,
+  required,
+  value,
+  onChange,
+  options,
+  accent,
+}: {
+  label: string;
+  required?: boolean;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  accent: string;
+}) {
+  const isKnownPreset = options.includes(value);
+  const [forcedOther, setForcedOther] = useState(value !== "" && !isKnownPreset);
+  const showOther = forcedOther || (value !== "" && !isKnownPreset);
+  const selectValue = showOther ? "Other" : value;
+  return (
+    <Field label={label} required={required}>
+      <Select
+        value={selectValue}
+        onChange={(v) => {
+          if (v === "Other") {
+            setForcedOther(true);
+            onChange("");
+          } else {
+            setForcedOther(false);
+            onChange(v);
+          }
+        }}
+        options={options}
+        accent={accent}
+      />
+      {showOther && (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Type your own…"
+          style={{ ...inputStyle, marginTop: 8 }}
+          autoFocus
+        />
+      )}
+    </Field>
+  );
+}
+
+
 function CharCount({ value, min, max }: { value: string; min: number; max: number }) {
   const len = value.trim().length;
   const ok = len >= min && len <= max;
@@ -1298,7 +1367,7 @@ const inputStyle: React.CSSProperties = {
   height: 44,
   padding: "0 14px",
   background: "#09090b",
-  border: "1px solid #3f3f46",
+  border: "1px solid rgba(255,255,255,0.28)",
   borderRadius: 8,
   fontSize: 14,
   color: "#fff",
