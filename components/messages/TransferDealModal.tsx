@@ -586,9 +586,9 @@ function CollaboratorInvitePanel({
     setInviting(true);
     const result = await inviteGithubCollaborator(u);
     setInviting(false);
-    if (result.ok) {
+    if (result.ok === true) {
       setStatus(result.status);
-    } else {
+    } else if (result.ok === false) {
       await alert({ theme: "danger", title: "Invite Failed", msg: result.error });
     }
   }
