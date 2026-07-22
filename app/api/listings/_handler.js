@@ -308,7 +308,7 @@ export default async function handler(req, res) {
   // browse listings and preview/download an already-attached build file
   // without being logged in. Every other action (create/update/delete/
   // report) still requires auth.
-  const PUBLIC_ACTIONS = ['listing.feed', 'listing.file-url', 'listing.impression', 'listing.view', 'listing.premium-sellers', 'listing.similar', 'listing.search'];
+  const PUBLIC_ACTIONS = ['listing.feed', 'listing.file-url', 'listing.impression', 'listing.view', 'listing.premium-sellers', 'listing.similar', 'listing.search', 'listing.boosted-ads'];
   if (!idToken && !PUBLIC_ACTIONS.includes(action)) {
     return fail(res, new ApiError('Missing auth token', 'AUTH_MISSING', 401));
   }
@@ -322,6 +322,7 @@ export default async function handler(req, res) {
       case 'listing.feed':   return ok(res, await handleFeed(req.body, idToken));
       case 'listing.similar': return ok(res, await handleSimilar(req.body, idToken));
       case 'listing.search':  return ok(res, await handleSearch(req.body, idToken));
+      case 'listing.boosted-ads': return ok(res, await handleBoostedAds(req.body, idToken));
       case 'listing.mine':   return ok(res, await handleMine(req.body, idToken));
       case 'listing.daily-stats': return ok(res, await handleDailyStats(req.body, idToken));
       case 'listing.file-url': return ok(res, await handleFileUrl(req.body, idToken));
@@ -683,6 +684,104 @@ async function handleCreate(body, idToken) {
 // listing.update — owner only. Never trusts/accepts ownerId, ownerEmail,
 // type, status, or createdAt from the request body.
 // ─────────────────────────────────────────────────────────────────────────────
+// Builds the denormalized card-display snapshot stored on boostedAds/{id}.
+// Only the fields ListingCard actually renders — kept intentionally small
+// since this doc is read on every BoostedRow load, uncached, unlike the
+// full listings doc. Shared by handleBoostListing (paypal handler, at
+// purchase time) and _syncBoostedAdIfActive below (at edit time), so both
+// call sites build the exact same shape from a listing's current data.
+function _boostedAdSnapshot(listingId, listingData, boostedUntilTs) {
+  return {
+    listingId,
+    type:         listingData.type || 'website',
+    ownerId:      listingData.ownerId || null,
+    title:        listingData.title || 'Untitled',
+    tagline:      listingData.tagline || null,
+    url:          listingData.url || null,
+    images:       Array.isArray(listingData.images) ? listingData.images.slice(0, 6) : [],
+    imageCover:   listingData.imageCover || (listingData.images && listingData.images[0]) || null,
+    appIcon:      listingData.appIcon || null,
+    category:     listingData.category || null,
+    gameType:     listingData.gameType || null,
+    financials:   listingData.financials || null,
+    settings:     listingData.settings || null,
+    verified:     !!listingData.verified,
+    boostedUntil: boostedUntilTs,
+  };
+}
+
+// If `listingId` currently has an active (non-expired) boostedAds doc,
+// overwrites it with a fresh snapshot built from `listingData` — keeping
+// the paid ad's display in sync with the seller's latest edit, per the
+// "boosted ads must stay live-accurate, never stale" requirement. A no-op
+// (one extra read, no write) for the common case of an unboosted listing,
+// so ordinary edits pay only a single cheap lookup, not a wasted write.
+async function _syncBoostedAdIfActive(db, listingId, listingData) {
+  try {
+    const adRef = db.collection('boostedAds').doc(listingId);
+    const adSnap = await adRef.get();
+    if (!adSnap.exists) return;
+    const boostedUntilTs = adSnap.data().boostedUntil;
+    const stillActive = boostedUntilTs?.toMillis?.() > Date.now();
+    if (!stillActive) return; // expired — leave it for lazy cleanup, don't resurrect it
+    await adRef.set(_boostedAdSnapshot(listingId, listingData, boostedUntilTs));
+  } catch (err) {
+    // Non-fatal — worst case the boosted ad card shows slightly stale
+    // fields until the next successful edit or boost top-up corrects it.
+    // Must never fail/roll back the listing edit itself.
+    console.error('[_syncBoostedAdIfActive] failed for', listingId, err);
+  }
+}
+
+// Builds the denormalized card-display snapshot stored on boostedAds/{id}.
+// Only the fields ListingCard actually renders — kept intentionally small
+// since this doc is read on every BoostedRow load, uncached, unlike the
+// full listings doc. Shared by handleBoostListing (paypal handler, at
+// purchase time) and _syncBoostedAdIfActive below (at edit time), so both
+// call sites build the exact same shape from a listing's current data.
+function _boostedAdSnapshot(listingId, listingData, boostedUntilTs) {
+  return {
+    listingId,
+    type:         listingData.type || 'website',
+    ownerId:      listingData.ownerId || null,
+    title:        listingData.title || 'Untitled',
+    tagline:      listingData.tagline || null,
+    url:          listingData.url || null,
+    images:       Array.isArray(listingData.images) ? listingData.images.slice(0, 6) : [],
+    imageCover:   listingData.imageCover || (listingData.images && listingData.images[0]) || null,
+    appIcon:      listingData.appIcon || null,
+    category:     listingData.category || null,
+    gameType:     listingData.gameType || null,
+    financials:   listingData.financials || null,
+    settings:     listingData.settings || null,
+    verified:     !!listingData.verified,
+    boostedUntil: boostedUntilTs,
+  };
+}
+
+// If `listingId` currently has an active (non-expired) boostedAds doc,
+// overwrites it with a fresh snapshot built from `listingData` — keeping
+// the paid ad's display in sync with the seller's latest edit, per the
+// "boosted ads must stay live-accurate, never stale" requirement. A no-op
+// (one extra read, no write) for the common case of an unboosted listing,
+// so ordinary edits pay only a single cheap lookup, not a wasted write.
+async function _syncBoostedAdIfActive(db, listingId, listingData) {
+  try {
+    const adRef = db.collection('boostedAds').doc(listingId);
+    const adSnap = await adRef.get();
+    if (!adSnap.exists) return;
+    const boostedUntilTs = adSnap.data().boostedUntil;
+    const stillActive = boostedUntilTs?.toMillis?.() > Date.now();
+    if (!stillActive) return; // expired — leave it for lazy cleanup, don't resurrect it
+    await adRef.set(_boostedAdSnapshot(listingId, listingData, boostedUntilTs));
+  } catch (err) {
+    // Non-fatal — worst case the boosted ad card shows slightly stale
+    // fields until the next successful edit or boost top-up corrects it.
+    // Must never fail/roll back the listing edit itself.
+    console.error('[_syncBoostedAdIfActive] failed for', listingId, err);
+  }
+}
+
 async function handleUpdate(body, idToken) {
   const {
     listingId, title, description, url,
@@ -778,6 +877,12 @@ async function handleUpdate(body, idToken) {
   update.editDay   = _todayKey;
 
   await ref.update(update);
+
+  // Keep a live boosted ad's card snapshot in sync with this edit, so a
+  // seller who tweaks price/title/images mid-boost doesn't show stale data
+  // in the paid placement. No-op if this listing isn't currently boosted.
+  await _syncBoostedAdIfActive(db, listingId, { ...existing, ...update });
+
   return {};
 }
 
@@ -809,6 +914,14 @@ async function handleDelete(body, idToken) {
   // handleUpdate don't need this — see the cache's header comment.
   const type = listingData.type;
   await _invalidateFeedPool(type);
+
+  // A deleted listing must never keep appearing as a paid boosted ad —
+  // boostedAds is read live/uncached (see handleBoostedAds), so this takes
+  // effect on the very next BoostedRow load. Non-fatal: a seller who
+  // deletes a listing mid-boost forfeits the remaining time either way.
+  await db.collection('boostedAds').doc(listingId).delete().catch(err => {
+    console.error('[listings] boostedAds cleanup on delete failed (non-fatal):', err.message);
+  });
 
   // Mirror the increment done at creation time (see handleCreate) so
   // stats/platformTotals stays accurate after a hard delete. Fired after
@@ -1617,6 +1730,57 @@ async function handleSearch(body, idToken) {
   // to ownerPlan: 'free' for any listing missing the field, same as it
   // already does for feed items before that lookup resolves.
   return { listings: results, query };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// listing.boosted-ads  { idToken?, type? }  → { listings }
+//
+// Public, same auth posture as handleFeed. Powers BoostedRow.
+//
+// Deliberately independent of _getTypePool/feedPool — sellers are paying
+// real money for this placement, so it must NEVER be subject to the feed
+// pool's 1-hour TTL cache. This queries the `boostedAds` collection
+// directly, every call, straight from Firestore. That collection is
+// written (and kept in sync) by handleBoostListing (see app/api/paypal/
+// _handler.js) at purchase time, and by handleUpdate/handleDelete below
+// whenever the underlying listing changes or is removed — so a boost
+// bought or a listing edited seconds ago shows up on the very next load,
+// no wait, no refresh trick needed.
+//
+// `boostedAds` docs carry a denormalized card-display snapshot (title,
+// price, image, etc.) precisely so this read never has to join back to
+// the (possibly stale-cached) `listings` pool at all — it's a fully
+// self-contained ad record, the way a paid ad slot should be.
+//
+// Expired ads aren't proactively deleted (no cron) — see design note in
+// handleBoostListing. Instead this filters `boostedUntil > now` at read
+// time, so an expired doc simply stops appearing here on its own; it gets
+// physically cleaned up lazily whenever convenient (e.g. next boost
+// purchase for that listing overwrites it, or a future cleanup job).
+const BOOSTED_ADS_MAX_PER_TYPE = 6; // mirrors BoostedRow's BOOSTED_ROW_MAX_PER_TYPE
+
+async function handleBoostedAds(body, idToken) {
+  if (idToken) await verifyFirebaseToken(idToken);
+  const db = getAdminDb();
+
+  const { type } = body || {};
+  const activeTypes = (type && FEED_TYPES.includes(type)) ? [type] : FEED_TYPES;
+  const now = Date.now();
+
+  const results = await Promise.all(activeTypes.map(async (t) => {
+    // boostedUntil is stored as a Firestore Timestamp; '>' comparison
+    // against a Timestamp built from "now" is index-friendly and avoids
+    // pulling in already-expired docs that just haven't been swept yet.
+    const snap = await db.collection('boostedAds')
+      .where('type', '==', t)
+      .where('boostedUntil', '>', Timestamp.fromMillis(now))
+      .orderBy('boostedUntil', 'desc')
+      .limit(BOOSTED_ADS_MAX_PER_TYPE)
+      .get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }));
+
+  return { listings: results.flat() };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
