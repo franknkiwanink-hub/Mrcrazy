@@ -50,20 +50,23 @@ const FALLBACK_DESC_MIN = 100;
 const FALLBACK_DESC_MAX = 5000;
 
 const TRANSFER_OPTIONS = [
-  { value: "html_css_js", label: "HTML/CSS/JS Files ⚡" },
-  { value: "domain_push", label: "Domain Push" },
-  { value: "zip_download", label: "Full Site ZIP" },
-  { value: "cpanel", label: "cPanel" },
-  { value: "github", label: "GitHub / GitLab" },
-  { value: "hosting_handover", label: "Hosting Handover" },
-  { value: "db_dump", label: "Database Dump" },
-  { value: "ftp", label: "FTP Credentials" },
-  { value: "escrow_migration", label: "Escrow Migration" },
-  { value: "account_handover", label: "Account Handover" },
-  { value: "source_code", label: "Source Code Handover" },
-  { value: "direct_download", label: "Direct Build Transfer (APK/IPA)" },
-  { value: "steam_key", label: "Steam Key / CD Key" },
-  { value: "other", label: "Other (discuss in chat)" },
+  { value: "escrow_migration", label: "Escrow-Protected Migration" },
+  { value: "store_account_handover", label: "Store Account Handover" },
+  { value: "source_files", label: "Source Files / Full Handover" },
+  { value: "domain_push", label: "Domain Push (Registrar Transfer)" },
+  { value: "site_archive", label: "Full Site Archive (Files + Database)" },
+  { value: "hosting_handover", label: "Hosting Account Handover" },
+  { value: "cpanel", label: "cPanel / Control Panel Access" },
+  { value: "database_export", label: "Database Export (.sql)" },
+  { value: "repo_transfer", label: "GitHub / GitLab Repository Transfer" },
+  { value: "site_builder_transfer", label: "Site Builder Transfer" },
+  { value: "build_transfer", label: "Signed Build Transfer (APK/AAB/IPA)" },
+  { value: "console_store_code", label: "Console Store Code" },
+  { value: "steam_key_transfer", label: "Steam Key / CD Key Transfer" },
+  { value: "account_handover", label: "Player Account Handover" },
+  { value: "direct_download", label: "Direct Build Transfer" },
+  { value: "ftp_credentials", label: "FTP/SFTP Credentials" },
+  { value: "other", label: "Other (confirm details in chat)" },
 ];
 
 const TYPE_LABEL: Record<string, string> = { website: "Website", app: "App", game: "Game" };
