@@ -338,51 +338,7 @@ export default function ApiPanel({
       </button>
       <span className="hint">If the key is active, you&apos;ll get admin commands: delete messages, pin messages, group management.</span>
 
-      {/* Revoke confirm — same inline-overlay pattern as Sign Out / Cancel
-          Subscription elsewhere in this port. */}
-      {confirmRevokeId ? (
-        <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center" }}
-          onClick={() => !revokingId && setConfirmRevokeId(null)}
-        >
-          <div style={{ background: "#141420", padding: 24, borderRadius: 12, color: "#fff", maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>Revoke Key</h3>
-            <p style={{ opacity: 0.7, fontSize: 14 }}>
-              This will permanently deactivate this API key. Automations using it will stop working immediately.
-            </p>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-              <button onClick={() => setConfirmRevokeId(null)} disabled={!!revokingId}>
-                Cancel
-              </button>
-              <button className="danger-btn" onClick={() => handleRevoke(confirmRevokeId)} disabled={!!revokingId}>
-                {revokingId ? "Revoking…" : "Revoke"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Key-limit-reached — ports window.srfModal.alert's danger dialog. */}
-      {limitReached ? (
-        <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center" }}
-          onClick={() => setLimitReached(null)}
-        >
-          <div style={{ background: "#141420", padding: 24, borderRadius: 12, color: "#fff", maxWidth: 360 }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ marginTop: 0 }}>Key Limit Reached</h3>
-            <p style={{ opacity: 0.7, fontSize: 14 }}>
-              Your {limitReached.plan} plan allows up to {limitReached.maxKeys} active API key
-              {limitReached.maxKeys !== 1 ? "s" : ""}. You currently have {limitReached.activeCount}. Upgrade your
-              plan or revoke an existing key to create a new one.
-            </p>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
-              <button onClick={() => setLimitReached(null)}>Got it</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <ToastHost />
+      <ConfirmHost />
     </>
   );
 }
