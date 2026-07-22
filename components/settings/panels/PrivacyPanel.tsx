@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { auth } from "@/lib/firebase";
 import type { SettingsState } from "@/lib/useSettingsState";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
 
 const SaveIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
@@ -27,7 +27,7 @@ export default function PrivacyPanel({
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
 
   const [profileVisibility, setProfileVisibility] = useState(state.profileVisibility);
   const [showEmail, setShowEmail] = useState(state.showEmail);
@@ -46,11 +46,11 @@ export default function PrivacyPanel({
   async function handleSave() {
     const user = auth.currentUser;
     if (!user) {
-      toast("Not signed in.");
+      toast("Not signed in.", "error");
       return;
     }
     if (profileVisibility === "private" && !canGoPrivate) {
-      toast("Private profiles are available on paid plans. Upgrade to unlock.");
+      toast("Private profiles are available on paid plans. Upgrade to unlock.", "error");
       return;
     }
     setSaving(true);
@@ -65,9 +65,9 @@ export default function PrivacyPanel({
       const json = await res.json();
       if (!res.ok || json.error) throw new Error(json.error || "Save failed");
       setState((prev) => ({ ...prev, ...priv }));
-      toast("Privacy settings saved.");
+      toast("Privacy settings saved.", "success");
     } catch (err: any) {
-      toast(`Save failed: ${err.message}`);
+      toast(`Save failed: ${err.message}`, "error");
     } finally {
       setSaving(false);
     }
@@ -105,7 +105,7 @@ export default function PrivacyPanel({
               style={{ color: "var(--mp-accent, #a3e635)", fontWeight: 600, textDecoration: "none" }}
               onClick={(e) => {
                 e.preventDefault();
-                toast("Plans modal isn't built yet — this is a placeholder.");
+                toast("Plans modal isn't built yet — this is a placeholder.", "info");
               }}
             >
               Upgrade to unlock
@@ -143,7 +143,6 @@ export default function PrivacyPanel({
         {saving ? "Saving…" : "Save Privacy Settings"}
       </button>
 
-      <ToastHost />
     </>
   );
 }
