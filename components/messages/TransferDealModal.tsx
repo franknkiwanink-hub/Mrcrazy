@@ -359,7 +359,9 @@ function FileUploadPanel({
   accent: string;
 }) {
   const [filesArray, setFilesArray] = useState<File[]>(existing?.kind === "files" ? existing.files : []);
-  const [buildInfo, setBuildInfo] = useState(existing?.kind === "files" ? existing.buildInfo || "" : "");
+  const [buildInfo, setBuildInfo] = useState(
+    existing?.kind === "files" ? (existing as { buildInfo?: string }).buildInfo || "" : ""
+  );
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const thumbUrlsRef = useRef<string[]>([]);
@@ -383,7 +385,7 @@ function FileUploadPanel({
       await alert({ theme: "warning", title: "Missing Information", msg: "Please upload at least one file." });
       return;
     }
-    onDone({ kind: "files", label, files: filesArray, buildInfo: buildInfo.trim() || undefined });
+    onDone({ kind: "files", label, files: filesArray, buildInfo: buildInfo.trim() || undefined } as TdmPayload);
   }
 
   return (
@@ -662,7 +664,9 @@ function RecipientProofPanel({
   alert: (opts: { theme?: "success" | "warning" | "danger" | "info" | "report"; title: string; msg: string }) => Promise<void>;
   accent: string;
 }) {
-  const [filesArray, setFilesArray] = useState<File[]>(existing?.kind === "screenshot_proof" ? existing.files : []);
+  const [filesArray, setFilesArray] = useState<File[]>(
+    existing?.kind === "screenshot_proof" ? (existing as { files: File[] }).files : []
+  );
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const thumbUrlsRef = useRef<string[]>([]);
@@ -693,7 +697,7 @@ function RecipientProofPanel({
       await alert({ theme: "warning", title: "Missing Information", msg: "Please upload a screenshot or confirmation as proof of transfer." });
       return;
     }
-    onDone({ kind: "screenshot_proof", label, files: filesArray, recipientEmail: buyerEmail });
+    onDone({ kind: "screenshot_proof", label, files: filesArray, recipientEmail: buyerEmail } as TdmPayload);
   }
 
   return (
