@@ -33,6 +33,7 @@ import TransferMethodPicker from "./shared/TransferMethodPicker";
 import ProofUploader, { type ProofImage } from "./shared/ProofUploader";
 import { GAME_TRANSFER_METHODS } from "./shared/transferMethods";
 import { PLATFORM_META, type PlatformKey } from "./shared/platforms";
+import PlatformPicker, { PlatformIcon } from "./shared/PlatformPicker";
 
 const ACCENT = "#f59e0b";
 const DRAFT_KEY = "srf_draft_game";
@@ -900,22 +901,22 @@ export default function GameListingForm() {
               Select everywhere this game can be played. A browser game that&apos;s also on the Play Store or App Store should have both selected.
             </div>
             {errors.details && <ErrorBox>{errors.details}</ErrorBox>}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 14 }}>
-              {GAME_PLATFORM_KEYS.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => togglePlatform(p)}
-                  style={{ ...platformToggleStyle, ...(platforms.has(p) ? activeAmberStyle : {}) }}
-                >
-                  {PLATFORM_META[p].label}
-                </button>
-              ))}
+            <div style={{ marginBottom: 14 }}>
+              <PlatformPicker
+                keys={GAME_PLATFORM_KEYS}
+                meta={PLATFORM_META}
+                selected={platforms}
+                onToggle={togglePlatform}
+                accent={ACCENT}
+              />
             </div>
 
             {GAME_PLATFORM_KEYS.filter((p) => p !== "web" && platforms.has(p)).map((p) => (
               <div key={p} style={{ marginBottom: 16, padding: 14, background: "rgba(255,255,255,0.03)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>{PLATFORM_META[p].label}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 7 }}>
+                  <PlatformIcon platform={p} size={15} color="rgba(255,255,255,0.7)" />
+                  {PLATFORM_META[p].label}
+                </div>
                 <input
                   type="url"
                   value={platformUrls[p] || ""}
