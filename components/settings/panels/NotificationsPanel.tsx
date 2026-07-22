@@ -4,7 +4,7 @@ import { useState } from "react";
 import { doc, updateDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type { SettingsState } from "@/lib/useSettingsState";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
 import { subscribeToPush, unsubscribeFromPush, isPushSupported } from "@/lib/push";
 
 const SaveIcon = () => (
@@ -36,7 +36,7 @@ export default function NotificationsPanel({
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
 
   const [emailNotifs, setEmailNotifs] = useState(state.emailNotifs);
   const [pushNotifs, setPushNotifs] = useState(state.pushNotifs);
@@ -57,7 +57,7 @@ export default function NotificationsPanel({
     try {
       await updateDoc(doc(db, "users", user.uid), { [`notificationPrefs.${key}`]: value });
     } catch {
-      toast("Save failed.");
+      toast("Save failed.", "error");
     }
   }
 
@@ -73,27 +73,27 @@ export default function NotificationsPanel({
     try {
       if (checked) {
         if (!isPushSupported()) {
-          toast("Push not supported in this browser.");
+          toast("Push not supported in this browser.", "error");
           setPushBusy(false);
           return;
         }
         const result = await subscribeToPush(user.uid);
         if (!result.ok) {
-          toast(result.message);
+          toast(result.message, "error");
           setPushBusy(false);
           return;
         }
-        toast(result.message);
+        toast(result.message, "success");
       } else {
         const result = await unsubscribeFromPush(user.uid);
-        toast(result.message || "Push notifications disabled.");
+        toast(result.message || "Push notifications disabled.", "info");
       }
       setPushNotifs(checked);
       setState((prev) => ({ ...prev, pushNotifs: checked }));
       await updateDoc(doc(db, "users", user.uid), { "notificationPrefs.pushNotifs": checked });
     } catch (err) {
       console.error("[push toggle]", err);
-      toast("Could not update push notifications.");
+      toast("Could not update push notifications.", "error");
     } finally {
       setPushBusy(false);
     }
@@ -105,7 +105,7 @@ export default function NotificationsPanel({
   async function handleSaveAll() {
     const user = auth.currentUser;
     if (!user) {
-      toast("Not signed in.");
+      toast("Not signed in.", "error");
       return;
     }
     setSaving(true);
@@ -114,7 +114,7 @@ export default function NotificationsPanel({
       await updateDoc(doc(db, "users", user.uid), { notificationPrefs: prefs });
       setState((prev) => ({ ...prev, ...prefs }));
     } catch (err: any) {
-      toast(`Save failed: ${err.message}`);
+      toast(`Save failed: ${err.message}`, "error");
     } finally {
       setSaving(false);
     }
@@ -173,7 +173,6 @@ export default function NotificationsPanel({
         {saving ? "Saving…" : "Save Notification Settings"}
       </button>
 
-      <ToastHost />
     </>
   );
 }
