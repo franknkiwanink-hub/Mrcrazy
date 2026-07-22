@@ -10617,16 +10617,16 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
        width: 100%; max-width: 700px; margin: 0 auto;
      }
 
-     .tdm-checklist-container { display: flex; flex-direction: column; gap: 0.6rem; width: 100%; }
+     .tdm-checklist-container { display: flex; flex-direction: column; gap: 0.9rem; width: 100%; }
      @media (min-width: 600px) {
        .tdm-checklist-container { flex-direction: row; gap: 1.5rem; }
-       .tdm-checklist-column { flex: 1 1 50%; display: flex; flex-direction: column; gap: 0.6rem; }
+       .tdm-checklist-column { flex: 1 1 50%; display: flex; flex-direction: column; gap: 0.9rem; }
      }
 
      .tdm-checklist-item {
-       display: flex; align-items: center; gap: 0.8rem;
-       padding: 0.75rem 1rem; background: #0a0a0a; border: 1px solid #1f1f1f;
-       border-radius: 0.75rem; transition: all 0.2s ease; cursor: pointer; position: relative;
+       display: flex; align-items: center; gap: 0.9rem;
+       padding: 0.95rem 1.1rem; background: #0a0a0a; border: 1px solid #1f1f1f;
+       border-radius: 0.85rem; transition: all 0.2s ease; cursor: pointer; position: relative;
      }
      .tdm-checklist-item:hover { border-color: #444; background: #0f0f0f; transform: translateY(-1px); }
      .tdm-checklist-item.tdm-completed { border-color: #22c55e; background: #0a1a0f; }
@@ -13397,3 +13397,64 @@ select.srf-tools-url-input option { background: #0d0d0d; color: #fff; }
   .sr-blog-post { margin-top: 92px; }
   .sr-blog-post-title { font-size: 22px; }
 }
+
+/* ── Listing form field rows (App/Website/Game) ──────────────────────────
+   Replaces hardcoded inline gridTemplateColumns on step 2/3/4 field
+   groups (Tech Stack, Settings, Financials) so they stack to a single
+   column on narrow phones instead of squashing 2-3 fields side by side.
+   .sr-lf-row-2 / .sr-lf-row-3 set the desktop/tablet column count; the
+   media query collapses both to 1fr on phones. Image-slot pickers
+   (screenshots, banner+icon) intentionally do NOT use these classes —
+   those stay multi-column at all sizes since they're thumbnail grids,
+   not stacked form fields. */
+.sr-lf-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.sr-lf-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+@media (max-width: 600px) {
+  .sr-lf-row-2, .sr-lf-row-3 { grid-template-columns: 1fr; }
+}
+
+/* ── Financials step card ─────────────────────────────────────────────
+   Wraps Asking Price / Revenue / Expenses in a bordered card with a
+   subtle accent-tinted background, instead of bare inputs floating on
+   plain black — meant to visually read as "this is the trust-sensitive
+   step" rather than looking like every other text field on the form. */
+.sr-lf-fin-card {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.09);
+  border-radius: 14px;
+  padding: 18px 16px 6px;
+  margin-bottom: 20px;
+}
+.sr-lf-fin-card .sr-lf-row-2,
+.sr-lf-fin-card .sr-lf-row-3 { margin-bottom: 14px; }
+
+/* Financial inputs get a $-prefixed look + a slightly stronger border
+   than ordinary text fields, so Price/Revenue/Expenses read as currency
+   inputs at a glance rather than generic text boxes. Wrap the <input>
+   in a .sr-lf-money div; the $ is a ::before pseudo-element so no extra
+   DOM/JS is needed per field. */
+.sr-lf-money { position: relative; }
+.sr-lf-money::before {
+  content: "$";
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: rgba(255,255,255,0.35);
+  font-size: 14px;
+  font-weight: 700;
+  pointer-events: none;
+}
+.sr-lf-money input { padding-left: 26px !important; }
+
+/* Proof-of-revenue upload block — gets its own subtle warning-tinted
+   card so the "you must upload proof" requirement reads as a real
+   verification step, not just another optional field. */
+.sr-lf-proof-card {
+  background: rgba(251,191,36,0.045);
+  border: 1px solid rgba(251,191,36,0.18);
+  border-radius: 12px;
+  padding: 14px 14px 16px;
+  margin-bottom: 20px;
+}
+
