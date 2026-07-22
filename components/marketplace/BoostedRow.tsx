@@ -5,8 +5,20 @@
 // listings; if none exist at all across every type, the whole row is
 // omitted. Reuses ListingCard so a boosted card here is pixel-identical
 // to its counterpart in the main grid.
+//
+// IMPORTANT: this fetches its own data via fetchBoostedAds — it does NOT
+// derive boosted listings by filtering whatever feed page happens to be
+// loaded in the parent. That used to be the bug: the feed is served from a
+// server-side pool cached for up to an hour (see _getTypePool in
+// app/api/listings/_handler.js), so a seller who just paid for a boost (or
+// edited a listing mid-boost) wouldn't see it reflected here until that
+// cache happened to expire, no matter how many times they refreshed.
+// listing.boosted-ads reads Firestore's `boostedAds` collection live, with
+// no cache layer, specifically because this is paid placement — it must
+// always be current.
+import { useEffect, useState } from "react";
 import type { Listing, ListingType } from "@/lib/listings";
-import { isBoosted } from "@/lib/listings";
+import { fetchBoostedAds } from "@/lib/listings";
 import ListingCard from "./ListingCard";
 
 const FLAME_SVG = (
@@ -15,7 +27,6 @@ const FLAME_SVG = (
   </svg>
 );
 
-const BOOSTED_ROW_MAX_PER_TYPE = 6; // teaser cap, not the full pool
 const FEED_TYPE_ORDER: ListingType[] = ["website", "app", "game"];
 const TYPE_LABELS: Record<ListingType, string> = {
   website: "Boosted sites",
@@ -24,19 +35,35 @@ const TYPE_LABELS: Record<ListingType, string> = {
 };
 
 export default function BoostedRow({
-  listings,
   onOpen,
   onOpenSeller,
 }: {
-  listings: Listing[];
   onOpen: (listing: Listing) => void;
   onOpenSeller: (ownerId: string | undefined, listing: Listing) => void;
 }) {
+  const [listings, setListings] = useState<Listing[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Fresh call every mount — deliberately not memoized/shared with the
+    // feed fetch. See file header: this must never ride on the feed's
+    // cached pool.
+    fetchBoostedAds()
+      .then((res) => {
+        if (!cancelled) setListings(res.listings || []);
+      })
+      .catch((err) => {
+        console.error("[BoostedRow] fetchBoostedAds failed", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const groups: Record<ListingType, Listing[]> = { website: [], app: [], game: [] };
   for (const listing of listings) {
-    if (!isBoosted(listing)) continue;
     const t = (listing.type || "website") as ListingType;
-    if (groups[t] && groups[t].length < BOOSTED_ROW_MAX_PER_TYPE) groups[t].push(listing);
+    if (groups[t]) groups[t].push(listing);
   }
 
   const nonEmptyTypes = FEED_TYPE_ORDER.filter((t) => groups[t].length);
