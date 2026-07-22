@@ -100,15 +100,6 @@ export interface Listing {
   globalBuildUrl?: string;
   additionalFiles?: ListingBuildFile[];
   notLive?: boolean;
-  // Legacy binary-upload fields — older listings created before the
-  // link-only change may still have these; no current form writes them
-  // anymore (see UpdateListingParams below, kept there for back-compat
-  // submission, and AppListingBody.tsx which still renders them if present).
-  apkUrl?: string;
-  apkStorageUrl?: string;
-  apkIpaFileName?: string;
-  apkFileName?: string;
-  notLiveBuildFiles?: { global?: ListingBuildFile[] };
   attachedRepo?: AttachedRepo;
   transferMethods?: string[];
   saves?: number;
@@ -135,10 +126,6 @@ export interface FeedResponse {
 }
 
 export interface SimilarResponse {
-  listings: Listing[];
-}
-
-export interface BoostedAdsResponse {
   listings: Listing[];
 }
 
@@ -236,23 +223,6 @@ export async function fetchSearchResults(params: {
 }): Promise<SearchResponse> {
   if (!params.q || !params.q.trim()) return { listings: [], query: "" };
   return callListingsApi<SearchResponse>("listing.search", params);
-}
-
-// action: 'listing.boosted-ads' — public, no auth required. Powers
-// BoostedRow. Deliberately a SEPARATE call from fetchFeed, not derived from
-// its results — sellers pay real money for this placement, and the feed
-// pool it would otherwise share is cached server-side for up to an hour
-// (see _getTypePool in _handler.js). This action reads Firestore's
-// `boostedAds` collection directly on every call with no cache layer, so a
-// boost purchased seconds ago — or a listing edited while boosted — shows
-// up on the very next load. Call this fresh whenever BoostedRow mounts or
-// the marketplace is revisited; don't cache/reuse its result the way feed
-// pages are reused.
-export async function fetchBoostedAds(params: {
-  type?: ListingType;
-  idToken?: string | null;
-} = {}): Promise<BoostedAdsResponse> {
-  return callListingsApi<BoostedAdsResponse>("listing.boosted-ads", params);
 }
 
 // Fire-and-forget analytics beacon — mirrors _mpTrackListing. Never throws
