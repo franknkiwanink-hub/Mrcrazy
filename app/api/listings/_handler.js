@@ -108,6 +108,62 @@
 //                              (search doesn't need the premium shimmer,
 //                              and a large match set shouldn't pay for it).
 //
+//   action: 'listing.verify-generate' { idToken, listingId }
+//                              → { ok: true, data: { domain, token, snippet } }
+//                              Owner only. Mints (or re-mints) a verification
+//                              token bound to BOTH this listing's own `url`
+//                              domain AND its listingId (HMAC over
+//                              `${domain}|${listingId}`, keyed with
+//                              VERIFICATION_SECRET / a fallback dev key).
+//                              Binding both means a token generated for one
+//                              listing can never be reused to "verify" a
+//                              second listing on the same domain, and a
+//                              token can't be replayed against a different
+//                              domain — see handleVerifyCheck. Stored on
+//                              listings/{listingId}.verification (pending
+//                              state) so a repeat call is idempotent (same
+//                              token) instead of silently invalidating an
+//                              in-flight verification.
+//
+//   action: 'listing.verify-check' { idToken, listingId }
+//                              → { ok: true, data: { verified, domain } }
+//                              Owner only. Server-side (Admin SDK, this
+//                              process — never the browser) fetches the
+//                              listing's own https://domain/ homepage HTML
+//                              and looks for
+//                              <meta name="siterifty-site-verification"
+//                                    content="{token}">
+//                              with the EXACT token minted for THIS
+//                              domain+listingId pair. On match, sets
+//                              listings/{listingId}.verified = true,
+//                              .verifiedDomain, .verifiedAt. Verification is
+//                              optional — see listing.create/update, which
+//                              never require it — this only flips the badge
+//                              shown on the listing (app/aitools's
+//                              VerifyOwnershipCard + the listing detail
+//                              page). No listing.create/update is ever
+//                              blocked by this being unset.
+//
+//   action: 'listing.link-check' { idToken, listingId, url }
+//                              → { ok: true, data: { status, reason? } }
+//                              Owner only, best-effort. For app/game
+//                              listings with only a store/marketplace link
+//                              (Play Store / App Store / itch.io/similar) —
+//                              no site to put a meta tag on, so this can
+//                              never be cryptographic proof of ownership.
+//                              Server fetches the store page HTML and looks
+//                              for the listing's own title as a loose
+//                              substring match. status is one of:
+//                              'link-checked' (page fetched OK and title
+//                              matched — "looks plausible", NOT the same
+//                              trust level as a domain-verified site),
+//                              'link-provided' (page unreachable, blocked,
+//                              or no match — the floor: we simply have the
+//                              link on file), or 'invalid-url' (not a
+//                              recognized store URL). Never sets
+//                              listing.verified — only a real domain check
+//                              can do that.
+//
 //   action: 'listing.daily-stats' { idToken, listingId, days }
 //                              → { ok: true, data: { days: [{ date, impressionCount, viewCount }, ...] } }
 //                              Owner only. Per-day impression/view history for
@@ -144,6 +200,7 @@
 
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue, FieldPath, Timestamp } from 'firebase-admin/firestore';
+import crypto from 'node:crypto';
 import { LIMITS } from '../_lib/limits.js';
 import { supabaseCreateSignedUrl, findAccountById } from '../_lib/storage.js';
 
@@ -271,6 +328,9 @@ export default async function handler(req, res) {
       case 'listing.impression': return ok(res, await handleImpression(req.body, idToken));
       case 'listing.view':   return ok(res, await handleView(req.body, idToken));
       case 'listing.premium-sellers': return ok(res, await handlePremiumSellers(req.body, idToken));
+      case 'listing.verify-generate': return ok(res, await handleVerifyGenerate(req.body, idToken));
+      case 'listing.verify-check': return ok(res, await handleVerifyCheck(req.body, idToken));
+      case 'listing.link-check': return ok(res, await handleLinkCheck(req.body, idToken));
       default:
         return fail(res, new ApiError('Unknown action', 'UNKNOWN_ACTION', 400));
     }
@@ -352,13 +412,30 @@ function buildSettings(settings, fallbackCategory) {
 
 function buildPlatforms(platforms) {
   if (!platforms || typeof platforms !== 'object') return null;
-  return {
+  const out = {
     selected:   Array.isArray(platforms.selected) ? platforms.selected.map(String) : [],
     iosUrl:     platforms.iosUrl     ? String(platforms.iosUrl).slice(0, 500)     : null,
     androidUrl: platforms.androidUrl ? String(platforms.androidUrl).slice(0, 500) : null,
     webUrl:     platforms.webUrl     ? String(platforms.webUrl).slice(0, 500)     : null,
     previewUrl: platforms.previewUrl ? String(platforms.previewUrl).slice(0, 500) : null,
   };
+  if (platforms.notLive && typeof platforms.notLive === 'object') {
+    out.notLive = {
+      ios:     Boolean(platforms.notLive.ios),
+      android: Boolean(platforms.notLive.android),
+      web:     Boolean(platforms.notLive.web),
+    };
+  }
+  // "Not live" builds: iOS/Android are always a URL to wherever the seller
+  // already hosts the .ipa/.apk — never a binary Siterifty stores. Web is
+  // the one platform where an actual uploaded build (html/css/js, possibly
+  // zipped) still makes sense — see AppListingForm.tsx's zipIfMultiple.
+  if (platforms.iosBuildUrl)     out.iosBuildUrl     = String(platforms.iosBuildUrl).slice(0, 1000);
+  if (platforms.androidBuildUrl) out.androidBuildUrl = String(platforms.androidBuildUrl).slice(0, 1000);
+  if (Array.isArray(platforms.webBuildFiles)) {
+    out.webBuildFiles = buildAdditionalFiles(platforms.webBuildFiles) || [];
+  }
+  return out;
 }
 
 // Each additional file the client uploaded via /api/storage comes back as
@@ -501,7 +578,7 @@ async function handleCreate(body, idToken) {
     financials, tech, images, appIcon, category, gameFile,
     settings, transferMethods, gameType, videoUrl, previewUrl,
     platforms, apkUrl, apkStorageUrl, apkIpaFileName,
-    additionalFiles, notLive, notLiveBuildFiles,
+    additionalFiles, notLive, notLiveBuildFiles, globalBuildUrl,
   } = body;
 
   if (!LISTING_TYPES.includes(type)) {
@@ -564,6 +641,13 @@ async function handleCreate(body, idToken) {
     const notLiveObj = buildNotLive(notLive);
     if (notLiveObj) listingDoc.notLive = notLiveObj;
 
+    // Global "not published anywhere yet" build is a link now, never a
+    // stored binary — see AppListingForm.tsx's globalBuildUrl. Old
+    // notLiveBuildFiles (file-based) is still accepted for any legacy
+    // caller so existing drafts/integrations don't hard-break, but no
+    // current form sends it anymore.
+    if (globalBuildUrl) listingDoc.globalBuildUrl = String(globalBuildUrl).slice(0, 1000);
+
     const notLiveBuildFilesObj = buildNotLiveBuildFiles(notLiveBuildFiles);
     if (notLiveBuildFilesObj) listingDoc.notLiveBuildFiles = notLiveBuildFilesObj;
 
@@ -605,7 +689,7 @@ async function handleUpdate(body, idToken) {
     financials, tech, settings, images, appIcon, category,
     gameFile, videoUrl, previewUrl, platforms, transferMethods,
     apkUrl, apkStorageUrl, apkIpaFileName,
-    additionalFiles, notLive, notLiveBuildFiles,
+    additionalFiles, notLive, notLiveBuildFiles, globalBuildUrl,
   } = body;
 
   if (!listingId) throw new ApiError('Missing listingId', 'MISSING_LISTING_ID', 400);
@@ -652,6 +736,9 @@ async function handleUpdate(body, idToken) {
   }
   if (notLiveBuildFiles !== undefined) {
     update.notLiveBuildFiles = buildNotLiveBuildFiles(notLiveBuildFiles) || {};
+  }
+  if (globalBuildUrl !== undefined) {
+    update.globalBuildUrl = globalBuildUrl ? String(globalBuildUrl).slice(0, 1000) : null;
   }
 
   const fin = buildFinancials(financials);
@@ -738,6 +825,258 @@ async function handleDelete(body, idToken) {
   });
 
   return {};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Domain ownership verification — listing.verify-generate / verify-check.
+//
+// Replaces the old /aitools "Verify site ownership" card, which called an
+// external, Siterifty-unowned domain (dlsvalue.site) to both mint AND check
+// tokens — meaning Siterifty never actually controlled or trusted its own
+// verification result, and (worse) it was never even wired into the listing
+// flow at all, so nothing stopped anyone from listing a URL they don't own.
+//
+// This version runs entirely on our own infra (Admin SDK + this same
+// serverless function, on whatever origin this app is actually deployed to
+// — nothing hardcoded to a specific domain) and is the single source of
+// truth for both minting and checking.
+//
+// Token derivation: HMAC-SHA256 over `${domain}|${listingId}`, truncated to
+// 32 hex chars for a manageable snippet. Binding the listingId into the HMAC
+// input (not just the domain) is what stops the exact abuse case flagged:
+// someone who owns siteA.com verifies listing #1 for siteA.com, then tries
+// to create listing #2 (a duplicate/decoy) and claims it's "the same
+// verified siteA.com" by copy-pasting the same tag — it won't match, because
+// listing #2's required token is a different HMAC output for a different
+// listingId, even though the domain string is identical. Reusing one
+// listing's tag on a different domain fails for the same reason in the
+// other direction (domain is also part of the HMAC input).
+// ─────────────────────────────────────────────────────────────────────────────
+const VERIFICATION_META_NAME = 'siterifty-site-verification';
+
+function _verificationSecret() {
+  // Falls back to a fixed dev-only string so local/dev environments without
+  // the env var configured still work end-to-end — but that fallback value
+  // must never be relied on in production. If VERIFICATION_SECRET isn't set
+  // in the deployed environment, warn loudly so it gets fixed rather than
+  // silently running on a guessable key.
+  const secret = process.env.VERIFICATION_SECRET;
+  if (!secret) {
+    console.warn('[listings] VERIFICATION_SECRET is not set — falling back to an insecure dev-only key. Set this env var in production.');
+    return 'siterifty-dev-only-insecure-verification-key';
+  }
+  return secret;
+}
+
+function _domainFromUrl(url) {
+  try {
+    const withScheme = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    return new URL(withScheme).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function _makeVerificationToken(domain, listingId) {
+  return crypto
+    .createHmac('sha256', _verificationSecret())
+    .update(`${domain}|${listingId}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+function _verificationSnippet(token) {
+  return `<meta name="${VERIFICATION_META_NAME}" content="${token}" />`;
+}
+
+async function _loadOwnedListing(listingId, idToken) {
+  if (!listingId) throw new ApiError('Missing listingId', 'MISSING_LISTING_ID', 400);
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  const db = getAdminDb();
+  const ref = db.collection('listings').doc(listingId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new ApiError('Listing not found', 'LISTING_NOT_FOUND', 404);
+  const data = snap.data();
+  if (data.ownerId !== uid) {
+    throw new ApiError('You can only verify your own listings', 'FORBIDDEN', 403);
+  }
+  return { db, ref, data };
+}
+
+// listing.verify-generate — mints (or idempotently re-returns) a
+// domain+listingId-bound token for the listing's own `url` field. Website
+// listings use `url` directly; app/game listings with a "web" platform use
+// platforms.webUrl as their verifiable domain instead.
+async function handleVerifyGenerate(body, idToken) {
+  const { listingId } = body;
+  const { ref, data } = await _loadOwnedListing(listingId, idToken);
+
+  const rawUrl = data.url || data.platforms?.webUrl;
+  const domain = rawUrl ? _domainFromUrl(rawUrl) : null;
+  if (!domain) {
+    throw new ApiError('This listing has no website URL to verify.', 'NO_DOMAIN', 400);
+  }
+
+  const token = _makeVerificationToken(domain, listingId);
+
+  await ref.set({
+    verification: {
+      domain,
+      token,
+      generatedAt: FieldValue.serverTimestamp(),
+    },
+  }, { merge: true });
+
+  return { domain, token, snippet: _verificationSnippet(token) };
+}
+
+// listing.verify-check — server-side fetch (never trusts a client-reported
+// "yes I pasted it") of the domain's own homepage, looking for the exact
+// meta tag minted for this domain+listingId pair.
+async function handleVerifyCheck(body, idToken) {
+  const { listingId } = body;
+  const { ref, data } = await _loadOwnedListing(listingId, idToken);
+
+  const rawUrl = data.url || data.platforms?.webUrl;
+  const domain = rawUrl ? _domainFromUrl(rawUrl) : null;
+  if (!domain) {
+    throw new ApiError('This listing has no website URL to verify.', 'NO_DOMAIN', 400);
+  }
+
+  // Must match the domain the token was minted for — if the listing's URL
+  // changed since verify-generate was called, the old token is for a
+  // different domain and can't be used to verify the new one.
+  const pending = data.verification;
+  if (!pending || pending.domain !== domain) {
+    throw new ApiError('Generate a new verification snippet for this domain first.', 'NOT_GENERATED', 400);
+  }
+  const expectedToken = pending.token;
+
+  let html = '';
+  try {
+    const res = await fetch(`https://${domain}/`, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(8000),
+      headers: { 'User-Agent': 'SiteriftyVerificationBot/1.0' },
+    });
+    if (!res.ok) {
+      throw new ApiError(`Could not fetch https://${domain}/ (HTTP ${res.status}). Make sure the site is live.`, 'FETCH_FAILED', 400);
+    }
+    html = await res.text();
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(`Could not reach https://${domain}/ — check the site is live and try again.`, 'FETCH_FAILED', 400);
+  }
+
+  // Look for our own meta tag with this exact token — order/quote-style/
+  // attribute-order tolerant, but the token itself must match exactly.
+  const tagRegex = new RegExp(
+    `<meta[^>]+name=["']${VERIFICATION_META_NAME}["'][^>]+content=["']${expectedToken}["']`,
+    'i'
+  );
+  const altTagRegex = new RegExp(
+    `<meta[^>]+content=["']${expectedToken}["'][^>]+name=["']${VERIFICATION_META_NAME}["']`,
+    'i'
+  );
+  const verified = tagRegex.test(html) || altTagRegex.test(html);
+
+  if (verified) {
+    await ref.set({
+      verified: true,
+      verifiedDomain: domain,
+      verifiedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+
+  return { verified, domain };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// listing.link-check — best-effort plausibility check for app/game listings
+// whose only proof of existence is a store/marketplace link (Play Store,
+// App Store, itch.io, etc). There is no meta-tag mechanism on a store
+// listing page, so this can NEVER be treated as ownership proof the way
+// verify-check is — it only answers "does this link lead somewhere real
+// that plausibly matches this listing's title?" Three possible outcomes:
+//   'link-checked'  — page fetched fine and the listing's title appears in
+//                      it (a loose, case-insensitive substring match).
+//   'link-provided' — the floor. Page didn't load, blocked our fetch (many
+//                      stores rate-limit/challenge non-browser requests),
+//                      or the title didn't match. We still keep the link on
+//                      file; it's just unverified beyond "user gave us a
+//                      link". This is also the ONLY outcome for any link
+//                      that isn't a recognized store domain.
+//   'invalid-url'   — not a well-formed URL at all.
+// Never touches listing.verified — that flag is reserved for a real
+// cryptographic domain check via verify-check.
+// ─────────────────────────────────────────────────────────────────────────────
+const STORE_LINK_HOSTS = [
+  'play.google.com',
+  'apps.apple.com',
+  'itunes.apple.com',
+  'itch.io',
+  'store.steampowered.com',
+  'microsoft.com',
+];
+
+function _isStoreLink(url) {
+  const domain = _domainFromUrl(url);
+  if (!domain) return false;
+  return STORE_LINK_HOSTS.some(h => domain === h || domain.endsWith(`.${h}`));
+}
+
+async function handleLinkCheck(body, idToken) {
+  const { listingId, url } = body;
+  const { ref, data } = await _loadOwnedListing(listingId, idToken);
+
+  if (!url || typeof url !== 'string') {
+    throw new ApiError('Missing url to check', 'MISSING_URL', 400);
+  }
+  const domain = _domainFromUrl(url);
+  if (!domain) {
+    return { status: 'invalid-url' };
+  }
+
+  let status = 'link-provided';
+  let reason;
+
+  if (_isStoreLink(url)) {
+    try {
+      const withScheme = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+      const res = await fetch(withScheme, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(8000),
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SiteriftyLinkCheck/1.0)' },
+      });
+      if (res.ok) {
+        const html = await res.text();
+        const title = (data.title || '').trim().toLowerCase();
+        if (title && html.toLowerCase().includes(title)) {
+          status = 'link-checked';
+        } else {
+          reason = 'Page loaded, but couldn\u2019t find this listing\u2019s title on it — link kept on file as unverified.';
+        }
+      } else {
+        reason = `Store page returned HTTP ${res.status} — link kept on file as unverified.`;
+      }
+    } catch {
+      reason = 'Could not fetch the store page (stores often block automated requests) — link kept on file as unverified.';
+    }
+  } else {
+    reason = 'Not a recognized store link — kept on file as unverified.';
+  }
+
+  await ref.set({
+    linkCheck: {
+      url: String(url).slice(0, 500),
+      status,
+      checkedAt: FieldValue.serverTimestamp(),
+    },
+  }, { merge: true });
+
+  return { status, reason };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
