@@ -86,22 +86,36 @@ export interface Listing {
     webUrl?: string | null;
     previewUrl?: string | null;
     notLive?: { ios?: boolean; android?: boolean; web?: boolean };
-    iosBuildFiles?: ListingBuildFile[] | null;
-    androidBuildFiles?: ListingBuildFile[] | null;
+    // iOS/Android "not live" builds are always an externally-hosted link
+    // now (Drive/Dropbox/etc) — Siterifty never stores APK/IPA binaries.
+    // Only "web" not-live still uploads a file (html/css/js, zipped into
+    // one archive if there was more than one — see zipIfMultiple in
+    // AppListingForm.tsx), since that's small and can be rendered live.
+    iosBuildUrl?: string | null;
+    androidBuildUrl?: string | null;
     webBuildFiles?: ListingBuildFile[] | null;
   };
-  apkUrl?: string;
-  apkStorageUrl?: string;
-  apkIpaFileName?: string;
-  apkFileName?: string;
+  // Link to an externally-hosted build for an app that isn't published
+  // anywhere yet (globalNotLive) — never an uploaded binary.
+  globalBuildUrl?: string;
   additionalFiles?: ListingBuildFile[];
   notLive?: boolean;
-  notLiveBuildFiles?: { global?: ListingBuildFile[] };
   attachedRepo?: AttachedRepo;
   transferMethods?: string[];
   saves?: number;
   boostedUntil?: number | { toMillis?: () => number; seconds?: number };
   createdAt?: unknown;
+  // Domain ownership verification (see /api/listings listing.verify-*).
+  // Optional — publishing never requires this; it only controls whether a
+  // green "Verified" badge is shown on the listing.
+  verified?: boolean;
+  verifiedDomain?: string;
+  verifiedAt?: unknown;
+  verification?: { domain: string; token: string };
+  // Store-link plausibility check (see listing.link-check) for app/game
+  // listings whose only proof is a Play Store/App Store/itch.io link — NOT
+  // ownership proof, just "we checked the link resolves and looks related".
+  linkCheck?: { url: string; status: "link-checked" | "link-provided"; checkedAt?: unknown };
 }
 
 export interface FeedResponse {
@@ -227,6 +241,15 @@ export async function trackListing(action: "listing.impression" | "listing.view"
   }
 }
 
+// action: 'listing.mine' — auth required, caller's own listings only.
+// Minimal wrapper (Seller Dashboard calls the raw action directly via its
+// own hook — see lib/useSellerDashboard.ts — this is for simpler callers
+// like /aitools's verification card that just need "my listings", no
+// dashboard-specific shaping).
+export async function fetchMyListings(params: { idToken: string; status?: string }): Promise<{ listings: Listing[] }> {
+  return callListingsApi<{ listings: Listing[] }>("listing.mine", params);
+}
+
 // action: 'listing.create' — auth required. Mirrors the payload shape
 // built by the old lfm/gfm/afm submit handlers (listing-form.js,
 // listing-form-game.js, onboarding.js's app form) — see _handler.js's
@@ -257,16 +280,13 @@ export interface CreateListingParams {
   videoUrl?: string;
   previewUrl?: string;
   platforms?: Listing["platforms"];
-  apkUrl?: string;
-  apkStorageUrl?: string;
-  apkIpaFileName?: string;
   additionalFiles?: ListingBuildFile[];
-  // Global "app not published anywhere yet" flag + its build upload —
-  // see buildNotLive/buildNotLiveBuildFiles in _handler.js. Distinct from
-  // the per-platform notLive nested inside `platforms` above. Used by
-  // AppListingForm.tsx.
+  // Global "app not published anywhere yet" flag + its build link — see
+  // buildNotLive in _handler.js for the flag, globalBuildUrl for the link.
+  // Distinct from the per-platform notLive nested inside `platforms` above.
+  // Used by AppListingForm.tsx.
   notLive?: { ios?: boolean; android?: boolean; web?: boolean; global?: boolean };
-  notLiveBuildFiles?: { global?: ListingBuildFile[] };
+  globalBuildUrl?: string;
   attachedRepo?: AttachedRepo | null;
 }
 
@@ -301,13 +321,51 @@ export interface UpdateListingParams {
   apkUrl?: string;
   apkStorageUrl?: string;
   apkIpaFileName?: string;
+  apkFileName?: string;
+  // Legacy — older listings only, no current form writes this. Global
+  // not-live builds are a link (globalBuildUrl) now, not an uploaded file.
+  notLiveBuildFiles?: { global?: ListingBuildFile[] };
   additionalFiles?: ListingBuildFile[];
   notLive?: boolean;
-  notLiveBuildFiles?: { global?: ListingBuildFile[] };
+  globalBuildUrl?: string;
 }
 
 export async function updateListing(params: UpdateListingParams): Promise<Record<string, never>> {
   return callListingsApi<Record<string, never>>("listing.update", params);
+}
+
+// ── Domain ownership verification (action: 'listing.verify-generate' /
+// 'listing.verify-check') — see _handler.js for the full server-side
+// contract. Both owner-only; listingId must belong to the caller. Optional
+// step — a listing publishes and stays fully usable whether or not this is
+// ever run; it only controls the green "Verified" badge.
+export interface VerifyGenerateResponse {
+  domain: string;
+  token: string;
+  snippet: string;
+}
+export async function generateVerification(params: { idToken: string; listingId: string }): Promise<VerifyGenerateResponse> {
+  return callListingsApi<VerifyGenerateResponse>("listing.verify-generate", params);
+}
+
+export interface VerifyCheckResponse {
+  verified: boolean;
+  domain: string;
+}
+export async function checkVerification(params: { idToken: string; listingId: string }): Promise<VerifyCheckResponse> {
+  return callListingsApi<VerifyCheckResponse>("listing.verify-check", params);
+}
+
+// ── Store-link plausibility check (action: 'listing.link-check') — for
+// app/game listings whose only proof is a Play Store/App Store/itch.io
+// link. Best-effort, never a substitute for real domain verification — see
+// _handler.js's handleLinkCheck for exactly what each status means.
+export interface LinkCheckResponse {
+  status: "link-checked" | "link-provided" | "invalid-url";
+  reason?: string;
+}
+export async function checkStoreLink(params: { idToken: string; listingId: string; url: string }): Promise<LinkCheckResponse> {
+  return callListingsApi<LinkCheckResponse>("listing.link-check", params);
 }
 
 // $ formatting for site cards — full number, comma-separated.
