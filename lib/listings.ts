@@ -51,6 +51,14 @@ export interface AttachedRepo {
   language?: string;
 }
 
+// Per-platform install/engagement stats for store-distributed app & game
+// listings (iOS/Android only — see PLATFORM_META.isStore). Required
+// client-side whenever that platform is marked Live.
+export interface PlatformStats {
+  installs?: number;
+  mau?: number;
+}
+
 export interface Listing {
   id: string;
   type: ListingType;
@@ -94,6 +102,10 @@ export interface Listing {
     iosBuildUrl?: string | null;
     androidBuildUrl?: string | null;
     webBuildFiles?: ListingBuildFile[] | null;
+    // Installs + Monthly Active Users per store-distributed platform
+    // (iOS/Android only — see PlatformStats/PLATFORM_META.isStore).
+    // Required client-side whenever that platform is marked Live.
+    stats?: { ios?: PlatformStats; android?: PlatformStats };
   };
   // Link to an externally-hosted build for an app that isn't published
   // anywhere yet (globalNotLive) — never an uploaded binary.
