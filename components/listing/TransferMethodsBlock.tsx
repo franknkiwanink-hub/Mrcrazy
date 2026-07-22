@@ -24,18 +24,50 @@ const ICON_PATHS: Record<string, string> = {
   launcher: '<path d="M22.54 6.42a2.78 2.78 0 00-1.95-1.95C18.88 4 12 4 12 4s-6.88 0-8.59.47A2.78 2.78 0 001.46 6.42 29 29 0 001 12a29 29 0 00.46 5.58 2.78 2.78 0 001.95 1.95C5.12 20 12 20 12 20s6.88 0 8.59-.47a2.78 2.78 0 001.95-1.95A29 29 0 0023 12a29 29 0 00-.46-5.58z"/><polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02"/>',
   browser_login: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 010 20M2 12h20"/>',
   html_css_js: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  // Current values without a legacy equivalent above — reuse the closest
+  // existing icon shape rather than adding new artwork.
+  store_account_handover: '<path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  source_files: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  source_code_handover: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  site_archive: '<path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+  database_export: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>',
+  repo_transfer: '<path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/>',
+  site_builder_transfer: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>',
+  ftp_credentials: '<path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>',
+  build_transfer: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/>',
+  console_store_code: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  steam_key_transfer: '<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
+  other: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
 };
 
 const LABELS: Record<string, string> = {
+  // Current values (see components/listing/shared/transferMethods.ts)
+  escrow_migration: "Escrow-Protected Migration",
+  store_account_handover: "Store Account Handover",
+  source_files: "Source Files / Full Handover",
+  source_code_handover: "Source Code Handover",
   domain_push: "Domain Push",
-  zip_download: "Full Site ZIP",
-  cpanel: "cPanel Migration",
-  github: "GitHub / GitLab Transfer",
+  site_archive: "Full Site Archive",
   hosting_handover: "Hosting Handover",
+  cpanel: "cPanel Access",
+  database_export: "Database Export (.sql)",
+  repo_transfer: "GitHub / GitLab Transfer",
+  site_builder_transfer: "Site Builder Transfer",
+  ftp_credentials: "FTP/SFTP Credentials",
+  build_transfer: "Signed Build Transfer",
+  console_store_code: "Console Store Code",
+  steam_key_transfer: "Steam Key Transfer",
+  account_handover: "Player Account Handover",
+  direct_download: "Direct Build Transfer",
+  other: "Other (confirmed in chat)",
+
+  // Legacy values — kept so older listings created before this label set
+  // was introduced still render a readable pill instead of a raw key.
+  zip_download: "Full Site ZIP",
+  github: "GitHub / GitLab Transfer",
   db_dump: "Database Dump (.sql)",
   ftp: "FTP Credentials",
   site_builder: "Site Builder Transfer",
-  escrow_migration: "Escrow Migration",
   license_key: "License Key",
   apk_ipa: "APK / IPA Download",
   app_store_connect: "App Store Connect",
@@ -44,14 +76,13 @@ const LABELS: Record<string, string> = {
   qr_code: "QR Code",
   api_key: "API Key Delivery",
   steam_key: "Steam Key",
-  direct_download: "Direct Download",
-  account_handover: "Account Handover",
   gift_code: "Gift Code",
   console_code: "Console Store Code",
   google_play_games: "Google Play Games",
   launcher: "Launcher Transfer",
   browser_login: "Browser Login",
-  html_css_js: "HTML/CSS/JS Files ⚡ Fastest",
+  source_code: "Source Code Handover",
+  html_css_js: "HTML/CSS/JS Files",
 };
 
 // Ports _buildTransferMethodsHtml exactly — a pill row of the methods a
