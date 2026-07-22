@@ -10761,6 +10761,88 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
      .tdm-btn-login-submit { background: #4f46e5; color: #fff; margin-top: 0.5rem; }
      .tdm-btn-login-submit:hover { background: #4338ca; }
 
+     /* ── seller's-choice toggle (e.g. Source Code Repository) ── */
+     .tdm-type-choice { display: flex; gap: 0.5rem; margin-bottom: 1.1rem; }
+     .tdm-type-choice-btn {
+       flex: 1; padding: 0.55rem 0.7rem; border-radius: 0.6rem;
+       border: 1px solid #2a2a2a; background: #0a0a0a; color: #888;
+       font-size: 0.78rem; font-weight: 600; cursor: pointer; font-family: inherit;
+       transition: border-color 0.15s, color 0.15s, background 0.15s;
+     }
+     .tdm-type-choice-btn:hover { border-color: #3a3a3a; color: #bbb; }
+     .tdm-type-choice-btn.active {
+       border-color: var(--tdm-accent, #a3e635); color: var(--tdm-accent, #a3e635);
+       background: color-mix(in srgb, var(--tdm-accent, #a3e635) 10%, transparent);
+     }
+
+     /* ── dropzone icon (replaces bare text-only dropzone) ── */
+     .tdm-dropzone-icon { width: 1.6rem; height: 1.6rem; color: #555; margin: 0 auto 0.6rem; display: block; }
+     .tdm-dropzone:hover .tdm-dropzone-icon, .tdm-dropzone.tdm-dragover .tdm-dropzone-icon { color: var(--tdm-accent, #aaa); }
+
+     /* ── file_upload: freeform "how it was built" panel ── */
+     .tdm-buildinfo-section {
+       margin-top: 1.1rem; margin-bottom: 0.4rem; padding: 1rem 1.1rem;
+       background: #0a0a0a; border: 1px solid #232323; border-radius: 0.9rem;
+     }
+     .tdm-buildinfo-head { display: flex; align-items: flex-start; gap: 0.7rem; margin-bottom: 0.7rem; }
+     .tdm-buildinfo-head svg { flex-shrink: 0; color: var(--tdm-accent, #60a5fa); margin-top: 0.1rem; }
+     .tdm-buildinfo-title { font-size: 0.85rem; font-weight: 700; color: #eee; }
+     .tdm-buildinfo-sub { font-size: 0.74rem; color: #888; line-height: 1.5; margin-top: 0.2rem; }
+     .tdm-buildinfo-textarea {
+       width: 100%; background: #111; border: 1px solid #2a2a2a; color: #ddd;
+       padding: 0.7rem 0.8rem; border-radius: 0.6rem; font-family: inherit; font-size: 0.82rem;
+       line-height: 1.5; resize: vertical; min-height: 90px;
+     }
+     .tdm-buildinfo-textarea:focus { outline: none; border-color: var(--tdm-accent, #60a5fa); }
+     .tdm-buildinfo-textarea::placeholder { color: #4a4a4a; }
+
+     /* ── secure_secret panel: warning banner, mode tabs, labeled fields ── */
+     .tdm-secret-warning {
+       display: flex; align-items: flex-start; gap: 0.7rem;
+       background: color-mix(in srgb, #e879f9 8%, transparent);
+       border: 1px solid color-mix(in srgb, #e879f9 25%, transparent);
+       border-radius: 0.75rem; padding: 0.85rem 1rem; margin-bottom: 1.1rem;
+     }
+     .tdm-secret-warning svg { flex-shrink: 0; color: #e879f9; margin-top: 0.15rem; }
+     .tdm-secret-warning p { font-size: 0.78rem; color: #d9b8de; line-height: 1.55; margin: 0; }
+     .tdm-secret-warning p strong { color: #f0d3f3; font-weight: 700; }
+
+     .tdm-secret-tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+     .tdm-secret-tab {
+       flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+       padding: 0.55rem 0.6rem; border-radius: 0.6rem; border: 1px solid #2a2a2a;
+       background: #0a0a0a; color: #888; font-size: 0.78rem; font-weight: 600;
+       cursor: pointer; font-family: inherit; transition: border-color 0.15s, color 0.15s;
+     }
+     .tdm-secret-tab:hover { color: #bbb; }
+     .tdm-secret-tab.active { border-color: var(--tdm-accent, #e879f9); color: var(--tdm-accent, #e879f9); }
+
+     .tdm-secret-fields { display: flex; flex-direction: column; gap: 0.85rem; margin-bottom: 0.3rem; }
+     .tdm-field label {
+       display: flex; align-items: center; gap: 0.4rem; font-size: 0.76rem; font-weight: 600;
+       color: #999; margin-bottom: 0.35rem;
+     }
+     .tdm-field label svg { flex-shrink: 0; color: #666; }
+     .tdm-field-optional { color: #555; font-weight: 400; }
+     .tdm-field input[type="text"],
+     .tdm-field input[type="password"],
+     .tdm-field input[type="email"] { margin-bottom: 0; }
+
+     /* ── registry_transfer / account_ownership: numbered recipient steps ── */
+     .tdm-recipient-steps { display: flex; flex-direction: column; gap: 0.9rem; margin-bottom: 1.2rem; }
+     .tdm-recipient-step { display: flex; align-items: flex-start; gap: 0.75rem; }
+     .tdm-recipient-step-num {
+       flex-shrink: 0; width: 1.5rem; height: 1.5rem; border-radius: 50%;
+       background: color-mix(in srgb, var(--tdm-accent, #a3e635) 16%, transparent);
+       color: var(--tdm-accent, #a3e635); border: 1px solid color-mix(in srgb, var(--tdm-accent, #a3e635) 40%, transparent);
+       display: flex; align-items: center; justify-content: center;
+       font-size: 0.72rem; font-weight: 700;
+     }
+     .tdm-recipient-step-title { font-size: 0.82rem; font-weight: 700; color: #eee; margin-bottom: 0.3rem; }
+     .tdm-recipient-step-sub { font-size: 0.76rem; color: #888; line-height: 1.5; }
+     .tdm-recipient-step .tdm-buyer-email { margin-bottom: 0; margin-top: 0.4rem; }
+
+
      /* floating cta */
      .tdm-floating-cta {
        position: absolute; bottom: 1.25rem; left: 50%; transform: translateX(-50%);
