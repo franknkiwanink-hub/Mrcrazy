@@ -4,7 +4,7 @@ import { useState } from "react";
 import { doc, updateDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type { SettingsState } from "@/lib/useSettingsState";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
 import { useThemeModal } from "@/components/theme/ThemeModalProvider";
 import { useCurrency } from "@/lib/CurrencyContext";
 import { SUPPORTED_CURRENCIES, CURRENCY_LABELS } from "@/lib/currencies";
@@ -30,7 +30,7 @@ export default function AppearancePanel({
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
   const { openThemePicker } = useThemeModal();
   const { currency, setCurrency } = useCurrency();
 
@@ -56,9 +56,9 @@ export default function AppearancePanel({
     if (!user) return;
     try {
       await updateDoc(doc(db, "users", user.uid), { fontSize: size });
-      toast(`Font size set to ${size}.`);
+      toast(`Font size set to ${size}.`, "success");
     } catch {
-      toast("Save failed.");
+      toast("Save failed.", "error");
     }
   }
 
@@ -85,7 +85,7 @@ export default function AppearancePanel({
   async function handleSave() {
     const user = auth.currentUser;
     if (!user) {
-      toast("Not signed in.");
+      toast("Not signed in.", "error");
       return;
     }
     setSaving(true);
@@ -94,7 +94,7 @@ export default function AppearancePanel({
       setState((prev) => ({ ...prev, fontSize, compactMode }));
       handleCompactModeChange(compactMode);
     } catch (err: any) {
-      toast(`Save failed: ${err.message}`);
+      toast(`Save failed: ${err.message}`, "error");
     } finally {
       setSaving(false);
     }
@@ -143,7 +143,7 @@ export default function AppearancePanel({
           value={currency}
           onChange={(e) => {
             setCurrency(e.target.value as (typeof SUPPORTED_CURRENCIES)[number]);
-            toast(`Prices now shown in ${e.target.value}.`);
+            toast(`Prices now shown in ${e.target.value}.`, "info");
           }}
         >
           {SUPPORTED_CURRENCIES.map((code) => (
@@ -217,7 +217,6 @@ export default function AppearancePanel({
         {saving ? "Saving…" : "Save Appearance"}
       </button>
 
-      <ToastHost />
     </>
   );
 }
