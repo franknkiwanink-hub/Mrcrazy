@@ -10,12 +10,16 @@ import AttachedRepoBlock from "./AttachedRepoBlock";
 import DealCtaBar from "@/components/deal/DealCtaBar";
 import { useCurrency } from "@/lib/CurrencyContext";
 import ShareButton from "@/components/listing/ShareButton";
+import VerifiedBadge from "@/components/marketplace/VerifiedBadge";
 import { listingShareUrl } from "@/lib/share";
 
 const ACCENT = "#a78bfa"; // app accent color, matches tc for type==='app'
 
 function collectBuildFiles(listing: Listing): ListingBuildFile[] {
   const files: ListingBuildFile[] = [];
+  // Legacy binary uploads (older listings created before the link-only
+  // change) — still rendered for listings that already have them, but no
+  // current form writes these fields anymore.
   if (listing.apkUrl || listing.apkStorageUrl) {
     files.push({
       filename: listing.apkIpaFileName || listing.apkFileName || "app-build.apk",
@@ -30,6 +34,24 @@ function collectBuildFiles(listing: Listing): ListingBuildFile[] {
   }
   if (listing.notLive === true && Array.isArray(listing.notLiveBuildFiles?.global)) {
     for (const f of listing.notLiveBuildFiles!.global!) {
+      if (f && (f.url || f.storagePath)) files.push(f);
+    }
+  }
+  // Current, link-first "not live" builds. iOS/Android are always an
+  // externally-hosted link the seller provided (Drive/Dropbox/etc) — never
+  // a file Siterifty stores — so these render as plain external links
+  // rather than a signed-storage download.
+  if (listing.globalBuildUrl) {
+    files.push({ filename: "Build (external link)", url: listing.globalBuildUrl, storagePath: null });
+  }
+  if (listing.platforms?.iosBuildUrl) {
+    files.push({ filename: "iOS build (external link)", url: listing.platforms.iosBuildUrl, storagePath: null });
+  }
+  if (listing.platforms?.androidBuildUrl) {
+    files.push({ filename: "Android build (external link)", url: listing.platforms.androidBuildUrl, storagePath: null });
+  }
+  if (Array.isArray(listing.platforms?.webBuildFiles)) {
+    for (const f of listing.platforms!.webBuildFiles!) {
       if (f && (f.url || f.storagePath)) files.push(f);
     }
   }
@@ -187,7 +209,10 @@ export default function AppListingBody({ listing }: { listing: Listing }) {
               </div>
             )}
             <div className="modal-hero-title-block">
-              <h2 className="modal-hero-title">{title}</h2>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <h2 className="modal-hero-title">{title}</h2>
+                <VerifiedBadge listing={listing} />
+              </div>
               <div className="modal-hero-pills">
                 {selPlatforms.map((p) => (
                   <span key={p} className="modal-hero-pill">
