@@ -43,6 +43,10 @@ import { createListing, checkStoreLink, type ListingBuildFile } from "@/lib/list
 import { aiStudioCall, aiPlanCap } from "@/lib/aiStudio";
 import { useAiLengthPicker } from "@/lib/useAiLengthPicker";
 import { useLimits } from "@/lib/useLimits";
+import Select from "./shared/Select";
+import TransferMethodPicker from "./shared/TransferMethodPicker";
+import ProofUploader, { type ProofImage } from "./shared/ProofUploader";
+import { APP_TRANSFER_METHODS } from "./shared/transferMethods";
 
 const ACCENT = "#fbbf24";
 const DRAFT_KEY = "srf_draft_app";
@@ -60,13 +64,6 @@ const CATEGORY_OPTIONS = ["Productivity", "Social", "Finance", "Health & Fitness
 const AGE_OPTIONS = ["< 3 months", "3–5 months", "6–11 months", "1+ year", "2+ years", "3+ years", "5+ years", "10+ years"];
 const STRUCTURE_OPTIONS = ["Sole Proprietorship", "LLC", "Corporation", "Partnership", "Other"];
 const MONETIZATION_OPTIONS = ["Ads", "Subscription", "One-time purchase", "In-app purchases", "Freemium", "Other"];
-
-const TRANSFER_METHODS: { value: string; label: string; sub?: string; featured?: boolean }[] = [
-  { value: "account_handover", label: "Account Handover (App Store / Play Console access)", featured: true },
-  { value: "source_code", label: "Source Code Handover" },
-  { value: "direct_download", label: "Direct Build Transfer (APK/IPA)" },
-  { value: "other", label: "Other (discuss in chat)" },
-];
 
 type Platform = "ios" | "android" | "web";
 // "Not live" builds are link-only for iOS/Android — no binary APK/IPA/AAB
@@ -266,6 +263,14 @@ export default function AppListingForm() {
   // list, since that's the one case we accept an upload for (html/css/js).
   const [platformBuildUrls, setPlatformBuildUrls] = useState<Record<"ios" | "android", string>>({ ios: "", android: "" });
   const [webNotLiveFiles, setWebNotLiveFiles] = useState<NamedFile[]>([]);
+  // Installs + Monthly Active Users — required once a store platform
+  // (iOS/Android) is marked Live, since that's the only way a buyer can
+  // sanity-check store traction claims. Not required while "Not live"
+  // (nothing to report yet) or for Web (no single install-count source).
+  const [platformStats, setPlatformStats] = useState<Record<"ios" | "android", { installs: string; mau: string }>>({
+    ios: { installs: "", mau: "" },
+    android: { installs: "", mau: "" },
+  });
   // Global "app isn't published anywhere yet" also takes a link now, not a
   // file — same reasoning as platformBuildUrls above.
   const [globalBuildUrl, setGlobalBuildUrl] = useState("");
@@ -286,6 +291,9 @@ export default function AppListingForm() {
   const [monetization, setMonetization] = useState("");
   const [subMonthly, setSubMonthly] = useState("");
   const [subAnnual, setSubAnnual] = useState("");
+  // Proof of the claimed monthly revenue — required whenever revenue > 0
+  // and the app isn't marked globally Not Live (no revenue to prove then).
+  const [revenueProof, setRevenueProof] = useState<ProofImage[]>([]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -438,6 +446,9 @@ export default function AppListingForm() {
   function setPlatformBuildUrl(p: "ios" | "android", v: string) {
     setPlatformBuildUrls((prev) => ({ ...prev, [p]: v }));
   }
+  function setPlatformStat(p: "ios" | "android", field: "installs" | "mau", v: string) {
+    setPlatformStats((prev) => ({ ...prev, [p]: { ...prev[p], [field]: v } }));
+  }
   // Web is the only "not live" platform that still takes a file upload —
   // html/css/js only, never binaries. Multiple files get zipped into one
   // bundle at submit time (see zipIfMultiple), so this list is just staging.
@@ -551,6 +562,21 @@ export default function AppListingForm() {
             setErrors({ platforms: `Please enter a valid ${PLATFORM_META[p].urlLabel} for ${PLATFORM_META[p].label}.` });
             return false;
           }
+          // Live store platforms (iOS/Android) must report install count +
+          // monthly active users — that's the traction data a buyer checks
+          // a store listing's numbers against. Web has no single
+          // install-count source, so it's exempt.
+          if (p === "ios" || p === "android") {
+            const stats = platformStats[p];
+            if (!stats.installs.trim() || isNaN(parseFloat(stats.installs)) || parseFloat(stats.installs) < 0) {
+              setErrors({ platforms: `Please enter a valid install count for ${PLATFORM_META[p].label}.` });
+              return false;
+            }
+            if (!stats.mau.trim() || isNaN(parseFloat(stats.mau)) || parseFloat(stats.mau) < 0) {
+              setErrors({ platforms: `Please enter valid Monthly Active Users for ${PLATFORM_META[p].label}.` });
+              return false;
+            }
+          }
         }
       }
     }
@@ -605,6 +631,10 @@ export default function AppListingForm() {
           return;
         }
       }
+      if ((parseFloat(revenue) || 0) > 0 && revenueProof.length === 0) {
+        setErrors({ fin: "Please upload at least one screenshot proving your claimed monthly revenue (e.g. App Store Connect, Play Console, or Stripe dashboard)." });
+        return;
+      }
     }
     if (!user) {
       setSubmitError("You must be logged in to list.");
@@ -646,7 +676,13 @@ export default function AppListingForm() {
         webBuildFiles = uploaded;
       }
 
-      setProgress({ pct: 88, label: "Saving listing to marketplace…" });
+      let revenueProofUrls: string[] = [];
+      if (revenueProof.length > 0) {
+        setProgress({ pct: 85, label: "Uploading revenue proof…" });
+        for (const img of revenueProof) revenueProofUrls.push(await uploadToImgur(img.file));
+      }
+
+      setProgress({ pct: 90, label: "Saving listing to marketplace…" });
 
       const effectivePreviewUrl = platforms.has("web") && !notLive.web ? previewUrl.trim() || undefined : undefined;
 
@@ -677,6 +713,14 @@ export default function AppListingForm() {
           iosBuildUrl: platforms.has("ios") && notLive.ios ? platformBuildUrls.ios.trim() : null,
           androidBuildUrl: platforms.has("android") && notLive.android ? platformBuildUrls.android.trim() : null,
           webBuildFiles,
+          stats: {
+            ios: platforms.has("ios") && !notLive.ios
+              ? { installs: parseFloat(platformStats.ios.installs) || 0, mau: parseFloat(platformStats.ios.mau) || 0 }
+              : undefined,
+            android: platforms.has("android") && !notLive.android
+              ? { installs: parseFloat(platformStats.android.installs) || 0, mau: parseFloat(platformStats.android.mau) || 0 }
+              : undefined,
+          },
         },
         notLive: { ios: false, android: false, web: false, global: globalNotLive },
         // Global not-live is also link-only now — see globalBuildUrl state.
@@ -690,7 +734,7 @@ export default function AppListingForm() {
         settings: { category, age, structure, reason: reason.trim() || undefined },
         financials: globalNotLive
           ? { price: parseFloat(priceVal), revenue: 0, expenses: 0 }
-          : { price: parseFloat(priceVal), revenue: parseFloat(revenue), expenses: parseFloat(expenses) },
+          : { price: parseFloat(priceVal), revenue: parseFloat(revenue), expenses: parseFloat(expenses), revenueProofUrls },
         transferMethods,
         attachedRepo: null,
       });
@@ -831,24 +875,15 @@ export default function AppListingForm() {
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
               <Field label="Category">
-                <select value={category} onChange={(e) => setCategory(e.target.value)} style={inputStyle}>
-                  <option value="">Select</option>
-                  {CATEGORY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <Select value={category} onChange={setCategory} options={CATEGORY_OPTIONS} accent={ACCENT} />
               </Field>
               <Field label="App Age">
-                <select value={age} onChange={(e) => setAge(e.target.value)} style={inputStyle}>
-                  <option value="">Select</option>
-                  {AGE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <Select value={age} onChange={setAge} options={AGE_OPTIONS} accent={ACCENT} />
               </Field>
             </div>
 
             <Field label="Business Structure">
-              <select value={structure} onChange={(e) => setStructure(e.target.value)} style={inputStyle}>
-                <option value="">Select</option>
-                {STRUCTURE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-              </select>
+              <Select value={structure} onChange={setStructure} options={STRUCTURE_OPTIONS} accent={ACCENT} />
             </Field>
 
             <Field label="Reason for selling (optional)">
@@ -962,13 +997,39 @@ export default function AppListingForm() {
                       </div>
                     )
                   ) : (
-                    <input
-                      type="url"
-                      value={platformUrls[p]}
-                      onChange={(e) => setPlatformUrl(p, e.target.value)}
-                      placeholder={PLATFORM_META[p].urlPlaceholder}
-                      style={inputStyle}
-                    />
+                    <div>
+                      <input
+                        type="url"
+                        value={platformUrls[p]}
+                        onChange={(e) => setPlatformUrl(p, e.target.value)}
+                        placeholder={PLATFORM_META[p].urlPlaceholder}
+                        style={inputStyle}
+                      />
+                      {(p === "ios" || p === "android") && (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                          <Field label="Installs">
+                            <input
+                              type="number"
+                              min="0"
+                              value={platformStats[p].installs}
+                              onChange={(e) => setPlatformStat(p, "installs", e.target.value)}
+                              placeholder="e.g. 10000"
+                              style={inputStyle}
+                            />
+                          </Field>
+                          <Field label="Monthly Active Users">
+                            <input
+                              type="number"
+                              min="0"
+                              value={platformStats[p].mau}
+                              onChange={(e) => setPlatformStat(p, "mau", e.target.value)}
+                              placeholder="e.g. 2500"
+                              style={inputStyle}
+                            />
+                          </Field>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               ) : null
@@ -1028,28 +1089,16 @@ export default function AppListingForm() {
             </div>
 
             <span style={sectionLabelStyle}>
-              Transfer Methods <span style={{ color: "#f87171" }}>*</span>
+              Delivery Method <span style={{ color: "#f87171" }}>*</span>
             </span>
             {errors.transfer && <ErrorBox>{errors.transfer}</ErrorBox>}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 24 }}>
-              {TRANSFER_METHODS.map((m) => (
-                <label
-                  key={m.value}
-                  style={{
-                    gridColumn: m.featured ? "1/-1" : undefined,
-                    display: "flex", alignItems: "center", gap: 8, padding: "10px 12px",
-                    background: transferMethods.includes(m.value) ? "rgba(251,191,36,0.08)" : "rgba(255,255,255,0.03)",
-                    border: `1px solid ${transferMethods.includes(m.value) ? "rgba(251,191,36,0.3)" : "rgba(255,255,255,0.08)"}`,
-                    borderRadius: 10, cursor: "pointer", fontSize: 13,
-                  }}
-                >
-                  <input type="checkbox" checked={transferMethods.includes(m.value)} onChange={() => toggleTransfer(m.value)} style={{ accentColor: ACCENT }} />
-                  <span style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontWeight: 600 }}>{m.featured ? "⚡ " : ""}{m.label}</span>
-                    {m.sub && <span style={{ fontSize: 11, opacity: 0.5 }}>{m.sub}</span>}
-                  </span>
-                </label>
-              ))}
+            <div style={{ marginBottom: 24 }}>
+              <TransferMethodPicker
+                methods={APP_TRANSFER_METHODS}
+                selected={transferMethods}
+                onToggle={toggleTransfer}
+                accent={ACCENT}
+              />
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
@@ -1082,12 +1131,27 @@ export default function AppListingForm() {
               </Field>
             </div>
 
+            {!globalNotLive && (parseFloat(revenue) || 0) > 0 && (
+              <div style={{ marginBottom: 24 }}>
+                <span style={sectionLabelStyle}>
+                  Proof of Revenue <span style={{ color: "#f87171" }}>*</span>
+                </span>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
+                  Upload a screenshot of your App Store Connect, Play Console, or payment processor dashboard showing this revenue.
+                </div>
+                <ProofUploader
+                  images={revenueProof}
+                  onAdd={(img) => setRevenueProof((prev) => [...prev, img])}
+                  onRemove={(i) => setRevenueProof((prev) => prev.filter((_, idx) => idx !== i))}
+                  max={3}
+                  accent={ACCENT}
+                />
+              </div>
+            )}
+
             <div style={{ opacity: globalNotLive ? 0.4 : 1, marginBottom: 16 }}>
               <Field label="Monetization Model">
-                <select value={monetization} onChange={(e) => setMonetization(e.target.value)} disabled={globalNotLive} style={inputStyle}>
-                  <option value="">Select</option>
-                  {MONETIZATION_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <Select value={monetization} onChange={setMonetization} options={MONETIZATION_OPTIONS} accent={ACCENT} disabled={globalNotLive} />
               </Field>
               {monetization === "Subscription" && !globalNotLive && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
