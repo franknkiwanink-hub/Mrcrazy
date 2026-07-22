@@ -39,7 +39,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
-import { createListing, type ListingBuildFile } from "@/lib/listings";
+import { createListing, checkStoreLink, type ListingBuildFile } from "@/lib/listings";
 import { aiStudioCall, aiPlanCap } from "@/lib/aiStudio";
 import { useAiLengthPicker } from "@/lib/useAiLengthPicker";
 import { useLimits } from "@/lib/useLimits";
@@ -69,14 +69,26 @@ const TRANSFER_METHODS: { value: string; label: string; sub?: string; featured?:
 ];
 
 type Platform = "ios" | "android" | "web";
-const PLATFORM_META: Record<Platform, { label: string; urlLabel: string; urlPlaceholder: string; exts: string[] }> = {
-  ios: { label: "iOS", urlLabel: "App Store URL", urlPlaceholder: "https://apps.apple.com/...", exts: [".ipa"] },
-  android: { label: "Android", urlLabel: "Play Store URL", urlPlaceholder: "https://play.google.com/...", exts: [".apk", ".aab", ".obb", ".apks", ".xapk"] },
-  web: { label: "Web", urlLabel: "Site URL", urlPlaceholder: "https://example.com", exts: [".html", ".htm", ".css", ".js", ".zip"] },
+// "Not live" builds are link-only for iOS/Android — no binary APK/IPA/AAB
+// upload accepted anywhere in this form (that storage would be wasted on
+// files nobody can install without sideloading anyway; a direct download
+// link to the build, hosted wherever the seller already has it, works just
+// as well and costs us nothing). "Web" is the one case where an upload
+// still makes sense, since it's small (html/css/js only) and we can render
+// it live ourselves later — see EXTRA_FILE_EXTS/TEXT_EXTS below and
+// zipIfMultiple() further down this file.
+const PLATFORM_META: Record<Platform, { label: string; urlLabel: string; urlPlaceholder: string; buildUrlLabel: string; buildUrlPlaceholder: string }> = {
+  ios: { label: "iOS", urlLabel: "App Store URL", urlPlaceholder: "https://apps.apple.com/...", buildUrlLabel: "Link to your .ipa (any host)", buildUrlPlaceholder: "https://drive.google.com/... or any direct link" },
+  android: { label: "Android", urlLabel: "Play Store URL", urlPlaceholder: "https://play.google.com/...", buildUrlLabel: "Link to your .apk/.aab (any host)", buildUrlPlaceholder: "https://drive.google.com/... or any direct link" },
+  web: { label: "Web", urlLabel: "Site URL", urlPlaceholder: "https://example.com", buildUrlLabel: "", buildUrlPlaceholder: "" },
 };
-const GLOBAL_NOT_LIVE_EXTS = [".apk", ".aab", ".obb", ".apks", ".xapk", ".ipa"];
-const EXTRA_FILE_EXTS = [".apk", ".aab", ".obb", ".apks", ".xapk", ".ipa", ".html", ".htm", ".css", ".js", ".zip"];
+// Only text web assets can be uploaded anywhere in this form — no binaries.
+// If a seller selects more than one file, they get zipped into a single
+// bundle client-side (see zipIfMultiple) before upload, so storage only
+// ever holds one small archive instead of loose files.
+const EXTRA_FILE_EXTS = [".html", ".htm", ".css", ".js", ".zip"];
 const TEXT_EXTS = ["html", "htm", "css", "js"];
+const WEB_BUILD_EXTS = [".html", ".htm", ".css", ".js"];
 
 interface SlotImage {
   file: File;
@@ -164,6 +176,23 @@ async function uploadBuildFile(file: File, idToken: string): Promise<ListingBuil
   };
 }
 
+// If the seller selected more than one html/css/js file for a "not live"
+// web build, bundle them into a single .zip client-side before upload —
+// storage only ever holds one small archive per not-live build instead of
+// N loose files, and it still renders live later the same way a single
+// uploaded .html file would (just unzipped server/render-side first). A
+// single file is left as-is; zipping one file would just add overhead for
+// no benefit.
+async function zipIfMultiple(files: NamedFile[]): Promise<NamedFile[]> {
+  if (files.length <= 1) return files;
+  const JSZip = (await import("jszip")).default;
+  const zip = new JSZip();
+  for (const f of files) zip.file(f.name, f.file);
+  const blob = await zip.generateAsync({ type: "blob" });
+  const zipFile = new File([blob], "site-bundle.zip", { type: "application/zip" });
+  return [{ file: zipFile, name: zipFile.name }];
+}
+
 export default function AppListingForm() {
   const router = useRouter();
   const { user, profile } = useAuth();
@@ -231,18 +260,20 @@ export default function AppListingForm() {
   const [globalNotLive, setGlobalNotLive] = useState(false);
   const [notLive, setNotLive] = useState<Record<Platform, boolean>>({ ios: false, android: false, web: false });
   const [platformUrls, setPlatformUrls] = useState<Record<Platform, string>>({ ios: "", android: "", web: "" });
-  const [platformFiles, setPlatformFiles] = useState<Record<Platform, NamedFile[]>>({ ios: [], android: [], web: [] });
-  const [globalNotLiveFiles, setGlobalNotLiveFiles] = useState<NamedFile[]>([]);
+  // iOS/Android "not live" builds are a URL (to wherever the seller already
+  // hosts the .ipa/.apk — Drive, Dropbox, their own site, etc.), never a
+  // file upload — see PLATFORM_META comment above. Only "web" keeps a file
+  // list, since that's the one case we accept an upload for (html/css/js).
+  const [platformBuildUrls, setPlatformBuildUrls] = useState<Record<"ios" | "android", string>>({ ios: "", android: "" });
+  const [webNotLiveFiles, setWebNotLiveFiles] = useState<NamedFile[]>([]);
+  // Global "app isn't published anywhere yet" also takes a link now, not a
+  // file — same reasoning as platformBuildUrls above.
+  const [globalBuildUrl, setGlobalBuildUrl] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
   const [extraFiles, setExtraFiles] = useState<NamedFile[]>([]);
   const [transferMethods, setTransferMethods] = useState<string[]>([]);
-  const platformFileInputRefs: Record<Platform, React.RefObject<HTMLInputElement>> = {
-    ios: useRef<HTMLInputElement>(null),
-    android: useRef<HTMLInputElement>(null),
-    web: useRef<HTMLInputElement>(null),
-  };
-  const globalNotLiveInputRef = useRef<HTMLInputElement>(null);
+  const webNotLiveInputRef = useRef<HTMLInputElement>(null);
   const extraFileInputRef = useRef<HTMLInputElement>(null);
 
   // Step 4 — Financials
@@ -404,30 +435,23 @@ export default function AppListingForm() {
   function setPlatformUrl(p: Platform, v: string) {
     setPlatformUrls((prev) => ({ ...prev, [p]: v }));
   }
-  function addPlatformFiles(p: Platform, fileList: FileList | File[]) {
-    const allowed = PLATFORM_META[p].exts;
-    const valid = Array.from(fileList).filter((f) => allowed.includes(extOf(f.name)));
-    if (valid.length === 0) return;
-    setPlatformFiles((prev) => {
-      const existing = new Set(prev[p].map((f) => f.name));
-      const additions = valid.filter((f) => !existing.has(f.name)).map((f) => ({ file: f, name: f.name }));
-      return { ...prev, [p]: [...prev[p], ...additions] };
-    });
+  function setPlatformBuildUrl(p: "ios" | "android", v: string) {
+    setPlatformBuildUrls((prev) => ({ ...prev, [p]: v }));
   }
-  function removePlatformFile(p: Platform, idx: number) {
-    setPlatformFiles((prev) => ({ ...prev, [p]: prev[p].filter((_, i) => i !== idx) }));
-  }
-  function addGlobalNotLiveFiles(fileList: FileList | File[]) {
-    const valid = Array.from(fileList).filter((f) => GLOBAL_NOT_LIVE_EXTS.includes(extOf(f.name)));
+  // Web is the only "not live" platform that still takes a file upload —
+  // html/css/js only, never binaries. Multiple files get zipped into one
+  // bundle at submit time (see zipIfMultiple), so this list is just staging.
+  function addWebNotLiveFiles(fileList: FileList | File[]) {
+    const valid = Array.from(fileList).filter((f) => WEB_BUILD_EXTS.includes(extOf(f.name)));
     if (valid.length === 0) return;
-    setGlobalNotLiveFiles((prev) => {
+    setWebNotLiveFiles((prev) => {
       const existing = new Set(prev.map((f) => f.name));
       const additions = valid.filter((f) => !existing.has(f.name)).map((f) => ({ file: f, name: f.name }));
       return [...prev, ...additions];
     });
   }
-  function removeGlobalNotLiveFile(idx: number) {
-    setGlobalNotLiveFiles((prev) => prev.filter((_, i) => i !== idx));
+  function removeWebNotLiveFile(idx: number) {
+    setWebNotLiveFiles((prev) => prev.filter((_, i) => i !== idx));
   }
   function addExtraFiles(fileList: FileList | File[]) {
     const valid = Array.from(fileList).filter((f) => EXTRA_FILE_EXTS.includes(extOf(f.name)));
@@ -498,8 +522,8 @@ export default function AppListingForm() {
   function validateStep3(): boolean {
     clearAllErrors();
     if (globalNotLive) {
-      if (globalNotLiveFiles.length === 0) {
-        setErrors({ platforms: "Please upload at least one build file for this not-yet-published app." });
+      if (!globalBuildUrl.trim() || !isValidUrl(globalBuildUrl.trim())) {
+        setErrors({ platforms: "Please enter a valid link to your build for this not-yet-published app." });
         return false;
       }
     } else if (platforms.size === 0) {
@@ -509,9 +533,17 @@ export default function AppListingForm() {
     if (!globalNotLive) {
       for (const p of platforms) {
         if (notLive[p]) {
-          if (platformFiles[p].length === 0) {
-            setErrors({ platforms: `Please upload a build file for ${PLATFORM_META[p].label}, or switch it back to live.` });
-            return false;
+          if (p === "web") {
+            if (webNotLiveFiles.length === 0) {
+              setErrors({ platforms: "Please upload your site files for Web, or switch it back to live." });
+              return false;
+            }
+          } else {
+            const u = platformBuildUrls[p].trim();
+            if (!u || !isValidUrl(u)) {
+              setErrors({ platforms: `Please enter a valid build link for ${PLATFORM_META[p].label}, or switch it back to live.` });
+              return false;
+            }
           }
         } else {
           const u = platformUrls[p].trim();
@@ -601,32 +633,24 @@ export default function AppListingForm() {
       setProgress({ pct: 48, label: "Uploading extra files…" });
       const additionalFiles: ListingBuildFile[] = [];
       for (const f of extraFiles) additionalFiles.push(await uploadBuildFile(f.file, idToken));
-      const firstBinary = additionalFiles.find((f) => f.storagePath && !f.url);
-      const apkStorageUrl = firstBinary ? firstBinary.storagePath ?? undefined : undefined;
-      const apkIpaFileName = firstBinary ? firstBinary.filename : undefined;
 
-      setProgress({ pct: 60, label: "Uploading platform builds…" });
-      const notLiveBuilds: Record<Platform, ListingBuildFile[] | null> = { ios: null, android: null, web: null };
-      for (const p of ["ios", "android", "web"] as Platform[]) {
-        if (!globalNotLive && platforms.has(p) && notLive[p] && platformFiles[p].length) {
-          const uploaded: ListingBuildFile[] = [];
-          for (const f of platformFiles[p]) uploaded.push(await uploadBuildFile(f.file, idToken));
-          notLiveBuilds[p] = uploaded;
-        }
-      }
-      let globalBuild: ListingBuildFile[] | undefined;
-      if (globalNotLive && globalNotLiveFiles.length) {
-        setProgress({ pct: 75, label: "Uploading not-live build…" });
+      // Only "web" not-live builds are ever uploaded as files — iOS/Android
+      // not-live builds are always a URL the seller already hosts elsewhere
+      // (see platformBuildUrls/globalBuildUrl), never a binary we store.
+      setProgress({ pct: 60, label: "Uploading web build…" });
+      let webBuildFiles: ListingBuildFile[] | null = null;
+      if (!globalNotLive && platforms.has("web") && notLive.web && webNotLiveFiles.length) {
+        const bundled = await zipIfMultiple(webNotLiveFiles);
         const uploaded: ListingBuildFile[] = [];
-        for (const f of globalNotLiveFiles) uploaded.push(await uploadBuildFile(f.file, idToken));
-        globalBuild = uploaded;
+        for (const f of bundled) uploaded.push(await uploadBuildFile(f.file, idToken));
+        webBuildFiles = uploaded;
       }
 
       setProgress({ pct: 88, label: "Saving listing to marketplace…" });
 
       const effectivePreviewUrl = platforms.has("web") && !notLive.web ? previewUrl.trim() || undefined : undefined;
 
-      await createListing({
+      const { listingId } = await createListing({
         idToken,
         type: "app",
         title: name.trim(),
@@ -636,9 +660,6 @@ export default function AppListingForm() {
         videoUrl: videoUrl.trim() || undefined,
         previewUrl: effectivePreviewUrl,
         category,
-        apkUrl: apkStorageUrl,
-        apkStorageUrl,
-        apkIpaFileName,
         additionalFiles,
         platforms: {
           selected: Array.from(platforms),
@@ -651,12 +672,15 @@ export default function AppListingForm() {
             android: platforms.has("android") ? notLive.android : false,
             web: platforms.has("web") ? notLive.web : false,
           },
-          iosBuildFiles: notLiveBuilds.ios,
-          androidBuildFiles: notLiveBuilds.android,
-          webBuildFiles: notLiveBuilds.web,
+          // Not-live builds: iOS/Android are always a link the seller
+          // already hosts elsewhere; web is the one uploaded build file.
+          iosBuildUrl: platforms.has("ios") && notLive.ios ? platformBuildUrls.ios.trim() : null,
+          androidBuildUrl: platforms.has("android") && notLive.android ? platformBuildUrls.android.trim() : null,
+          webBuildFiles,
         },
         notLive: { ios: false, android: false, web: false, global: globalNotLive },
-        notLiveBuildFiles: globalNotLive ? { global: globalBuild } : undefined,
+        // Global not-live is also link-only now — see globalBuildUrl state.
+        globalBuildUrl: globalNotLive ? globalBuildUrl.trim() : undefined,
         tech: {
           frontend: techFrontend.trim() || undefined,
           backend: techBackend.trim() || undefined,
@@ -674,6 +698,21 @@ export default function AppListingForm() {
       setProgress({ pct: 100, label: "Published!" });
       setSuccess(true);
       clearDraft();
+
+      // Best-effort, non-blocking: for any live store URL (Play Store/App
+      // Store), ask the backend to do a lightweight plausibility check
+      // (see listing.link-check / handleLinkCheck). This is NOT ownership
+      // proof — it just upgrades 'link-provided' to 'link-checked' when the
+      // store page is reachable and mentions the listing's title. Errors
+      // here are swallowed on purpose: this is a nice-to-have background
+      // enrichment, not something that should ever block or interrupt the
+      // "Published!" flow the user is already seeing.
+      for (const p of ["ios", "android"] as const) {
+        if (platforms.has(p) && !notLive[p] && !globalNotLive && platformUrls[p].trim()) {
+          checkStoreLink({ idToken, listingId, url: platformUrls[p].trim() }).catch(() => {});
+        }
+      }
+
       setTimeout(() => router.push("/marketplace"), 2000);
     } catch (err: any) {
       setSubmitError("Error: " + (err?.message || "Something went wrong. Please try again."));
@@ -688,28 +727,14 @@ export default function AppListingForm() {
       <input ref={bannerInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onBannerChange} />
       <input ref={iconInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onIconChange} />
       <input ref={screenshotInputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={onScreenshotsChange} />
-      {(["ios", "android", "web"] as Platform[]).map((p) => (
-        <input
-          key={p}
-          ref={platformFileInputRefs[p]}
-          type="file"
-          accept={PLATFORM_META[p].exts.join(",")}
-          multiple
-          style={{ display: "none" }}
-          onChange={(e) => {
-            if (e.target.files?.length) addPlatformFiles(p, e.target.files);
-            e.target.value = "";
-          }}
-        />
-      ))}
       <input
-        ref={globalNotLiveInputRef}
+        ref={webNotLiveInputRef}
         type="file"
-        accept={GLOBAL_NOT_LIVE_EXTS.join(",")}
+        accept={WEB_BUILD_EXTS.join(",")}
         multiple
         style={{ display: "none" }}
         onChange={(e) => {
-          if (e.target.files?.length) addGlobalNotLiveFiles(e.target.files);
+          if (e.target.files?.length) addWebNotLiveFiles(e.target.files);
           e.target.value = "";
         }}
       />
@@ -908,19 +933,34 @@ export default function AppListingForm() {
                     </button>
                   </div>
                   {notLive[p] ? (
-                    <div>
-                      <div
-                        onClick={() => platformFileInputRefs[p].current?.click()}
-                        style={{ border: "2px dashed rgba(251,191,36,0.3)", borderRadius: 10, padding: 16, textAlign: "center", cursor: "pointer", fontSize: 12, color: "rgba(255,255,255,0.5)" }}
-                      >
-                        Click or drag to upload a build ({PLATFORM_META[p].exts.join(", ")})
+                    p === "web" ? (
+                      <div>
+                        <div
+                          onClick={() => webNotLiveInputRef.current?.click()}
+                          style={{ border: "2px dashed rgba(251,191,36,0.3)", borderRadius: 10, padding: 16, textAlign: "center", cursor: "pointer", fontSize: 12, color: "rgba(255,255,255,0.5)" }}
+                        >
+                          Click or drag to upload your site ({WEB_BUILD_EXTS.join(", ")}) — multiple files are bundled into one archive automatically
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                          {webNotLiveFiles.map((f, i) => (
+                            <FileTag key={f.name} name={f.name} onRemove={() => removeWebNotLiveFile(i)} />
+                          ))}
+                        </div>
                       </div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                        {platformFiles[p].map((f, i) => (
-                          <FileTag key={f.name} name={f.name} onRemove={() => removePlatformFile(p, i)} />
-                        ))}
+                    ) : (
+                      <div>
+                        <input
+                          type="url"
+                          value={platformBuildUrls[p]}
+                          onChange={(e) => setPlatformBuildUrl(p, e.target.value)}
+                          placeholder={PLATFORM_META[p].buildUrlPlaceholder}
+                          style={inputStyle}
+                        />
+                        <div style={{ fontSize: 11, opacity: 0.45, marginTop: 6 }}>
+                          {PLATFORM_META[p].buildUrlLabel} — we don&apos;t host APK/IPA files, just link to wherever it&apos;s already hosted.
+                        </div>
                       </div>
-                    </div>
+                    )
                   ) : (
                     <input
                       type="url"
@@ -946,20 +986,19 @@ export default function AppListingForm() {
                 {globalNotLive ? "✓ " : ""}App isn&apos;t published anywhere yet
               </div>
               <div style={{ fontSize: 12, opacity: 0.5, marginTop: 4 }}>
-                Selecting this clears platform selections and lets buyers preview via an uploaded build instead. Price is still required; revenue/expenses/monetization won&apos;t apply yet.
+                Selecting this clears platform selections. Price is still required; revenue/expenses/monetization won&apos;t apply yet.
               </div>
               {globalNotLive && (
                 <div style={{ marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
-                  <div
-                    onClick={() => globalNotLiveInputRef.current?.click()}
-                    style={{ border: "2px dashed rgba(251,191,36,0.4)", borderRadius: 10, padding: 16, textAlign: "center", cursor: "pointer", fontSize: 12, color: "rgba(255,255,255,0.5)" }}
-                  >
-                    Click or drag to upload a build ({GLOBAL_NOT_LIVE_EXTS.join(", ")})
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                    {globalNotLiveFiles.map((f, i) => (
-                      <FileTag key={f.name} name={f.name} onRemove={() => removeGlobalNotLiveFile(i)} />
-                    ))}
+                  <input
+                    type="url"
+                    value={globalBuildUrl}
+                    onChange={(e) => setGlobalBuildUrl(e.target.value)}
+                    placeholder="Link to your build (Drive/Dropbox/any host)"
+                    style={inputStyle}
+                  />
+                  <div style={{ fontSize: 11, opacity: 0.45, marginTop: 6 }}>
+                    We don&apos;t host APK/IPA files — just link to wherever the build already lives.
                   </div>
                 </div>
               )}
