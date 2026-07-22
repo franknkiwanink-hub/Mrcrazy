@@ -6,6 +6,7 @@ import { isBoosted, isPremiumSeller, trackListing } from "@/lib/listings";
 import { useCurrency } from "@/lib/CurrencyContext";
 import SellerStrip from "./SellerStrip";
 import SaveButton from "./SaveButton";
+import VerifiedBadge from "./VerifiedBadge";
 
 const PLACEHOLDER_MAIN = "https://placehold.co/1280x720/0d0d14/444?text=No+Preview";
 
@@ -107,7 +108,10 @@ export default function SiteCard({
       </div>
       <div className="sr-site-main">
         <div className="sr-site-headline">
-          <h3 className="sr-site-title">{title}</h3>
+          <div className="sr-site-title-group">
+            <h3 className="sr-site-title">{title}</h3>
+            <VerifiedBadge listing={listing} />
+          </div>
           <div className="sr-site-price" title={priceTooltip}>{price}</div>
         </div>
         <p className="sr-site-desc">
