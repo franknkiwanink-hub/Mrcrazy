@@ -52,6 +52,17 @@ const CATEGORY_OPTIONS = ["E-commerce", "Portfolio", "Blog", "SaaS", "Game", "Co
 const AGE_OPTIONS = ["< 3 months", "3–5 months", "6–11 months", "1+ year", "2+ years", "3+ years", "5+ years", "10+ years"];
 const STRUCTURE_OPTIONS = ["Sole Proprietorship", "LLC", "Corporation", "Partnership", "Other"];
 
+// Tech Stack dropdown options — was free-text (users typing "Hi" as their
+// frontend framework was a real thing that happened), converted to
+// pick-from-list + "Other" so listings carry meaningful, comparable
+// values instead of arbitrary strings. "Other" reveals a small text
+// input beneath the dropdown (see TechField below) that becomes the
+// actual saved value.
+const FRONTEND_OPTIONS = ["React", "Next.js", "Vue", "Nuxt", "Angular", "Svelte", "HTML/CSS/JS", "WordPress", "Webflow", "Other"];
+const BACKEND_OPTIONS = ["Node.js", "Express", "Django", "Flask", "Ruby on Rails", "Laravel", "PHP", "Firebase", "Supabase", "None / Static", "Other"];
+const DATABASE_OPTIONS = ["PostgreSQL", "MySQL", "MongoDB", "Firestore", "Supabase", "SQLite", "Redis", "None", "Other"];
+const WEBSITE_MONETIZATION_OPTIONS = ["Ads", "Subscriptions", "One-time purchases", "Affiliate", "Sponsorships", "Donations", "Not monetized", "Other"];
+
 // Per-slot aspect ratio requirement — mirrors LFM_SLOT_RATIOS exactly.
 type SlotSpec = {
   orientation: "portrait" | "landscape";
@@ -713,7 +724,7 @@ export default function WebsiteListingForm() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", marginTop: 92, background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
+    <div style={{ marginTop: 92, background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
       <AiLengthPickerHost />
       <ConfirmHost />
       <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFileInputChange} />
@@ -998,16 +1009,16 @@ export default function WebsiteListingForm() {
           <div>
             <span style={sectionLabelStyle}>Tech Stack</span>
             {errors.tech && <ErrorBox>{errors.tech}</ErrorBox>}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-              <Field label="Frontend"><input value={frontend} onChange={(e) => setFrontend(e.target.value)} placeholder="e.g. React" style={inputStyle} /></Field>
-              <Field label="Backend"><input value={backend} onChange={(e) => setBackend(e.target.value)} placeholder="e.g. Node.js" style={inputStyle} /></Field>
-              <Field label="Database"><input value={database} onChange={(e) => setDatabase(e.target.value)} placeholder="e.g. PostgreSQL" style={inputStyle} /></Field>
-              <Field label="Monetization"><input value={monetization} onChange={(e) => setMonetization(e.target.value)} placeholder="e.g. Subscriptions" style={inputStyle} /></Field>
+            <div className="sr-lf-row-2" style={{ marginBottom: 20 }}>
+              <TechField label="Frontend" value={frontend} onChange={setFrontend} options={FRONTEND_OPTIONS} accent={ACCENT} />
+              <TechField label="Backend" value={backend} onChange={setBackend} options={BACKEND_OPTIONS} accent={ACCENT} />
+              <TechField label="Database" value={database} onChange={setDatabase} options={DATABASE_OPTIONS} accent={ACCENT} />
+              <TechField label="Monetization" value={monetization} onChange={setMonetization} options={WEBSITE_MONETIZATION_OPTIONS} accent={ACCENT} />
             </div>
 
             <span style={sectionLabelStyle}>Settings</span>
             {errors.settings && <ErrorBox>{errors.settings}</ErrorBox>}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <div className="sr-lf-row-3" style={{ marginBottom: 20 }}>
               <Field label="Category">
                 <Select value={category} onChange={setCategory} options={CATEGORY_OPTIONS} accent={ACCENT} />
               </Field>
@@ -1019,7 +1030,7 @@ export default function WebsiteListingForm() {
               </Field>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <div className="sr-lf-row-2" style={{ marginBottom: 20 }}>
               <Field label="Location (optional)"><input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Remote / US-based" style={inputStyle} /></Field>
               <Field label="Reason for selling (optional)"><input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Moving on to a new project" style={inputStyle} /></Field>
             </div>
@@ -1047,32 +1058,40 @@ export default function WebsiteListingForm() {
         {step === 3 && (
           <div>
             {errors.fin && <ErrorBox>{errors.fin}</ErrorBox>}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
-              <Field label="Asking Price ($)">
-                <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="5000" style={inputStyle} />
-              </Field>
-              <Field label="Monthly Revenue ($)">
-                <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} placeholder="500" style={inputStyle} />
-              </Field>
-              <Field label="Monthly Expenses ($)">
-                <input type="number" min="0" value={expenses} onChange={(e) => setExpenses(e.target.value)} placeholder="50" style={inputStyle} />
-              </Field>
-            </div>
+            <div className="sr-lf-fin-card">
+              <div className="sr-lf-row-3">
+                <Field label="Asking Price ($)">
+                  <div className="sr-lf-money">
+                    <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="5000" style={inputStyle} />
+                  </div>
+                </Field>
+                <Field label="Monthly Revenue ($)">
+                  <div className="sr-lf-money">
+                    <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} placeholder="500" style={inputStyle} />
+                  </div>
+                </Field>
+                <Field label="Monthly Expenses ($)">
+                  <div className="sr-lf-money">
+                    <input type="number" min="0" value={expenses} onChange={(e) => setExpenses(e.target.value)} placeholder="50" style={inputStyle} />
+                  </div>
+                </Field>
+              </div>
 
-            <div style={{ padding: 16, background: "rgba(255,255,255,0.03)", borderRadius: 12, marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", fontWeight: 600 }}>Monthly Profit</span>
-              <span style={{ fontSize: 20, fontWeight: 800, color: profit >= 0 ? ACCENT : "#f87171" }}>
-                {profit >= 0 ? "+" : ""}${profit.toFixed(2)}
-              </span>
+              <div style={{ padding: 14, background: "rgba(255,255,255,0.03)", borderRadius: 10, marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", fontWeight: 600 }}>Monthly Profit</span>
+                <span style={{ fontSize: 20, fontWeight: 800, color: profit >= 0 ? ACCENT : "#f87171" }}>
+                  {profit >= 0 ? "+" : ""}${profit.toFixed(2)}
+                </span>
+              </div>
             </div>
 
             {(parseFloat(revenue) || 0) > 0 && (
-              <div style={{ marginBottom: 24 }}>
+              <div className="sr-lf-proof-card">
                 <span style={sectionLabelStyle}>
                   Proof of Revenue <span style={{ color: "#f87171" }}>*</span>
                 </span>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
-                  Upload a screenshot of your Stripe, PayPal, ad network, or bank dashboard showing this revenue. Buyers trust listings with verified numbers.
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 10 }}>
+                  Upload a screenshot of your Stripe, PayPal, ad network, or bank dashboard showing this revenue. Listings without proof can't be published — buyers trust verified numbers.
                 </div>
                 <ProofUploader
                   images={revenueProof}
@@ -1097,8 +1116,8 @@ export default function WebsiteListingForm() {
                 />
               </Field>
               {(parseFloat(monthlyVisits) || 0) > 0 && (
-                <div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
+                <div className="sr-lf-proof-card">
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 10 }}>
                     Since you entered a visits number, upload 1–3 analytics screenshots (Google Analytics, Search Console, or your host's dashboard) to back it up. <span style={{ color: "#f87171" }}>Required.</span>
                   </div>
                   <ProofUploader
@@ -1327,6 +1346,72 @@ function Field({
   );
 }
 
+// Tech Stack field — dropdown of common presets + "Other", instead of a
+// bare free-text input (which let people type anything, including
+// nonsense — see the "Hi" / "Hu" reports). `value` is the actual saved
+// string: if it matches one of `options` exactly the dropdown shows that
+// selection; otherwise (a prior custom entry, or nothing yet) it falls
+// back to "Other" and reveals the text input pre-filled with the
+// existing value. Selecting "Other" from the list clears to an empty
+// custom field so the user isn't left with a stale preset string.
+function TechField({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder,
+  accent,
+  optional,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder?: string;
+  accent: string;
+  optional?: boolean;
+}) {
+  // Tracks whether the user has explicitly picked "Other" this session —
+  // can't be derived from `value` alone, since choosing "Other" clears
+  // value to "" (a fresh custom field), and "" would otherwise fall back
+  // to showing the placeholder instead of staying on "Other" + the text
+  // input. Also flips true automatically if `value` is a non-empty string
+  // that isn't one of the presets (e.g. an existing draft/listing loaded
+  // with a legacy free-text tech value).
+  const isKnownPreset = options.includes(value);
+  const [forcedOther, setForcedOther] = useState(value !== "" && !isKnownPreset);
+  const showOther = forcedOther || (value !== "" && !isKnownPreset);
+  const selectValue = showOther ? "Other" : value;
+  return (
+    <Field label={optional ? `${label} (optional)` : label}>
+      <Select
+        value={selectValue}
+        onChange={(v) => {
+          if (v === "Other") {
+            setForcedOther(true);
+            onChange("");
+          } else {
+            setForcedOther(false);
+            onChange(v);
+          }
+        }}
+        options={options}
+        placeholder={placeholder || "Select"}
+        accent={accent}
+      />
+      {showOther && (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Type your own…"
+          style={{ ...inputStyle, marginTop: 8 }}
+          autoFocus
+        />
+      )}
+    </Field>
+  );
+}
+
 function CharCount({ value, min, max }: { value: string; min: number; max: number }) {
   const len = value.trim().length;
   const ok = len >= min && len <= max;
@@ -1419,7 +1504,7 @@ const inputStyle: React.CSSProperties = {
   height: 44,
   padding: "0 14px",
   background: "#09090b",
-  border: "1px solid #3f3f46",
+  border: "1px solid rgba(255,255,255,0.28)",
   borderRadius: 8,
   fontSize: 14,
   color: "#fff",
