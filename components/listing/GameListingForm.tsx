@@ -23,7 +23,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
-import { createListing } from "@/lib/listings";
+import { createListing, checkStoreLink } from "@/lib/listings";
 import { aiStudioCall, aiPlanCap } from "@/lib/aiStudio";
 import { useAiLengthPicker } from "@/lib/useAiLengthPicker";
 import { useLimits } from "@/lib/useLimits";
@@ -527,7 +527,7 @@ export default function GameListingForm() {
 
       const frontendLabel = platform === "android" ? "Android" : platform === "desktop" ? "Desktop" : "Android & Desktop";
 
-      await createListing({
+      const { listingId } = await createListing({
         idToken,
         type: "game",
         gameType,
@@ -550,6 +550,16 @@ export default function GameListingForm() {
       setProgress({ pct: 100, label: "Published!" });
       setSuccess(true);
       clearDraft();
+
+      // Best-effort, non-blocking plausibility check — only makes sense
+      // when the seller supplied their own external link (gameType ===
+      // "link"); an "upload" game's URL is a storage link we generated
+      // ourselves, so there's nothing external to check. See the identical
+      // pattern/comment in AppListingForm.tsx.
+      if (gameType === "link" && gameUrl) {
+        checkStoreLink({ idToken, listingId, url: gameUrl }).catch(() => {});
+      }
+
       setTimeout(() => router.push("/marketplace"), 2000);
     } catch (err: any) {
       setSubmitError("Error: " + (err?.message || "Something went wrong. Please try again."));
