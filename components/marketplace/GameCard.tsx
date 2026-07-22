@@ -6,6 +6,7 @@ import { fmtFinVal, isBoosted, isPremiumSeller, trackListing } from "@/lib/listi
 import { useCurrency } from "@/lib/CurrencyContext";
 import SellerStrip from "./SellerStrip";
 import SaveButton from "./SaveButton";
+import VerifiedBadge from "./VerifiedBadge";
 
 export default function GameCard({
   listing,
@@ -94,7 +95,10 @@ export default function GameCard({
         <span className="sr-game-genre">{genre}</span>
       </div>
       <div className="sr-game-bar">
-        <h3 className="sr-game-title">{title}</h3>
+        <div className="sr-game-title-group">
+          <h3 className="sr-game-title">{title}</h3>
+          <VerifiedBadge listing={listing} />
+        </div>
         <span className="sr-game-price" title={priceTooltip}>{price}</span>
       </div>
       <div className="sr-game-stats">
