@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { auth } from "@/lib/firebase";
 import type { SettingsState } from "@/lib/useSettingsState";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
+import { useConfirm } from "@/lib/useConfirm";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
 import { useLimits } from "@/lib/useLimits";
 
@@ -23,10 +24,10 @@ export default function BillingPanel({
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
+  const { confirm, ConfirmHost } = useConfirm();
   const { openPlansModal } = usePlansModal();
   const { limits } = useLimits();
-  const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
   // Adapts useLimits()'s LimitsPlan shape (saleFeeDisplay/description) to
@@ -48,6 +49,14 @@ export default function BillingPanel({
   async function handleCancel() {
     const user = auth.currentUser;
     if (!user) return;
+    const ok = await confirm({
+      theme: "danger",
+      title: "Cancel Subscription",
+      msg: "Your plan will downgrade to Free at the end of the current billing cycle. All Pro features will be disabled.",
+      confirmText: "Cancel Subscription",
+      cancelText: "Keep Plan",
+    });
+    if (!ok) return;
     setCancelling(true);
     try {
       const idToken = await user.getIdToken();
@@ -59,12 +68,11 @@ export default function BillingPanel({
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || "Cancellation failed");
       setState((prev) => ({ ...prev, plan: "free" }));
-      toast("Subscription cancelled. Your plan reverts to Free at end of cycle.");
+      toast("Subscription cancelled. Your plan reverts to Free at end of cycle.", "success");
     } catch (err: any) {
-      toast(`Error: ${err.message}`);
+      toast(`Error: ${err.message}`, "error");
     } finally {
       setCancelling(false);
-      setConfirmingCancel(false);
     }
   }
 
@@ -90,8 +98,8 @@ export default function BillingPanel({
       </div>
 
       {currentPlan !== "free" ? (
-        <button className="danger-btn" style={{ marginBottom: "1rem" }} onClick={() => setConfirmingCancel(true)}>
-          Cancel Subscription
+        <button className="danger-btn" style={{ marginBottom: "1rem" }} onClick={handleCancel} disabled={cancelling}>
+          {cancelling ? "Cancelling…" : "Cancel Subscription"}
         </button>
       ) : null}
 
@@ -136,45 +144,7 @@ export default function BillingPanel({
         All payments handled by PayPal · Cancel anytime · No hidden fees
       </p>
 
-      {/* Cancel confirm — ports window.srfModal.confirm's danger-themed
-          dialog. No shared modal system exists in this port yet, so this
-          follows the same lightweight inline-overlay pattern already used
-          for the Sign Out confirm in SettingsSidebar.tsx. */}
-      {confirmingCancel ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.7)",
-            zIndex: 10001,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-          onClick={() => !cancelling && setConfirmingCancel(false)}
-        >
-          <div
-            style={{ background: "#141420", padding: 24, borderRadius: 12, color: "#fff", maxWidth: 360 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 style={{ marginTop: 0 }}>Cancel Subscription</h3>
-            <p style={{ opacity: 0.7, fontSize: 14 }}>
-              Your plan will downgrade to Free at the end of the current billing cycle. All Pro features will be
-              disabled.
-            </p>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-              <button onClick={() => setConfirmingCancel(false)} disabled={cancelling}>
-                Keep Plan
-              </button>
-              <button className="danger-btn" onClick={handleCancel} disabled={cancelling}>
-                {cancelling ? "Cancelling…" : "Cancel Subscription"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <ToastHost />
+      <ConfirmHost />
     </>
   );
 }
