@@ -2264,9 +2264,14 @@ async function handleAutoSendRun(req, res) {
   return res.status(200).json({ processed, succeeded, failed });
 }
 
-// Debits the caller's wallet and sets listings/{listingId}.boostedUntil so the
-// marketplace feed algorithm (mpRenderCards → _isBoosted/_boostSort) surfaces
-// it first within its type group while the boost is active.
+// Debits the caller's wallet, sets listings/{listingId}.boostedUntil for
+// legacy/reference purposes, and — the part that actually drives visible
+// placement — writes a denormalized ad record to boostedAds/{listingId}.
+// BoostedRow reads that collection live/uncached (listing.boosted-ads in
+// app/api/listings/_handler.js), never through the feed's TTL'd pool
+// cache, so the purchase is visible on the very next page load. The main
+// feed itself stays a plain seeded shuffle and does not rank by boost —
+// boosted listings only appear in the dedicated row.
 //
 // Price is looked up from BOOST_PLANS here — never trusts a client-sent price,
 // same principle as PLAN_IDS/PLAN_PRICES above. Caller must own the listing.
@@ -2329,6 +2334,33 @@ async function handleBoostListing(req, res) {
       boostedUntil:   newUntilTs,
       lastBoostedAt:  FieldValue.serverTimestamp(),
       lastBoostDays:  d,
+    });
+
+    // Write the paid ad slot itself — a fully self-contained, denormalized
+    // doc in its own `boostedAds` collection, NOT just a flag on the
+    // listings doc. This is what BoostedRow actually reads, and it reads it
+    // live/uncached (see listing.boosted-ads in app/api/listings/
+    // _handler.js) — deliberately independent of the feed's 1-hour TTL
+    // pool cache, so a boost the seller just paid real money for is
+    // visible on the very next page load, not up to an hour later.
+    // Same-transaction write means "payment succeeded" and "ad is live"
+    // can never drift apart — they commit together or not at all.
+    tx.set(db.collection('boostedAds').doc(listingId), {
+      listingId,
+      type:         listingData.type || 'website',
+      ownerId:      listingData.ownerId || null,
+      title:        listingData.title || 'Untitled',
+      tagline:      listingData.tagline || null,
+      url:          listingData.url || null,
+      images:       Array.isArray(listingData.images) ? listingData.images.slice(0, 6) : [],
+      imageCover:   listingData.imageCover || (listingData.images && listingData.images[0]) || null,
+      appIcon:      listingData.appIcon || null,
+      category:     listingData.category || null,
+      gameType:     listingData.gameType || null,
+      financials:   listingData.financials || null,
+      settings:     listingData.settings || null,
+      verified:     !!listingData.verified,
+      boostedUntil: newUntilTs,
     });
 
     tx.set(userRef.collection('transactions').doc(), {
