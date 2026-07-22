@@ -15,7 +15,6 @@ import {
 } from "@/lib/useDealChat";
 import { doc, deleteDoc, collection, getDocs, writeBatch, addDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
-import TransferDealModal from "./TransferDealModal";
 import RequestPaymentOverlay from "./RequestPaymentOverlay";
 import SignInRequired from "@/components/auth/SignInRequired";
 import { buildListingSlug } from "@/lib/slug";
@@ -24,9 +23,12 @@ import { buildListingSlug } from "@/lib/slug";
 // item bar, escrow announcement bar + actions (pay/release/dispute),
 // message list (text/image/link/file/transfer_zip bubbles), send box
 // with attach menu, hamburger menu (report/cancel), countdowns, and the
-// terminal outcome banner. The Transfer Deal checklist modal ("Mark
-// Delivered" / "Transfer Deal") this panel opens into now lives in its
-// own component, TransferDealModal.tsx — both buttons below open it.
+// terminal outcome banner. The Transfer Deal checklist ("Mark Delivered"
+// / "Transfer Deal") this panel opens into now lives at its own route,
+// /messages/deal/[id]/transfer (see TransferDealRoute.tsx), instead of
+// being rendered in-place — a real navigation entry so the Android back
+// button steps out of the transfer flow instead of closing this whole
+// chat. Both buttons below navigate there via router.push.
 
 const IMGUR_CLIENT_ID = "546c25a59c58ad7";
 
@@ -51,7 +53,6 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   const [ctaBusy, setCtaBusy] = useState(false);
   const [deleteAfterCancel, setDeleteAfterCancel] = useState<{ deleteAt: number } | null>(null);
   const [deleteCountdown, setDeleteCountdown] = useState("");
-  const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [requestPaymentOverlayOpen, setRequestPaymentOverlayOpen] = useState(false);
 
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -396,19 +397,6 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
       {requestPaymentOverlayOpen ? (
         <RequestPaymentOverlay onDone={() => setRequestPaymentOverlayOpen(false)} />
       ) : null}
-      {transferModalOpen && room ? (
-        <TransferDealModal
-          chatRoomId={chatRoomId}
-          sellerUid={room.sellerUid}
-          buyerUid={room.buyerUid}
-          listingId={room.listingId || null}
-          dealId={room.dealId || null}
-          paymentStatus={room.paymentStatus}
-          isSeller={isSeller}
-          syncThreads={chat.syncThreads}
-          onClose={() => setTransferModalOpen(false)}
-        />
-      ) : null}
       <div className="dcp-box">
         <div className="dcp-header">
           <div className="dcp-header-left">
@@ -466,7 +454,7 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
             onRelease={handleRelease}
             onDispute={handleDispute}
             onRemindBuyer={handleRemindBuyer}
-            onMarkDelivered={() => setTransferModalOpen(true)}
+            onMarkDelivered={() => router.push(`/messages/deal/${chatRoomId}/transfer`)}
           />
         ) : null}
 
@@ -521,7 +509,7 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
                 File
               </button>
               {isSeller ? (
-                <button id="dcpOptTransfer" className="dcp-attach-pill dcp-transfer-pill" onClick={() => setTransferModalOpen(true)}>
+                <button id="dcpOptTransfer" className="dcp-attach-pill dcp-transfer-pill" onClick={() => router.push(`/messages/deal/${chatRoomId}/transfer`)}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 014-4h14" /><path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 01-4 4H3" /></svg>
                   Transfer Deal
                 </button>
