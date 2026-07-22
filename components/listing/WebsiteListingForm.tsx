@@ -29,6 +29,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { createListing, generateVerification, checkVerification } from "@/lib/listings";
 import { aiStudioCall, aiPlanCap } from "@/lib/aiStudio";
 import { useAiLengthPicker } from "@/lib/useAiLengthPicker";
+import { useConfirm } from "@/lib/useConfirm";
 import { useLimits } from "@/lib/useLimits";
 import Select from "./shared/Select";
 import TransferMethodPicker from "./shared/TransferMethodPicker";
@@ -184,6 +185,7 @@ export default function WebsiteListingForm() {
 
   // ── AI auto-description (ports lfmAutoGenBtn from ai-support-chat.js) ──
   const { pick, AiLengthPickerHost } = useAiLengthPicker();
+  const { confirm, alert, ConfirmHost } = useConfirm();
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
@@ -262,39 +264,48 @@ export default function WebsiteListingForm() {
 
   // ── Draft restore on mount ──
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (!raw) return;
-      const ok = window.confirm("You have a saved draft for a website listing. Restore it?");
-      if (!ok) {
-        localStorage.removeItem(DRAFT_KEY);
-        return;
+    async function restoreDraft() {
+      try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (!raw) return;
+        const ok = await confirm({
+          theme: "info",
+          title: "Restore Draft?",
+          msg: "You have a saved draft for a website listing. Restore it?",
+          confirmText: "Restore",
+          cancelText: "Discard",
+        });
+        if (!ok) {
+          localStorage.removeItem(DRAFT_KEY);
+          return;
+        }
+        const d: Draft = JSON.parse(raw);
+        if (d.isTemplate) setIsTemplate(true);
+        if (d.tplUploadType) setTplUploadType(d.tplUploadType);
+        if (d.tplLinkUrl) setTplLinkUrl(d.tplLinkUrl);
+        if (d.url) setUrl(d.url);
+        if (d.title) setTitle(d.title);
+        if (d.desc) setDesc(d.desc);
+        if (d.frontend) setFrontend(d.frontend);
+        if (d.backend) setBackend(d.backend);
+        if (d.database) setDatabase(d.database);
+        if (d.monetization) setMonetization(d.monetization);
+        if (d.location) setLocation(d.location);
+        if (d.reason) setReason(d.reason);
+        if (d.category) setCategory(d.category);
+        if (d.age) setAge(d.age);
+        if (d.structure) setStructure(d.structure);
+        if (d.price) setPrice(d.price);
+        if (d.revenue) setRevenue(d.revenue);
+        if (d.expenses) setExpenses(d.expenses);
+        if (d.transferMethods?.length) setTransferMethods(d.transferMethods);
+        if (d.monthlyVisits) setMonthlyVisits(d.monthlyVisits);
+        if (d.step && d.step > 1) setStep(d.step);
+      } catch {
+        // ignore corrupt draft
       }
-      const d: Draft = JSON.parse(raw);
-      if (d.isTemplate) setIsTemplate(true);
-      if (d.tplUploadType) setTplUploadType(d.tplUploadType);
-      if (d.tplLinkUrl) setTplLinkUrl(d.tplLinkUrl);
-      if (d.url) setUrl(d.url);
-      if (d.title) setTitle(d.title);
-      if (d.desc) setDesc(d.desc);
-      if (d.frontend) setFrontend(d.frontend);
-      if (d.backend) setBackend(d.backend);
-      if (d.database) setDatabase(d.database);
-      if (d.monetization) setMonetization(d.monetization);
-      if (d.location) setLocation(d.location);
-      if (d.reason) setReason(d.reason);
-      if (d.category) setCategory(d.category);
-      if (d.age) setAge(d.age);
-      if (d.structure) setStructure(d.structure);
-      if (d.price) setPrice(d.price);
-      if (d.revenue) setRevenue(d.revenue);
-      if (d.expenses) setExpenses(d.expenses);
-      if (d.transferMethods?.length) setTransferMethods(d.transferMethods);
-      if (d.monthlyVisits) setMonthlyVisits(d.monthlyVisits);
-      if (d.step && d.step > 1) setStep(d.step);
-    } catch {
-      // ignore corrupt draft
     }
+    restoreDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -325,11 +336,15 @@ export default function WebsiteListingForm() {
     );
   }
 
-  function handleBack() {
+  async function handleBack() {
     if (hasAnyData()) {
-      const save = window.confirm(
-        "You have unsaved listing info. Save as a draft so you can pick up where you left off?\n\nOK = Save Draft, Cancel = Discard & Close"
-      );
+      const save = await confirm({
+        theme: "warning",
+        title: "Save as Draft?",
+        msg: "You have unsaved listing info. Save as a draft so you can pick up where you left off?",
+        confirmText: "Save Draft",
+        cancelText: "Discard & Close",
+      });
       if (save) saveDraft();
       else clearDraft();
     }
@@ -397,12 +412,12 @@ export default function WebsiteListingForm() {
     reader.readAsDataURL(file);
   }
 
-  function onFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     const idx = targetIdxRef.current;
     if (!f || idx == null) return;
     if (!f.type.startsWith("image/")) {
-      window.alert("Please select an image file (PNG, JPG, or WebP).");
+      await alert({ theme: "warning", title: "Invalid File", msg: "Please select an image file (PNG, JPG, or WebP)." });
       return;
     }
     readFile(f, idx);
@@ -700,6 +715,7 @@ export default function WebsiteListingForm() {
   return (
     <div style={{ minHeight: "100vh", marginTop: 92, background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
       <AiLengthPickerHost />
+      <ConfirmHost />
       <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFileInputChange} />
 
       {/* Header */}
@@ -1413,6 +1429,7 @@ const inputStyle: React.CSSProperties = {
 };
 const nextBtnStyle: React.CSSProperties = {
   flex: 1,
+  width: "100%",
   height: 48,
   background: ACCENT,
   color: "#09090b",
