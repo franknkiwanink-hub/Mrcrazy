@@ -67,6 +67,8 @@ export interface DealChatRoom {
   deleteAt: number | null;
   autoCompleted: boolean;
   autoCancelled: boolean;
+  paymentRequestPending: boolean;
+  paymentRequestedAt: number | null;
 }
 
 const DEAL_CHAT_DELETE_MS = 30 * 60 * 1000; // 30 minutes after cancellation
@@ -162,6 +164,8 @@ export function useDealChat(chatRoomId: string) {
         deleteAt: (r.deleteAt as number) || null,
         autoCompleted: r.autoCompleted === true,
         autoCancelled: r.autoCancelled === true,
+        paymentRequestPending: r.paymentRequestPending === true,
+        paymentRequestedAt: (r.paymentRequestedAt as number) || null,
       };
       setRoom(nextRoom);
 
@@ -383,6 +387,13 @@ export function useDealChat(chatRoomId: string) {
     [chatRoomId, room]
   );
 
+  // FUTURE PAYMENT METHOD: wallet-to-wallet escrow funding. Kept in place
+  // (not removed/deleted) but not currently wired to any UI — we don't
+  // hold a money-transmitter/custodial license to let users pay other
+  // users directly from wallet balance. Re-enable this once a licensed
+  // payment provider is integrated for escrow funding. Until then, Pay
+  // Now in DealChatPanel.tsx shows a "temporarily unavailable" notice
+  // instead of calling this.
   const payEscrow = useCallback((amount: number) => postDealAction("escrow-pay", { amount }), [postDealAction]);
   const releaseEscrow = useCallback(() => postDealAction("escrow-release"), [postDealAction]);
   const raiseDispute = useCallback((reason: string) => postDealAction("escrow-dispute", { reason }), [postDealAction]);
@@ -398,6 +409,7 @@ export function useDealChat(chatRoomId: string) {
       cancelledBy: user.uid,
       cancelledAt,
       deleteAt,
+      paymentRequestPending: false,
     });
     await addDoc(collection(db, "dealChats", chatRoomId, "messages"), {
       uid: "system",
@@ -421,6 +433,15 @@ export function useDealChat(chatRoomId: string) {
   const remindBuyer = useCallback(
     async (price: string) => {
       if (!room?.buyerUid) return;
+      // Guard: don't let the seller keep sending unlimited payment
+      // requests — once one is pending, block further sends until it's
+      // cleared (buyer pays, deal is cancelled, etc.).
+      if (room.paymentRequestPending) return;
+      const requestedAt = Date.now();
+      await updateDoc(doc(db, "dealChats", chatRoomId), {
+        paymentRequestPending: true,
+        paymentRequestedAt: requestedAt,
+      });
       await addDoc(collection(db, "users", room.buyerUid, "notifications"), {
         type: "payment_reminder",
         title: "Payment requested",
@@ -428,7 +449,7 @@ export function useDealChat(chatRoomId: string) {
         chatRoomId,
         dealId: room.dealId,
         read: false,
-        createdAt: Date.now(),
+        createdAt: requestedAt,
       });
     },
     [chatRoomId, room]
