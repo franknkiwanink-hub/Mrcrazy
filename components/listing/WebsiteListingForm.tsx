@@ -26,7 +26,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
-import { createListing } from "@/lib/listings";
+import { createListing, generateVerification, checkVerification } from "@/lib/listings";
 import { aiStudioCall, aiPlanCap } from "@/lib/aiStudio";
 import { useAiLengthPicker } from "@/lib/useAiLengthPicker";
 import { useLimits } from "@/lib/useLimits";
@@ -251,6 +251,16 @@ export default function WebsiteListingForm() {
   const [progress, setProgress] = useState<{ pct: number; label: string } | null>(null);
   const [submitError, setSubmitError] = useState("");
   const [success, setSuccess] = useState(false);
+  // Post-publish, optional domain verification (see /aitools's
+  // VerifyOwnershipCard for the standalone version of this same flow).
+  // Publishing itself never depends on any of this — see handleSubmit,
+  // which sets `success` and reaches this UI regardless of whether the
+  // user ever verifies. Verifying only adds the green "Verified" badge.
+  const [createdListingId, setCreatedListingId] = useState<string | null>(null);
+  const [verifyStep, setVerifyStep] = useState<"idle" | "generating" | "ready" | "checking" | "verified">("idle");
+  const [verifySnippet, setVerifySnippet] = useState<string | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [verifyCopied, setVerifyCopied] = useState(false);
 
   // ── Draft restore on mount ──
   useEffect(() => {
@@ -580,7 +590,7 @@ export default function WebsiteListingForm() {
 
       setProgress({ pct: 85, label: "Saving listing to marketplace…" });
 
-      await createListing({
+      const { listingId } = await createListing({
         idToken,
         type: "website",
         isTemplate,
@@ -604,13 +614,59 @@ export default function WebsiteListingForm() {
 
       setProgress({ pct: 100, label: "Published!" });
       setSuccess(true);
+      setCreatedListingId(listingId);
       clearDraft();
-      setTimeout(() => router.push("/marketplace"), 2000);
+      // No auto-redirect here on purpose — a website listing always has a
+      // verifiable domain, so this is the moment to offer "Verify now" (see
+      // the success block below) before the user wanders off to the
+      // marketplace. They can still skip it and go straight there.
     } catch (err: any) {
       setSubmitError("Error: " + (err?.message || "Something went wrong. Please try again."));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function startVerification() {
+    if (!createdListingId) return;
+    setVerifyStep("generating");
+    setVerifyError(null);
+    try {
+      const idToken = await user!.getIdToken();
+      const result = await generateVerification({ idToken, listingId: createdListingId });
+      setVerifySnippet(result.snippet);
+      setVerifyStep("ready");
+    } catch (err: any) {
+      setVerifyError(err?.message || "Could not generate a verification snippet — please try again.");
+      setVerifyStep("idle");
+    }
+  }
+
+  async function runVerificationCheck() {
+    if (!createdListingId) return;
+    setVerifyStep("checking");
+    setVerifyError(null);
+    try {
+      const idToken = await user!.getIdToken();
+      const result = await checkVerification({ idToken, listingId: createdListingId });
+      if (result.verified) {
+        setVerifyStep("verified");
+      } else {
+        setVerifyError("We couldn't find the tag on your site yet. Make sure it's saved and live, then try again.");
+        setVerifyStep("ready");
+      }
+    } catch (err: any) {
+      setVerifyError(err?.message || "Could not check verification right now — please try again.");
+      setVerifyStep("ready");
+    }
+  }
+
+  function copyVerifySnippet() {
+    if (!verifySnippet) return;
+    navigator.clipboard.writeText(verifySnippet).then(() => {
+      setVerifyCopied(true);
+      setTimeout(() => setVerifyCopied(false), 1500);
+    });
   }
 
   return (
@@ -1004,8 +1060,73 @@ export default function WebsiteListingForm() {
             )}
 
             {success && (
-              <div style={{ padding: 14, background: "rgba(163,230,53,0.1)", border: "1px solid rgba(163,230,53,0.3)", borderRadius: 10, color: ACCENT, fontWeight: 700, marginBottom: 16, textAlign: "center" }}>
-                ✓ Published! Redirecting to the marketplace…
+              <div style={{ padding: 16, background: "rgba(163,230,53,0.1)", border: "1px solid rgba(163,230,53,0.3)", borderRadius: 10, marginBottom: 16 }}>
+                <div style={{ color: ACCENT, fontWeight: 700, textAlign: "center", marginBottom: isTemplate ? 0 : 12 }}>
+                  ✓ Published!
+                </div>
+
+                {!isTemplate && verifyStep === "idle" && (
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", marginBottom: 10 }}>
+                      Want the green &quot;Verified&quot; badge? Prove you own this domain — takes about a minute. Totally optional.
+                    </div>
+                    <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+                      <button onClick={startVerification} style={{ ...nextBtnStyle, width: "auto", padding: "10px 20px" }}>
+                        Verify now
+                      </button>
+                      <button onClick={() => router.push("/marketplace")} style={{ ...nextBtnStyle, width: "auto", padding: "10px 20px", background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)" }}>
+                        Skip, go to marketplace
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {verifyStep === "generating" && (
+                  <div style={{ textAlign: "center", fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Generating snippet…</div>
+                )}
+
+                {(verifyStep === "ready" || verifyStep === "checking") && verifySnippet && (
+                  <div>
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", marginBottom: 8 }}>
+                      Paste this into your site&apos;s <code>&lt;head&gt;</code>, save, then check:
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#0d0d0d", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "10px 12px" }}>
+                      <code style={{ fontSize: 11, color: "rgba(255,255,255,0.8)", wordBreak: "break-all", flex: 1 }}>{verifySnippet}</code>
+                      <button onClick={copyVerifySnippet} style={{ flexShrink: 0, background: "transparent", border: "none", color: ACCENT, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+                        {verifyCopied ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 12 }}>
+                      <button onClick={runVerificationCheck} disabled={verifyStep === "checking"} style={{ ...nextBtnStyle, width: "auto", padding: "10px 20px", opacity: verifyStep === "checking" ? 0.6 : 1 }}>
+                        {verifyStep === "checking" ? "Checking…" : "Check now"}
+                      </button>
+                      <button onClick={() => router.push("/marketplace")} style={{ ...nextBtnStyle, width: "auto", padding: "10px 20px", background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)" }}>
+                        I&apos;ll do this later
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {verifyStep === "verified" && (
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 13, color: ACCENT, fontWeight: 700, marginBottom: 10 }}>✓ Domain verified!</div>
+                    <button onClick={() => router.push("/marketplace")} style={{ ...nextBtnStyle, width: "auto", padding: "10px 20px" }}>
+                      Go to marketplace
+                    </button>
+                  </div>
+                )}
+
+                {verifyError && (
+                  <div style={{ marginTop: 10, fontSize: 12, color: "#f87171", textAlign: "center" }}>{verifyError}</div>
+                )}
+
+                {isTemplate && (
+                  <div style={{ textAlign: "center" }}>
+                    <button onClick={() => router.push("/marketplace")} style={{ ...nextBtnStyle, width: "auto", padding: "10px 20px", marginTop: 4 }}>
+                      Go to marketplace
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
