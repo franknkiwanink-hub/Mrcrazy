@@ -10,6 +10,7 @@ import {
   type TdmListingType,
   type TdmItemType,
   type TdmPayload,
+  type TdmChecklistItem,
 } from "@/lib/useTransferDeal";
 import { TdmIcon, TdmArrowIcon, TdmCheckmarkIcon } from "./tdmIcons";
 import type { PaymentStatus } from "@/lib/useDealChat";
@@ -49,7 +50,7 @@ export default function TransferDealModal(props: TransferDealModalProps) {
 
   const tdm = useTransferDeal({ chatRoomId, sellerUid, buyerUid, listingId, dealId, paymentStatus, isSeller, syncThreads });
 
-  const [activeItem, setActiveItem] = useState<{ key: string; type: TdmItemType; label: string } | null>(null);
+  const [activeItem, setActiveItem] = useState<{ key: string; item: TdmChecklistItem } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
 
   // Lock page scroll while open, same as the rest of the app's modals.
@@ -107,7 +108,7 @@ export default function TransferDealModal(props: TransferDealModalProps) {
       </nav>
 
       <main className="tdm-checklist-main">
-        <ChecklistGrid tab={tdm.tab} completed={tdm.completed} onOpenItem={(key, type, label) => setActiveItem({ key, type, label })} />
+        <ChecklistGrid tab={tdm.tab} completed={tdm.completed} onOpenItem={(key, item) => setActiveItem({ key, item })} />
       </main>
 
       <FloatingCta finalized={tdm.isTabFinalized} enabled={tdm.anyCompletedInTab} onClick={() => tdm.anyCompletedInTab && !tdm.isTabFinalized && setPreviewOpen(true)} />
@@ -115,10 +116,13 @@ export default function TransferDealModal(props: TransferDealModalProps) {
       {activeItem ? (
         <ItemModal
           key={activeItem.key}
-          label={activeItem.label}
-          type={activeItem.type}
+          item={activeItem.item}
           buyerEmail={tdm.buyerEmail}
           existing={tdm.payloads[activeItem.key]}
+          attachedRepo={tdm.attachedRepo}
+          githubStatus={tdm.githubStatus}
+          githubCollabUsername={tdm.githubCollabUsername}
+          inviteGithubCollaborator={tdm.inviteGithubCollaborator}
           onCancel={() => setActiveItem(null)}
           onDone={(payload) => {
             tdm.markCompleted(activeItem.key, payload);
@@ -178,7 +182,7 @@ function ChecklistGrid({
 }: {
   tab: TdmListingType;
   completed: Record<string, boolean>;
-  onOpenItem: (key: string, type: TdmItemType, label: string) => void;
+  onOpenItem: (key: string, item: TdmChecklistItem) => void;
 }) {
   const data = TDM_CATEGORIES[tab];
   return (
@@ -204,13 +208,13 @@ function ChecklistRow({
   completed,
   onOpen,
 }: {
-  item: { label: string; icon: string; type: TdmItemType };
+  item: TdmChecklistItem;
   itemKey: string;
   completed: boolean;
-  onOpen: (key: string, type: TdmItemType, label: string) => void;
+  onOpen: (key: string, item: TdmChecklistItem) => void;
 }) {
   return (
-    <div className={`tdm-checklist-item${completed ? " tdm-completed" : ""}`} onClick={() => onOpen(itemKey, item.type, item.label)}>
+    <div className={`tdm-checklist-item${completed ? " tdm-completed" : ""}`} onClick={() => onOpen(itemKey, item)}>
       <div className="tdm-icon-wrapper">
         <TdmIcon id={item.icon} />
       </div>
@@ -233,47 +237,134 @@ function FloatingCta({ finalized, enabled, onClick }: { finalized: boolean; enab
 }
 
 // ---------- Item modal ----------
-// STALE: this component's branching (`type === "transfer" | "upload" |
-// "input"`) still targets the old 3-value TdmItemType. lib/useTransferDeal.ts
-// now exports the 5-value action-type model (registry_transfer,
-// collaborator_invite, file_upload, secure_secret, account_ownership) plus
-// per-item `altType` for seller's-choice items (e.g. Source Code
-// Repository). This file is expected to be replaced with the new popup —
-// left as-is on purpose rather than patched to half-match the new types.
+// Branches on the 5 professional action types (registry_transfer,
+// collaborator_invite, file_upload, secure_secret, account_ownership).
+// Items with `altType` (e.g. Source Code Repository: collaborator_invite
+// or file_upload) let the seller pick which path to complete it through —
+// the choice is a local view toggle, not a separate checklist entry.
 function ItemModal({
-  type,
-  label,
+  item,
   buyerEmail,
   existing,
+  attachedRepo,
+  githubStatus,
+  githubCollabUsername,
+  inviteGithubCollaborator,
   onCancel,
   onDone,
   alert,
 }: {
-  type: TdmItemType;
-  label: string;
+  item: TdmChecklistItem;
   buyerEmail: string;
   existing: TdmPayload | undefined;
+  attachedRepo: import("@/lib/listings").AttachedRepo | null | undefined;
+  githubStatus: "none" | "invited" | "added";
+  githubCollabUsername: string;
+  inviteGithubCollaborator: (username: string) => Promise<{ ok: true; status: "none" | "invited" | "added" } | { ok: false; error: string }>;
   onCancel: () => void;
   onDone: (payload: TdmPayload) => void;
   alert: (opts: { theme?: "success" | "warning" | "danger" | "info" | "report"; title: string; msg: string }) => Promise<void>;
 }) {
-  const theme = TDM_TYPE_THEME[type];
+  const hasChoice = !!item.altType;
+  const [activeType, setActiveType] = useState<TdmItemType>(item.type);
+  const theme = TDM_TYPE_THEME[activeType];
+  const label = item.label;
+
+  return (
+    <div className="tdm-item-modal-overlay active" onClick={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="tdm-item-modal" style={{ "--tdm-accent": theme.accent } as React.CSSProperties}>
+        <div className="tdm-modal-theme-head" style={{ "--tdm-accent": theme.accent } as React.CSSProperties}>
+          <div className="tdm-modal-theme-icon">
+            <TypeThemeIcon type={activeType} />
+          </div>
+          <div>
+            <div className="tdm-modal-theme-kicker">{theme.heading}</div>
+            <h2 style={{ margin: 0 }}>{label}</h2>
+          </div>
+        </div>
+        <p className="tdm-modal-blurb">{theme.blurb}</p>
+
+        {hasChoice ? (
+          <div className="tdm-type-choice">
+            <button
+              type="button"
+              className={`tdm-type-choice-btn${activeType === item.type ? " active" : ""}`}
+              style={{ "--tdm-accent": TDM_TYPE_THEME[item.type].accent } as React.CSSProperties}
+              onClick={() => setActiveType(item.type)}
+            >
+              {TDM_TYPE_THEME[item.type].heading}
+            </button>
+            <button
+              type="button"
+              className={`tdm-type-choice-btn${activeType === item.altType ? " active" : ""}`}
+              style={{ "--tdm-accent": TDM_TYPE_THEME[item.altType!].accent } as React.CSSProperties}
+              onClick={() => setActiveType(item.altType!)}
+            >
+              {TDM_TYPE_THEME[item.altType!].heading}
+            </button>
+          </div>
+        ) : null}
+
+        {activeType === "file_upload" ? (
+          <FileUploadPanel label={label} existing={existing} onCancel={onCancel} onDone={onDone} alert={alert} accent={theme.accent} />
+        ) : activeType === "secure_secret" ? (
+          <SecureSecretPanel label={label} existing={existing} onCancel={onCancel} onDone={onDone} alert={alert} accent={theme.accent} />
+        ) : activeType === "collaborator_invite" ? (
+          <CollaboratorInvitePanel
+            label={label}
+            attachedRepo={attachedRepo}
+            githubStatus={githubStatus}
+            githubCollabUsername={githubCollabUsername}
+            inviteGithubCollaborator={inviteGithubCollaborator}
+            onCancel={onCancel}
+            onDone={onDone}
+            alert={alert}
+            accent={theme.accent}
+          />
+        ) : (
+          // registry_transfer + account_ownership share the same real
+          // pattern: show the buyer's real account email to copy into the
+          // third-party console (Play Console, domain registrar, hosting
+          // panel, etc.), seller completes the transfer there, then
+          // attaches screenshot proof.
+          <RecipientProofPanel
+            label={label}
+            buyerEmail={buyerEmail}
+            existing={existing}
+            onCancel={onCancel}
+            onDone={onDone}
+            alert={alert}
+            accent={theme.accent}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- file_upload: file(s) + freeform build info ----------
+function FileUploadPanel({
+  label,
+  existing,
+  onCancel,
+  onDone,
+  alert,
+  accent,
+}: {
+  label: string;
+  existing: TdmPayload | undefined;
+  onCancel: () => void;
+  onDone: (payload: TdmPayload) => void;
+  alert: (opts: { theme?: "success" | "warning" | "danger" | "info" | "report"; title: string; msg: string }) => Promise<void>;
+  accent: string;
+}) {
   const [filesArray, setFilesArray] = useState<File[]>(existing?.kind === "files" ? existing.files : []);
-  const [textValue, setTextValue] = useState(existing?.kind === "text" ? existing.textValue : "");
-  const [loginOpen, setLoginOpen] = useState(existing?.kind === "credentials");
-  const [loginUrl, setLoginUrl] = useState(existing?.kind === "credentials" ? existing.loginUrl : "");
-  const [loginEmail, setLoginEmail] = useState(existing?.kind === "credentials" ? existing.loginEmail : "");
-  const [loginPassword, setLoginPassword] = useState(existing?.kind === "credentials" ? existing.loginPassword : "");
+  const [buildInfo, setBuildInfo] = useState(existing?.kind === "files" ? existing.buildInfo || "" : "");
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const thumbUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
-    // Capture the ref's current array reference now; reading
-    // thumbUrlsRef.current directly inside the cleanup would pick up
-    // whatever it happens to be at unmount time (an ESLint
-    // react-hooks/exhaustive-deps warning: "ref value will likely have
-    // changed by the time the cleanup runs").
     const thumbUrls = thumbUrlsRef.current;
     return () => {
       thumbUrls.forEach((u) => URL.revokeObjectURL(u));
@@ -287,131 +378,400 @@ function ItemModal({
     setFilesArray((f) => f.filter((_, i) => i !== idx));
   }
 
-  async function handleSubmitLogin() {
-    const url = loginUrl.trim();
-    const email = loginEmail.trim();
-    const password = loginPassword.trim();
-    if (url && email && password) {
-      onDone({ kind: "credentials", label, loginUrl: url, loginEmail: email, loginPassword: password });
-    } else {
-      await alert({ theme: "warning", title: "Missing Information", msg: "Please fill in all login fields." });
+  async function handleDone() {
+    if (filesArray.length === 0) {
+      await alert({ theme: "warning", title: "Missing Information", msg: "Please upload at least one file." });
+      return;
     }
+    onDone({ kind: "files", label, files: filesArray, buildInfo: buildInfo.trim() || undefined });
   }
 
+  return (
+    <>
+      <label>Drop files or click to browse</label>
+      <div
+        className={`tdm-dropzone${dragOver ? " tdm-dragover" : ""}`}
+        style={{ "--tdm-accent": accent } as React.CSSProperties}
+        onClick={() => fileInputRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          addFiles(Array.from(e.dataTransfer.files));
+        }}
+      >
+        <DropzoneIcon />
+        <p>Drag &amp; drop files here or click to select</p>
+        <div className="tdm-file-list">
+          {filesArray.map((f, i) =>
+            TDM_IMAGE_EXT_RE.test(f.name) ? (
+              <FileThumb key={i} file={f} onRemove={() => removeFile(i)} thumbUrlsRef={thumbUrlsRef} />
+            ) : (
+              <span key={i} className="tdm-file-chip">
+                {f.name}
+                <button type="button" className="tdm-file-chip-remove" onClick={(e) => (e.stopPropagation(), removeFile(i))}>
+                  ✕
+                </button>
+              </span>
+            )
+          )}
+        </div>
+        <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => e.target.files && addFiles(Array.from(e.target.files))} />
+      </div>
+
+      <div className="tdm-buildinfo-section">
+        <div className="tdm-buildinfo-head">
+          <BuildInfoIcon />
+          <div>
+            <div className="tdm-buildinfo-title">Tell the buyer how this was built</div>
+            <div className="tdm-buildinfo-sub">Tech stack, how it works, setup steps — anything that helps them run it. Optional, but buyers trust listings more when this is filled in.</div>
+          </div>
+        </div>
+        <textarea
+          className="tdm-buildinfo-textarea"
+          placeholder={"e.g. Built with Next.js 14 + Postgres. Auth via NextAuth. Run `npm install` then `npm run dev`. Env vars needed: DATABASE_URL, STRIPE_KEY..."}
+          value={buildInfo}
+          onChange={(e) => setBuildInfo(e.target.value)}
+          rows={5}
+        />
+      </div>
+
+      <div className="tdm-btn-group">
+        <button className="tdm-btn tdm-btn-cancel" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="tdm-btn tdm-btn-done" style={{ background: accent, color: "#000" }} disabled={filesArray.length === 0} onClick={handleDone}>
+          {filesArray.length === 0 ? "Mark Done (upload required)" : "Mark Done"}
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ---------- secure_secret: email/password or a single key string, with a mandatory rotate-after-receiving warning ----------
+function SecureSecretPanel({
+  label,
+  existing,
+  onCancel,
+  onDone,
+  alert,
+  accent,
+}: {
+  label: string;
+  existing: TdmPayload | undefined;
+  onCancel: () => void;
+  onDone: (payload: TdmPayload) => void;
+  alert: (opts: { theme?: "success" | "warning" | "danger" | "info" | "report"; title: string; msg: string }) => Promise<void>;
+  accent: string;
+}) {
+  const [mode, setMode] = useState<"login" | "key">(existing?.kind === "text" ? "key" : "login");
+  const [loginUrl, setLoginUrl] = useState(existing?.kind === "credentials" ? existing.loginUrl : "");
+  const [loginEmail, setLoginEmail] = useState(existing?.kind === "credentials" ? existing.loginEmail : "");
+  const [loginPassword, setLoginPassword] = useState(existing?.kind === "credentials" ? existing.loginPassword : "");
+  const [textValue, setTextValue] = useState(existing?.kind === "text" ? existing.textValue : "");
+
   async function handleDone() {
-    if (type === "input") {
+    if (mode === "key") {
       const val = textValue.trim();
       if (!val) {
-        await alert({ theme: "warning", title: "Missing Information", msg: "Please enter credentials." });
+        await alert({ theme: "warning", title: "Missing Information", msg: "Please enter the key or token." });
         return;
       }
       onDone({ kind: "text", label, textValue: val });
+      return;
+    }
+    const url = loginUrl.trim();
+    const email = loginEmail.trim();
+    const password = loginPassword.trim();
+    if (!email || !password) {
+      await alert({ theme: "warning", title: "Missing Information", msg: "Please fill in at least the email and password." });
+      return;
+    }
+    onDone({ kind: "credentials", label, loginUrl: url, loginEmail: email, loginPassword: password });
+  }
+
+  return (
+    <>
+      <div className="tdm-secret-warning">
+        <SecretShieldIcon />
+        <p>
+          <strong>The buyer must change this password immediately after receiving it.</strong> It's encrypted in transit and delivered to the
+          buyer only — never shown again once the deal closes.
+        </p>
+      </div>
+
+      <div className="tdm-secret-tabs">
+        <button type="button" className={`tdm-secret-tab${mode === "login" ? " active" : ""}`} onClick={() => setMode("login")}>
+          <LoginIcon /> Login credentials
+        </button>
+        <button type="button" className={`tdm-secret-tab${mode === "key" ? " active" : ""}`} onClick={() => setMode("key")}>
+          <KeyIcon /> API key / token
+        </button>
+      </div>
+
+      {mode === "login" ? (
+        <div className="tdm-secret-fields">
+          <div className="tdm-field">
+            <label><UrlIcon />Site / Console URL <span className="tdm-field-optional">(optional)</span></label>
+            <input type="text" placeholder="https://example.com/admin" value={loginUrl} onChange={(e) => setLoginUrl(e.target.value)} />
+          </div>
+          <div className="tdm-field">
+            <label><MailIcon />Email / Username</label>
+            <input type="text" placeholder="user@example.com" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} />
+          </div>
+          <div className="tdm-field">
+            <label><LockIcon />Password</label>
+            <input type="password" placeholder="••••••••" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} />
+          </div>
+        </div>
+      ) : (
+        <div className="tdm-secret-fields">
+          <div className="tdm-field">
+            <label><KeyIcon />Key / Token</label>
+            <input type="text" placeholder="API key, keystore password, etc." value={textValue} onChange={(e) => setTextValue(e.target.value)} />
+          </div>
+        </div>
+      )}
+
+      <div className="tdm-btn-group">
+        <button className="tdm-btn tdm-btn-cancel" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="tdm-btn tdm-btn-done" style={{ background: accent, color: "#000" }} onClick={handleDone}>
+          Mark Done
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ---------- collaborator_invite: reuses the real GitHub invite flow already wired in useTransferDeal ----------
+function CollaboratorInvitePanel({
+  label,
+  attachedRepo,
+  githubStatus,
+  githubCollabUsername,
+  inviteGithubCollaborator,
+  onCancel,
+  onDone,
+  alert,
+  accent,
+}: {
+  label: string;
+  attachedRepo: import("@/lib/listings").AttachedRepo | null | undefined;
+  githubStatus: "none" | "invited" | "added";
+  githubCollabUsername: string;
+  inviteGithubCollaborator: (username: string) => Promise<{ ok: true; status: "none" | "invited" | "added" } | { ok: false; error: string }>;
+  onCancel: () => void;
+  onDone: (payload: TdmPayload) => void;
+  alert: (opts: { theme?: "success" | "warning" | "danger" | "info" | "report"; title: string; msg: string }) => Promise<void>;
+  accent: string;
+}) {
+  const [username, setUsername] = useState(githubCollabUsername);
+  const [inviting, setInviting] = useState(false);
+  const [status, setStatus] = useState(githubStatus);
+
+  async function handleInvite() {
+    const u = username.trim();
+    if (!u) {
+      await alert({ theme: "warning", title: "Missing Information", msg: "Enter the buyer's GitHub username first." });
+      return;
+    }
+    setInviting(true);
+    const result = await inviteGithubCollaborator(u);
+    setInviting(false);
+    if (result.ok) {
+      setStatus(result.status);
     } else {
-      if (filesArray.length === 0) {
-        await alert({ theme: "warning", title: "Missing Information", msg: "Please upload at least one file." });
-        return;
-      }
-      onDone({ kind: "files", label, files: filesArray });
+      await alert({ theme: "danger", title: "Invite Failed", msg: result.error });
     }
   }
 
-  const doneDisabled = type !== "input" && filesArray.length === 0;
-
-  return (
-    <div className="tdm-item-modal-overlay active" onClick={(e) => e.target === e.currentTarget && onCancel()}>
-      <div className="tdm-item-modal" style={{ "--tdm-accent": theme.accent } as React.CSSProperties}>
-        <div className="tdm-modal-theme-head" style={{ "--tdm-accent": theme.accent } as React.CSSProperties}>
-          <div className="tdm-modal-theme-icon">
-            <TypeThemeIcon type={type} />
-          </div>
-          <div>
-            <div className="tdm-modal-theme-kicker">{theme.heading}</div>
-            <h2 style={{ margin: 0 }}>{label}</h2>
-          </div>
+  if (!attachedRepo) {
+    return (
+      <>
+        <div className="tdm-secret-warning">
+          <SecretShieldIcon />
+          <p>No repository is attached to this listing yet. Attach one from the listing editor, or use the file upload option above instead.</p>
         </div>
-        <p className="tdm-modal-blurb">{theme.blurb}</p>
-
-        {type === "transfer" || type === "upload" ? (
-          <>
-            {type === "transfer" ? (
-              <div className="tdm-buyer-email">
-                <span>{buyerEmail || "buyer@example.com"}</span>
-                <button className="tdm-copy-btn" onClick={() => navigator.clipboard.writeText(buyerEmail || "buyer@example.com")}>
-                  Copy
-                </button>
-              </div>
-            ) : null}
-            <label>{type === "transfer" ? "Upload proof (screenshot, confirmation email, etc.)" : "Drop files or click to browse"}</label>
-            <div
-              className={`tdm-dropzone${dragOver ? " tdm-dragover" : ""}`}
-              style={{ "--tdm-accent": theme.accent } as React.CSSProperties}
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                addFiles(Array.from(e.dataTransfer.files));
-              }}
-            >
-              <p>Drag &amp; drop files here or click to select</p>
-              <div className="tdm-file-list">
-                {filesArray.map((f, i) =>
-                  TDM_IMAGE_EXT_RE.test(f.name) ? (
-                    <FileThumb key={i} file={f} onRemove={() => removeFile(i)} thumbUrlsRef={thumbUrlsRef} />
-                  ) : (
-                    <span key={i} className="tdm-file-chip">
-                      {f.name}
-                      <button type="button" className="tdm-file-chip-remove" onClick={(e) => (e.stopPropagation(), removeFile(i))}>
-                        ✕
-                      </button>
-                    </span>
-                  )
-                )}
-              </div>
-              <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => e.target.files && addFiles(Array.from(e.target.files))} />
-            </div>
-          </>
-        ) : (
-          <>
-            <label>Paste the key/credentials</label>
-            <input type="text" placeholder="API key, keystore, etc." value={textValue} onChange={(e) => setTextValue(e.target.value)} />
-          </>
-        )}
-
-        <span className="tdm-login-toggle" onClick={() => setLoginOpen((v) => !v)}>
-          Send login credentials instead →
-        </span>
-        <div className={`tdm-login-form${loginOpen ? " active" : ""}`}>
-          <label>Site URL</label>
-          <input type="text" placeholder="https://example.com/admin" value={loginUrl} onChange={(e) => setLoginUrl(e.target.value)} />
-          <label>Email / Username</label>
-          <input type="text" placeholder="user@example.com" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} />
-          <label>Password</label>
-          <input type="password" placeholder="••••••••" value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} />
-          <button className="tdm-btn tdm-btn-login-submit" style={{ background: theme.accent, color: "#000" }} onClick={handleSubmitLogin}>
-            Submit Login &amp; Mark Done
-          </button>
-        </div>
-
         <div className="tdm-btn-group">
           <button className="tdm-btn tdm-btn-cancel" onClick={onCancel}>
-            Cancel
-          </button>
-          <button className="tdm-btn tdm-btn-done" style={{ background: theme.accent, color: "#000" }} disabled={doneDisabled} onClick={handleDone}>
-            {type !== "input" && doneDisabled ? "Mark Done (upload required)" : "Mark Done"}
+            Close
           </button>
         </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="tdm-buyer-email">
+        <span>{attachedRepo.fullName}</span>
+        <a href={attachedRepo.htmlUrl || "#"} target="_blank" rel="noopener noreferrer" className="tdm-copy-btn">
+          Open
+        </a>
       </div>
-    </div>
+      <div className="tdm-field">
+        <label><GithubIcon />Buyer's GitHub username</label>
+        <input type="text" placeholder="octocat" value={username} onChange={(e) => setUsername(e.target.value)} />
+      </div>
+      {status !== "none" ? (
+        <div className={`tdm-gh-invite-msg${status === "added" ? " tdm-gh-msg-success" : ""}`}>
+          {status === "invited" ? "Invite sent — waiting for the buyer to accept." : "Buyer has access to this repository."}
+        </div>
+      ) : null}
+      <div className="tdm-btn-group">
+        <button className="tdm-btn tdm-btn-cancel" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="tdm-btn tdm-btn-done" style={{ background: accent, color: "#000" }} disabled={inviting} onClick={handleInvite}>
+          {inviting ? "Inviting…" : status === "none" ? "Send Invite" : "Re-send Invite"}
+        </button>
+        <button
+          className="tdm-btn tdm-btn-done"
+          style={{ background: accent, color: "#000" }}
+          disabled={status === "none"}
+          onClick={() => onDone({ kind: "text", label, textValue: `GitHub collaborator invite: ${username} (${status})` })}
+        >
+          Mark Done
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ---------- registry_transfer / account_ownership: show the buyer's real account email, seller transfers on the 3rd-party platform, then attaches proof ----------
+function RecipientProofPanel({
+  label,
+  buyerEmail,
+  existing,
+  onCancel,
+  onDone,
+  alert,
+  accent,
+}: {
+  label: string;
+  buyerEmail: string;
+  existing: TdmPayload | undefined;
+  onCancel: () => void;
+  onDone: (payload: TdmPayload) => void;
+  alert: (opts: { theme?: "success" | "warning" | "danger" | "info" | "report"; title: string; msg: string }) => Promise<void>;
+  accent: string;
+}) {
+  const [filesArray, setFilesArray] = useState<File[]>(existing?.kind === "screenshot_proof" ? existing.files : []);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const thumbUrlsRef = useRef<string[]>([]);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const thumbUrls = thumbUrlsRef.current;
+    return () => {
+      thumbUrls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, []);
+
+  function addFiles(newFiles: File[]) {
+    setFilesArray((f) => [...f, ...newFiles]);
+  }
+  function removeFile(idx: number) {
+    setFilesArray((f) => f.filter((_, i) => i !== idx));
+  }
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(buyerEmail || "");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  }
+
+  async function handleDone() {
+    if (filesArray.length === 0) {
+      await alert({ theme: "warning", title: "Missing Information", msg: "Please upload a screenshot or confirmation as proof of transfer." });
+      return;
+    }
+    onDone({ kind: "screenshot_proof", label, files: filesArray, recipientEmail: buyerEmail });
+  }
+
+  return (
+    <>
+      <div className="tdm-recipient-steps">
+        <div className="tdm-recipient-step">
+          <span className="tdm-recipient-step-num">1</span>
+          <div>
+            <div className="tdm-recipient-step-title">Copy the buyer's account email</div>
+            <div className="tdm-buyer-email">
+              <span>{buyerEmail || "Buyer email unavailable — refresh and try again"}</span>
+              <button className="tdm-copy-btn" onClick={handleCopy} disabled={!buyerEmail}>
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="tdm-recipient-step">
+          <span className="tdm-recipient-step-num">2</span>
+          <div>
+            <div className="tdm-recipient-step-title">Add the buyer on the platform's console</div>
+            <div className="tdm-recipient-step-sub">Go to the official transfer/ownership tool for this item and add the email above as the new owner or team member.</div>
+          </div>
+        </div>
+        <div className="tdm-recipient-step">
+          <span className="tdm-recipient-step-num">3</span>
+          <div className="tdm-recipient-step-title">Upload proof of the transfer</div>
+        </div>
+      </div>
+
+      <div
+        className={`tdm-dropzone${dragOver ? " tdm-dragover" : ""}`}
+        style={{ "--tdm-accent": accent } as React.CSSProperties}
+        onClick={() => fileInputRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragOver(true);
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          addFiles(Array.from(e.dataTransfer.files));
+        }}
+      >
+        <DropzoneIcon />
+        <p>Drag &amp; drop a screenshot or confirmation here</p>
+        <div className="tdm-file-list">
+          {filesArray.map((f, i) =>
+            TDM_IMAGE_EXT_RE.test(f.name) ? (
+              <FileThumb key={i} file={f} onRemove={() => removeFile(i)} thumbUrlsRef={thumbUrlsRef} />
+            ) : (
+              <span key={i} className="tdm-file-chip">
+                {f.name}
+                <button type="button" className="tdm-file-chip-remove" onClick={(e) => (e.stopPropagation(), removeFile(i))}>
+                  ✕
+                </button>
+              </span>
+            )
+          )}
+        </div>
+        <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => e.target.files && addFiles(Array.from(e.target.files))} />
+      </div>
+
+      <div className="tdm-btn-group">
+        <button className="tdm-btn tdm-btn-cancel" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="tdm-btn tdm-btn-done" style={{ background: accent, color: "#000" }} disabled={filesArray.length === 0} onClick={handleDone}>
+          {filesArray.length === 0 ? "Mark Done (proof required)" : "Mark Done"}
+        </button>
+      </div>
+    </>
   );
 }
 
 function TypeThemeIcon({ type }: { type: TdmItemType }) {
-  if (type === "transfer")
+  if (type === "registry_transfer")
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
         <path d="M17 1l4 4-4 4" />
@@ -420,7 +780,24 @@ function TypeThemeIcon({ type }: { type: TdmItemType }) {
         <path d="M21 13v2a4 4 0 01-4 4H3" />
       </svg>
     );
-  if (type === "upload")
+  if (type === "account_ownership")
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 21v-1a7 7 0 0114 0v1" />
+        <path d="M17 8l2 2 3-4" />
+      </svg>
+    );
+  if (type === "collaborator_invite")
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 00-3-3.87" />
+        <path d="M17 3.13a4 4 0 010 7.75" />
+      </svg>
+    );
+  if (type === "file_upload")
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
@@ -431,6 +808,80 @@ function TypeThemeIcon({ type }: { type: TdmItemType }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
+    </svg>
+  );
+}
+
+// ---------- small inline icons used inside the panels above (SVG only, no emoji) ----------
+function DropzoneIcon() {
+  return (
+    <svg className="tdm-dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+function BuildInfoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width="20" height="20">
+      <polyline points="16 18 22 12 16 6" />
+      <polyline points="8 6 2 12 8 18" />
+    </svg>
+  );
+}
+function SecretShieldIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  );
+}
+function LoginIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width="15" height="15">
+      <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4" />
+      <polyline points="10 17 15 12 10 7" />
+      <line x1="15" y1="12" x2="3" y2="12" />
+    </svg>
+  );
+}
+function KeyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width="15" height="15">
+      <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
+    </svg>
+  );
+}
+function UrlIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+      <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+function MailIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M22 4L12 13 2 4" />
+    </svg>
+  );
+}
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0110 0v4" />
+    </svg>
+  );
+}
+function GithubIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+      <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z" />
     </svg>
   );
 }
