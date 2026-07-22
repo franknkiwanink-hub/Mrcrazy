@@ -38,6 +38,14 @@ export interface ListingSettings {
   reason?: string;
 }
 
+// Monthly traffic claim + its supporting analytics screenshots (GA4,
+// Search Console, host panel, etc). Optional overall, but once a visits
+// number is entered at least one screenshot is required client-side.
+export interface ListingTraffic {
+  monthlyVisits?: number;
+  proofUrls?: string[];
+}
+
 export interface ListingBuildFile {
   filename?: string;
   url?: string | null;
@@ -72,6 +80,7 @@ export interface Listing {
   ownerEmail?: string;
   ownerPlan?: string;
   financials?: ListingFinancials & { model?: string; subMonthly?: number; subAnnual?: number };
+  traffic?: ListingTraffic;
   tech?: ListingTech;
   settings?: ListingSettings;
   images?: string[];
@@ -92,6 +101,10 @@ export interface Listing {
     iosUrl?: string | null;
     androidUrl?: string | null;
     webUrl?: string | null;
+    // Present for Game listings, which can also distribute on Steam or as
+    // a direct desktop download alongside/instead of iOS/Android/Web.
+    steamUrl?: string | null;
+    desktopUrl?: string | null;
     previewUrl?: string | null;
     notLive?: { ios?: boolean; android?: boolean; web?: boolean };
     // iOS/Android "not live" builds are always an externally-hosted link
@@ -315,7 +328,8 @@ export interface CreateListingParams {
   category?: string;
   tech?: ListingTech;
   settings?: ListingSettings;
-  financials: { price: number; revenue: number; expenses: number };
+  financials: { price: number; revenue: number; expenses: number; revenueProofUrls?: string[] };
+  traffic?: { monthlyVisits?: number; proofUrls?: string[] };
   transferMethods?: string[];
   gameType?: string;
   videoUrl?: string;
