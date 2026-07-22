@@ -5,7 +5,6 @@ import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useNavDrawer } from "@/components/layout/NavDrawerProvider";
 import { useNavListingsCount } from "@/lib/useNavListingsCount";
-import { useToast } from "@/lib/useToast";
 import { logout } from "@/lib/authActions";
 import { useWalletModal } from "@/components/wallet/WalletModalProvider";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
@@ -30,7 +29,6 @@ export default function NavDrawer() {
   const { user, profile } = useAuth();
   const { openAuthModal } = useAuthModal();
   const { isOpen, closeNav, scrollBodyRef } = useNavDrawer();
-  const { ToastHost } = useToast();
   const { openWallet } = useWalletModal();
   const { openPlansModal } = usePlansModal();
   const { openThemePicker } = useThemeModal();
@@ -465,7 +463,6 @@ export default function NavDrawer() {
         <div className="nav-footer">© 2026 Siterifty.com</div>
       </div>
       {/* /navScrollBody */}
-      <ToastHost />
 
       {/* Logout confirm modal — same real #logoutModalOverlay styling used
           in Settings/My Profile, rendered as a sibling of <nav> (not
