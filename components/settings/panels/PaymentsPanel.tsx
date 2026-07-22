@@ -4,7 +4,7 @@ import { useState } from "react";
 import { doc, updateDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type { SettingsState } from "@/lib/useSettingsState";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
 
 const SaveIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
@@ -26,7 +26,7 @@ export default function PaymentsPanel({
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
   const [paypalEmail, setPaypalEmail] = useState(state.paypalEmail);
   const [saving, setSaving] = useState(false);
 
@@ -37,16 +37,16 @@ export default function PaymentsPanel({
     if (!user) return;
     const email = paypalEmail.trim();
     if (!email || !email.includes("@")) {
-      toast("Please enter a valid PayPal email.");
+      toast("Please enter a valid PayPal email.", "error");
       return;
     }
     setSaving(true);
     try {
       await updateDoc(doc(db, "users", user.uid), { paypalEmail: email });
       setState((prev) => ({ ...prev, paypalEmail: email }));
-      toast("PayPal account saved.");
+      toast("PayPal account saved.", "success");
     } catch (err: any) {
-      toast(`Save failed: ${err.message}`);
+      toast(`Save failed: ${err.message}`, "error");
     } finally {
       setSaving(false);
     }
@@ -115,7 +115,6 @@ export default function PaymentsPanel({
         </span>
       </div>
 
-      <ToastHost />
     </>
   );
 }
