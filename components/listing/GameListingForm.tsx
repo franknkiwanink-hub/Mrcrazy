@@ -161,6 +161,20 @@ export default function GameListingForm() {
   const DESC_MAX = limits.listing.descMaxLength ?? FALLBACK_DESC_MAX;
 
   const [step, setStep] = useState(1);
+
+  // Clicking Continue/Back re-renders a completely different step, but
+  // the page was staying scrolled wherever the user left off on the
+  // previous step — so e.g. finishing step 2 scrolled near the bottom of
+  // a long page, and step 3 then opened still scrolled down there instead
+  // of at its own top. changeStep() replaces every direct setStep() call
+  // so navigating between steps always lands back at the top of the form.
+  function changeStep(n: number) {
+    setStep(n);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
   const [images, setImages] = useState<(SlotImage | null)[]>([null, null, null]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const targetIdxRef = useRef<number | null>(null);
@@ -514,7 +528,7 @@ export default function GameListingForm() {
       if (step === 1 && !validateStep1()) return;
       if (step === 2 && !validateStep2()) return;
     }
-    setStep(n);
+    changeStep(n);
     saveDraft(n);
   }
 
@@ -554,27 +568,27 @@ export default function GameListingForm() {
 
     const filled = images.filter(Boolean);
     if (filled.length !== 3) {
-      setStep(1);
+      changeStep(1);
       setErrors({ img: "Please upload exactly 3 images (2 portrait + 1 landscape)." });
       return;
     }
     let gameUrl: string | null = null;
     if (gameType === "upload") {
       if (!combinedHtml) {
-        setStep(1);
+        changeStep(1);
         setErrors({ upload: "Please upload your game files." });
         return;
       }
     } else {
       gameUrl = url.trim();
       if (!gameUrl || !/^https?:\/\/.+/.test(gameUrl)) {
-        setStep(1);
+        changeStep(1);
         setErrors({ upload: "Please enter a valid game URL." });
         return;
       }
     }
     if (!validateStep2()) {
-      setStep(2);
+      changeStep(2);
       return;
     }
     if (!price.trim() || !revenue.trim() || !expenses.trim()) {
@@ -911,26 +925,8 @@ export default function GameListingForm() {
                 />
                 {(p === "ios" || p === "android") && (
                   <div className="sr-lf-row-2" style={{ marginTop: 10 }}>
-                    <Field label="Installs">
-                      <input
-                        type="number"
-                        min="0"
-                        value={platformStats[p].installs}
-                        onChange={(e) => setPlatformStat(p, "installs", e.target.value)}
-                        placeholder="e.g. 10000"
-                        style={inputStyle}
-                      />
-                    </Field>
-                    <Field label="Monthly Active Users">
-                      <input
-                        type="number"
-                        min="0"
-                        value={platformStats[p].mau}
-                        onChange={(e) => setPlatformStat(p, "mau", e.target.value)}
-                        placeholder="e.g. 2500"
-                        style={inputStyle}
-                      />
-                    </Field>
+                    <RangeStatField label="Installs" value={platformStats[p].installs} onChange={(v) => setPlatformStat(p, "installs", v)} accent={ACCENT} />
+                    <RangeStatField label="Monthly Active Users" value={platformStats[p].mau} onChange={(v) => setPlatformStat(p, "mau", v)} accent={ACCENT} />
                   </div>
                 )}
               </div>
@@ -976,7 +972,7 @@ export default function GameListingForm() {
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
-              <PrevButton onClick={() => setStep(1)} />
+              <PrevButton onClick={() => changeStep(1)} />
               <NextButton onClick={() => goToStep(3)} />
             </div>
           </div>
@@ -1076,7 +1072,7 @@ export default function GameListingForm() {
             )}
 
             <div style={{ display: "flex", gap: 10 }}>
-              <PrevButton onClick={() => setStep(2)} disabled={submitting} />
+              <PrevButton onClick={() => changeStep(2)} disabled={submitting} />
               <button onClick={handleSubmit} disabled={submitting || success} style={{ ...nextBtnStyle, opacity: submitting || success ? 0.6 : 1 }}>
                 {submitting ? "Publishing…" : "Publish Listing"}
               </button>
@@ -1252,6 +1248,69 @@ function SelectWithOther({
           placeholder="Type your own…"
           style={{ ...inputStyle, marginTop: 8 }}
           autoFocus
+        />
+      )}
+    </Field>
+  );
+}
+
+// Installs / Monthly Active Users field — range picker first, then a
+// plain number input scoped to the picked bucket, so the saved value is
+// always a real typed number, never a guessed midpoint. See
+// AppListingForm.tsx's RangeStatField for the full rationale (same
+// pattern, duplicated here since these are per-file helpers).
+const STAT_BUCKETS = [
+  { label: "Under 100", min: 0, max: 99 },
+  { label: "101 – 500", min: 101, max: 500 },
+  { label: "501 – 1,000", min: 501, max: 1000 },
+  { label: "1,001 – 5,000", min: 1001, max: 5000 },
+  { label: "5,001 – 9,999", min: 5001, max: 9999 },
+  { label: "10,000+", min: 10000, max: null },
+];
+function bucketForValue(v: string): string {
+  const n = parseFloat(v);
+  if (!v || isNaN(n)) return "";
+  const b = STAT_BUCKETS.find((b) => n >= b.min && (b.max === null || n <= b.max));
+  return b ? b.label : "";
+}
+function RangeStatField({
+  label,
+  value,
+  onChange,
+  accent,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  accent: string;
+}) {
+  const [bucket, setBucket] = useState(() => bucketForValue(value));
+  const activeBucket = STAT_BUCKETS.find((b) => b.label === bucket);
+  return (
+    <Field label={label}>
+      <Select
+        value={bucket}
+        onChange={(v) => {
+          setBucket(v);
+          const b = STAT_BUCKETS.find((b) => b.label === v);
+          const n = parseFloat(value);
+          if (b && (!value || isNaN(n) || n < b.min || (b.max !== null && n > b.max))) {
+            onChange("");
+          }
+        }}
+        options={STAT_BUCKETS.map((b) => b.label)}
+        placeholder="Select a range"
+        accent={accent}
+      />
+      {bucket !== "" && (
+        <input
+          type="number"
+          min={activeBucket?.min ?? 0}
+          max={activeBucket?.max ?? undefined}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={activeBucket?.max === null ? "e.g. 25000" : `${activeBucket?.min}–${activeBucket?.max}`}
+          style={{ ...inputStyle, marginTop: 8 }}
         />
       )}
     </Field>
