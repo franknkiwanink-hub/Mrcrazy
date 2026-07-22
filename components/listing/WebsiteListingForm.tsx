@@ -186,6 +186,17 @@ export default function WebsiteListingForm() {
   const DESC_MAX = limits.listing.descMaxLength ?? FALLBACK_DESC_MAX;
 
   const [step, setStep] = useState(1);
+
+  // See GameListingForm.tsx's changeStep for why this exists — without it
+  // the newly-rendered step keeps whatever scroll position the previous
+  // step was left at, instead of opening at its own top.
+  function changeStep(n: number) {
+    setStep(n);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
   const [images, setImages] = useState<(SlotImage | null)[]>([null, null, null, null]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const targetIdxRef = useRef<number | null>(null);
@@ -555,7 +566,7 @@ export default function WebsiteListingForm() {
       if (step === 1 && !validateStep1()) return;
       if (step === 2 && !validateStep2()) return;
     }
-    setStep(n);
+    changeStep(n);
     saveDraft(n);
   }
 
@@ -571,7 +582,7 @@ export default function WebsiteListingForm() {
 
     const filled = images.filter(Boolean);
     if (filled.length !== 4) {
-      setStep(1);
+      changeStep(1);
       setErrors({ img: "Please upload all 4 images (2 portrait + 2 landscape)." });
       return;
     }
@@ -1049,7 +1060,7 @@ export default function WebsiteListingForm() {
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
-              <PrevButton onClick={() => setStep(1)} />
+              <PrevButton onClick={() => changeStep(1)} />
               <NextButton onClick={() => goToStep(3)} />
             </div>
           </div>
@@ -1214,7 +1225,7 @@ export default function WebsiteListingForm() {
             )}
 
             <div style={{ display: "flex", gap: 10 }}>
-              <PrevButton onClick={() => setStep(2)} disabled={submitting} />
+              <PrevButton onClick={() => changeStep(2)} disabled={submitting} />
               <button onClick={handleSubmit} disabled={submitting || success} style={{ ...nextBtnStyle, opacity: submitting || success ? 0.6 : 1 }}>
                 {submitting ? "Publishing…" : "Publish Listing"}
               </button>
