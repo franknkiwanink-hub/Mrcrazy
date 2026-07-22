@@ -27,6 +27,11 @@ import { createListing, checkStoreLink } from "@/lib/listings";
 import { aiStudioCall, aiPlanCap } from "@/lib/aiStudio";
 import { useAiLengthPicker } from "@/lib/useAiLengthPicker";
 import { useLimits } from "@/lib/useLimits";
+import Select from "./shared/Select";
+import TransferMethodPicker from "./shared/TransferMethodPicker";
+import ProofUploader, { type ProofImage } from "./shared/ProofUploader";
+import { GAME_TRANSFER_METHODS } from "./shared/transferMethods";
+import { PLATFORM_META, type PlatformKey } from "./shared/platforms";
 
 const ACCENT = "#f59e0b";
 const DRAFT_KEY = "srf_draft_game";
@@ -40,24 +45,18 @@ const FALLBACK_TITLE_MAX = 99;
 const FALLBACK_DESC_MIN = 100;
 const FALLBACK_DESC_MAX = 5000;
 
-const PLATFORM_OPTIONS = [
-  { value: "android", label: "Android" },
-  { value: "desktop", label: "Desktop" },
-  { value: "both", label: "Both" },
-];
+// A game's distribution platforms, independent of where its source/build
+// lives (that's the separate Upload/Link "Game Source" step below). A
+// game can be a browser game only, or it can also ship as a real app on
+// the Play Store / App Store, on Steam, or as a direct desktop download —
+// any combination. Reuses the same PLATFORM_META/installs+MAU pattern as
+// AppListingForm so a "game that's also a store app" is captured properly
+// instead of being forced into a single Android/Desktop/Both dropdown.
+const GAME_PLATFORM_KEYS: PlatformKey[] = ["web", "ios", "android", "steam", "desktop"];
+
 const GENRE_OPTIONS = ["Action", "Adventure", "RPG", "Shooter", "Strategy", "Simulation", "Sports", "Puzzle", "Other"];
 const AGE_OPTIONS = ["< 3 months", "3–5 months", "6–11 months", "1+ year", "2+ years", "3+ years", "5+ years", "10+ years"];
 const STRUCTURE_OPTIONS = ["Sole Proprietorship", "LLC", "Corporation", "Partnership", "Other"];
-
-const TRANSFER_METHODS: { value: string; label: string; sub?: string; featured?: boolean }[] = [
-  { value: "html_css_js", label: "HTML/CSS/JS Files", sub: "Hand off source files directly in chat — no complications", featured: true },
-  { value: "steam_key", label: "Steam Key / CD Key" },
-  { value: "direct_download", label: "Direct Download (EXE, APK, ROM)" },
-  { value: "account_handover", label: "Account Handover (Pre-loaded)" },
-  { value: "gift_code", label: "In-Game Gift Code" },
-  { value: "console_code", label: "Console Store Code (Xbox / PS / Nintendo)" },
-  { value: "google_play_games", label: "Google Play Games Transfer" },
-];
 
 const SLOT_LABELS = ["Portrait 1", "Portrait 2", "Landscape 16:9"];
 
@@ -72,7 +71,8 @@ interface Draft {
   url?: string;
   title?: string;
   desc?: string;
-  platform?: string;
+  platforms?: PlatformKey[];
+  platformUrls?: Partial<Record<PlatformKey, string>>;
   genre?: string;
   monetization?: string;
   reason?: string;
@@ -82,6 +82,7 @@ interface Draft {
   age?: string;
   structure?: string;
   transferMethods?: string[];
+  monthlyVisits?: string;
 }
 
 const IMGUR_CLIENT_ID = "891e5bb4aa94282";
@@ -204,7 +205,20 @@ export default function GameListingForm() {
   const [testPlayOpen, setTestPlayOpen] = useState(false);
   const [duplicateError, setDuplicateError] = useState("");
 
-  const [platform, setPlatform] = useState("");
+  // Distribution platforms — where the game can actually be played/bought,
+  // separate from "Game Source" above (which is the build/link itself).
+  // Defaults to Web selected since every uploaded/linked game is at least
+  // playable in a browser; sellers add App Store/Play Store/Steam/Desktop
+  // on top of that when the game also ships there.
+  const [platforms, setPlatforms] = useState<Set<PlatformKey>>(new Set(["web"]));
+  const [platformUrls, setPlatformUrls] = useState<Partial<Record<PlatformKey, string>>>({});
+  // Installs + Monthly Active Users — required once iOS/Android is
+  // selected as a live distribution platform, same reasoning as the App
+  // form: that's the only way a buyer can sanity-check store traction.
+  const [platformStats, setPlatformStats] = useState<Record<"ios" | "android", { installs: string; mau: string }>>({
+    ios: { installs: "", mau: "" },
+    android: { installs: "", mau: "" },
+  });
   const [genre, setGenre] = useState("");
   const [monetization, setMonetization] = useState("");
   const [age, setAge] = useState("");
@@ -215,6 +229,12 @@ export default function GameListingForm() {
   const [price, setPrice] = useState("");
   const [revenue, setRevenue] = useState("");
   const [expenses, setExpenses] = useState("");
+  // Proof of the claimed monthly revenue — required whenever revenue > 0.
+  const [revenueProof, setRevenueProof] = useState<ProofImage[]>([]);
+  // Optional traffic claim (for browser-playable games) + its supporting
+  // analytics screenshots — required the moment a visits number is entered.
+  const [monthlyVisits, setMonthlyVisits] = useState("");
+  const [trafficProof, setTrafficProof] = useState<ProofImage[]>([]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -237,7 +257,8 @@ export default function GameListingForm() {
       if (d.url) setUrl(d.url);
       if (d.title) setTitle(d.title);
       if (d.desc) setDesc(d.desc);
-      if (d.platform) setPlatform(d.platform);
+      if (d.platforms?.length) setPlatforms(new Set(d.platforms));
+      if (d.platformUrls) setPlatformUrls(d.platformUrls);
       if (d.genre) setGenre(d.genre);
       if (d.monetization) setMonetization(d.monetization);
       if (d.reason) setReason(d.reason);
@@ -247,6 +268,7 @@ export default function GameListingForm() {
       if (d.age) setAge(d.age);
       if (d.structure) setStructure(d.structure);
       if (d.transferMethods?.length) setTransferMethods(d.transferMethods);
+      if (d.monthlyVisits) setMonthlyVisits(d.monthlyVisits);
       if (d.step && d.step > 1) setStep(d.step);
     } catch {
       // ignore corrupt draft
@@ -257,8 +279,9 @@ export default function GameListingForm() {
   function saveDraft(nextStep = step) {
     try {
       const d: Draft = {
-        step: nextStep, gameType, url, title, desc, platform, genre, monetization,
-        reason, price, revenue, expenses, age, structure, transferMethods,
+        step: nextStep, gameType, url, title, desc,
+        platforms: Array.from(platforms), platformUrls, genre, monetization,
+        reason, price, revenue, expenses, age, structure, transferMethods, monthlyVisits,
       };
       localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
     } catch {
@@ -432,9 +455,32 @@ export default function GameListingForm() {
 
   function validateStep2(): boolean {
     clearAllErrors();
-    if (!platform || !genre) {
-      setErrors({ details: "Please select Platform and Genre." });
+    if (platforms.size === 0) {
+      setErrors({ details: "Please select at least one platform this game is available on." });
       return false;
+    }
+    if (!genre) {
+      setErrors({ details: "Please select a Genre." });
+      return false;
+    }
+    for (const p of platforms) {
+      if (p === "web") continue; // web's URL is the game source itself, not a separate field
+      const u = (platformUrls[p] || "").trim();
+      if (!u || !isValidUrl(u)) {
+        setErrors({ details: `Please enter a valid ${PLATFORM_META[p].urlLabel} for ${PLATFORM_META[p].label}.` });
+        return false;
+      }
+      if (p === "ios" || p === "android") {
+        const stats = platformStats[p];
+        if (!stats.installs.trim() || isNaN(parseFloat(stats.installs)) || parseFloat(stats.installs) < 0) {
+          setErrors({ details: `Please enter a valid install count for ${PLATFORM_META[p].label}.` });
+          return false;
+        }
+        if (!stats.mau.trim() || isNaN(parseFloat(stats.mau)) || parseFloat(stats.mau) < 0) {
+          setErrors({ details: `Please enter valid Monthly Active Users for ${PLATFORM_META[p].label}.` });
+          return false;
+        }
+      }
     }
     if (!monetization.trim()) {
       setErrors({ details: "Please enter how this game is monetized." });
@@ -462,6 +508,30 @@ export default function GameListingForm() {
     setTransferMethods((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]));
   }
 
+  function togglePlatform(p: PlatformKey) {
+    setPlatforms((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p);
+      else next.add(p);
+      return next;
+    });
+  }
+  function setPlatformUrl(p: PlatformKey, v: string) {
+    setPlatformUrls((prev) => ({ ...prev, [p]: v }));
+  }
+  function setPlatformStat(p: "ios" | "android", field: "installs" | "mau", v: string) {
+    setPlatformStats((prev) => ({ ...prev, [p]: { ...prev[p], [field]: v } }));
+  }
+
+  function isValidUrl(u: string): boolean {
+    try {
+      new URL(u);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function handleSubmit() {
     clearAllErrors();
     setSubmitError("");
@@ -487,18 +557,22 @@ export default function GameListingForm() {
         return;
       }
     }
-    if (!platform || !genre) {
+    if (!validateStep2()) {
       setStep(2);
-      setErrors({ details: "Please select Platform and Genre." });
-      return;
-    }
-    if (!monetization.trim()) {
-      setStep(2);
-      setErrors({ details: "Please enter how this game is monetized." });
       return;
     }
     if (!price.trim() || !revenue.trim() || !expenses.trim()) {
       setErrors({ fin: "Please fill in Price, Monthly Revenue, and Monthly Expenses." });
+      return;
+    }
+    const revenueNum = parseFloat(revenue) || 0;
+    if (revenueNum > 0 && revenueProof.length === 0) {
+      setErrors({ fin: "Please upload at least one screenshot proving your claimed monthly revenue (e.g. Steam, App Store Connect, Play Console, or Stripe dashboard)." });
+      return;
+    }
+    const visitsNum = parseFloat(monthlyVisits) || 0;
+    if (monthlyVisits.trim() && visitsNum > 0 && trafficProof.length === 0) {
+      setErrors({ fin: "Please upload at least one analytics screenshot to support your monthly visits number." });
       return;
     }
     if (!user) {
@@ -523,9 +597,21 @@ export default function GameListingForm() {
         setProgress({ pct: 60, label: "Uploading game build…" });
         gameUrl = await uploadTextToStorage("game.html", combinedHtml, idToken);
       }
-      setProgress({ pct: 75, label: "Saving listing to marketplace…" });
 
-      const frontendLabel = platform === "android" ? "Android" : platform === "desktop" ? "Desktop" : "Android & Desktop";
+      let revenueProofUrls: string[] = [];
+      if (revenueProof.length > 0) {
+        setProgress({ pct: 68, label: "Uploading revenue proof…" });
+        for (const img of revenueProof) revenueProofUrls.push(await uploadToImgur(img.file));
+      }
+      let trafficProofUrls: string[] = [];
+      if (trafficProof.length > 0) {
+        setProgress({ pct: 72, label: "Uploading traffic proof…" });
+        for (const img of trafficProof) trafficProofUrls.push(await uploadToImgur(img.file));
+      }
+
+      setProgress({ pct: 78, label: "Saving listing to marketplace…" });
+
+      const platformLabel = Array.from(platforms).map((p) => PLATFORM_META[p].label).join(", ");
 
       const { listingId } = await createListing({
         idToken,
@@ -536,13 +622,33 @@ export default function GameListingForm() {
         description: desc.trim(),
         images: imgUrls,
         category: "Game",
-        tech: { frontend: frontendLabel, backend: genre, database: "", monetization },
+        tech: { frontend: platformLabel, backend: genre, database: "", monetization },
         settings: { category: "Game", age: age || "", location: "", structure: structure || "", reason: reason || "" },
+        platforms: {
+          selected: Array.from(platforms),
+          iosUrl: platforms.has("ios") ? (platformUrls.ios || "").trim() : null,
+          androidUrl: platforms.has("android") ? (platformUrls.android || "").trim() : null,
+          webUrl: null,
+          steamUrl: platforms.has("steam") ? (platformUrls.steam || "").trim() : null,
+          desktopUrl: platforms.has("desktop") ? (platformUrls.desktop || "").trim() : null,
+          stats: {
+            ios: platforms.has("ios")
+              ? { installs: parseFloat(platformStats.ios.installs) || 0, mau: parseFloat(platformStats.ios.mau) || 0 }
+              : undefined,
+            android: platforms.has("android")
+              ? { installs: parseFloat(platformStats.android.installs) || 0, mau: parseFloat(platformStats.android.mau) || 0 }
+              : undefined,
+          },
+        },
         financials: {
           price: parseFloat(price),
           revenue: parseFloat(revenue),
           expenses: parseFloat(expenses),
+          revenueProofUrls,
         },
+        traffic: monthlyVisits.trim()
+          ? { monthlyVisits: parseFloat(monthlyVisits) || 0, proofUrls: trafficProofUrls }
+          : undefined,
         transferMethods,
         attachedRepo: null,
       });
@@ -756,73 +862,95 @@ export default function GameListingForm() {
 
         {step === 2 && (
           <div>
-            <span style={sectionLabelStyle}>Details</span>
+            <span style={sectionLabelStyle}>
+              Platforms <span style={{ color: "#f87171" }}>*</span>
+            </span>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
+              Select everywhere this game can be played. A browser game that&apos;s also on the Play Store or App Store should have both selected.
+            </div>
             {errors.details && <ErrorBox>{errors.details}</ErrorBox>}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 14 }}>
+              {GAME_PLATFORM_KEYS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => togglePlatform(p)}
+                  style={{ ...platformToggleStyle, ...(platforms.has(p) ? activeAmberStyle : {}) }}
+                >
+                  {PLATFORM_META[p].label}
+                </button>
+              ))}
+            </div>
+
+            {GAME_PLATFORM_KEYS.filter((p) => p !== "web" && platforms.has(p)).map((p) => (
+              <div key={p} style={{ marginBottom: 16, padding: 14, background: "rgba(255,255,255,0.03)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>{PLATFORM_META[p].label}</div>
+                <input
+                  type="url"
+                  value={platformUrls[p] || ""}
+                  onChange={(e) => setPlatformUrl(p, e.target.value)}
+                  placeholder={PLATFORM_META[p].urlPlaceholder}
+                  style={inputStyle}
+                />
+                {(p === "ios" || p === "android") && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                    <Field label="Installs">
+                      <input
+                        type="number"
+                        min="0"
+                        value={platformStats[p].installs}
+                        onChange={(e) => setPlatformStat(p, "installs", e.target.value)}
+                        placeholder="e.g. 10000"
+                        style={inputStyle}
+                      />
+                    </Field>
+                    <Field label="Monthly Active Users">
+                      <input
+                        type="number"
+                        min="0"
+                        value={platformStats[p].mau}
+                        onChange={(e) => setPlatformStat(p, "mau", e.target.value)}
+                        placeholder="e.g. 2500"
+                        style={inputStyle}
+                      />
+                    </Field>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            <span style={sectionLabelStyle}>Details</span>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-              <Field label="Platform">
-                <select value={platform} onChange={(e) => setPlatform(e.target.value)} style={inputStyle}>
-                  <option value="">Select</option>
-                  {PLATFORM_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </Field>
               <Field label="Genre">
-                <select value={genre} onChange={(e) => setGenre(e.target.value)} style={inputStyle}>
-                  <option value="">Select</option>
-                  {GENRE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <Select value={genre} onChange={setGenre} options={GENRE_OPTIONS} accent={ACCENT} />
+              </Field>
+              <Field label="Game Age">
+                <Select value={age} onChange={setAge} options={AGE_OPTIONS} accent={ACCENT} />
               </Field>
             </div>
             <Field label="Monetization" required>
               <input value={monetization} onChange={(e) => setMonetization(e.target.value)} placeholder="e.g. Ads, In-app purchases, One-time purchase" style={inputStyle} />
             </Field>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-              <Field label="Game Age">
-                <select value={age} onChange={(e) => setAge(e.target.value)} style={inputStyle}>
-                  <option value="">Select</option>
-                  {AGE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </Field>
-              <Field label="Business Structure">
-                <select value={structure} onChange={(e) => setStructure(e.target.value)} style={inputStyle}>
-                  <option value="">Select</option>
-                  {STRUCTURE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </Field>
-            </div>
+            <Field label="Business Structure">
+              <Select value={structure} onChange={setStructure} options={STRUCTURE_OPTIONS} accent={ACCENT} />
+            </Field>
 
             <Field label="Reason for selling (optional)">
               <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Moving to a new project, time constraints" style={inputStyle} />
             </Field>
 
             <span style={sectionLabelStyle}>
-              Transfer Methods <span style={{ color: "#f87171" }}>*</span>
+              Delivery Method <span style={{ color: "#f87171" }}>*</span>
             </span>
             {errors.transfer && <ErrorBox>{errors.transfer}</ErrorBox>}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 24 }}>
-              {TRANSFER_METHODS.map((m) => (
-                <label
-                  key={m.value}
-                  style={{
-                    gridColumn: m.featured ? "1/-1" : undefined,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "10px 12px",
-                    background: transferMethods.includes(m.value) ? "rgba(245,158,11,0.08)" : "rgba(255,255,255,0.03)",
-                    border: `1px solid ${transferMethods.includes(m.value) ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.08)"}`,
-                    borderRadius: 10,
-                    cursor: "pointer",
-                    fontSize: 13,
-                  }}
-                >
-                  <input type="checkbox" checked={transferMethods.includes(m.value)} onChange={() => toggleTransfer(m.value)} style={{ accentColor: ACCENT }} />
-                  <span style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontWeight: 600 }}>{m.featured ? "⚡ " : ""}{m.label}</span>
-                    {m.sub && <span style={{ fontSize: 11, opacity: 0.5 }}>{m.sub}</span>}
-                  </span>
-                </label>
-              ))}
+            <div style={{ marginBottom: 24 }}>
+              <TransferMethodPicker
+                methods={GAME_TRANSFER_METHODS}
+                selected={transferMethods}
+                onToggle={toggleTransfer}
+                accent={ACCENT}
+              />
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
@@ -852,6 +980,52 @@ export default function GameListingForm() {
               <span style={{ fontSize: 20, fontWeight: 800, color: profit >= 0 ? ACCENT : "#f87171" }}>
                 {profit >= 0 ? "+" : ""}${profit.toFixed(2)}
               </span>
+            </div>
+
+            {(parseFloat(revenue) || 0) > 0 && (
+              <div style={{ marginBottom: 24 }}>
+                <span style={sectionLabelStyle}>
+                  Proof of Revenue <span style={{ color: "#f87171" }}>*</span>
+                </span>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
+                  Upload a screenshot of your Steam, App Store Connect, Play Console, or payment processor dashboard showing this revenue. Buyers trust listings with verified numbers.
+                </div>
+                <ProofUploader
+                  images={revenueProof}
+                  onAdd={(img) => setRevenueProof((prev) => [...prev, img])}
+                  onRemove={(i) => setRevenueProof((prev) => prev.filter((_, idx) => idx !== i))}
+                  max={3}
+                  accent={ACCENT}
+                />
+              </div>
+            )}
+
+            <div style={{ marginBottom: 24 }}>
+              <span style={sectionLabelStyle}>Traffic (optional)</span>
+              <Field label="Monthly Visits">
+                <input
+                  type="number"
+                  min="0"
+                  value={monthlyVisits}
+                  onChange={(e) => setMonthlyVisits(e.target.value)}
+                  placeholder="e.g. 12000"
+                  style={inputStyle}
+                />
+              </Field>
+              {(parseFloat(monthlyVisits) || 0) > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
+                    Since you entered a visits number, upload 1–3 analytics screenshots (Google Analytics, Steam stats, or your host's dashboard) to back it up. <span style={{ color: "#f87171" }}>Required.</span>
+                  </div>
+                  <ProofUploader
+                    images={trafficProof}
+                    onAdd={(img) => setTrafficProof((prev) => [...prev, img])}
+                    onRemove={(i) => setTrafficProof((prev) => prev.filter((_, idx) => idx !== i))}
+                    max={3}
+                    accent={ACCENT}
+                  />
+                </div>
+              )}
             </div>
 
             {submitError && <ErrorBox>{submitError}</ErrorBox>}
@@ -1073,6 +1247,17 @@ const activeAmberStyle: React.CSSProperties = {
   background: "rgba(245,158,11,0.12)",
   color: ACCENT,
   boxShadow: "0 0 0 1px rgba(245,158,11,0.15)",
+};
+const platformToggleStyle: React.CSSProperties = {
+  padding: "10px 8px",
+  border: "1px solid rgba(255,255,255,0.1)",
+  background: "rgba(255,255,255,0.03)",
+  borderRadius: 10,
+  fontSize: 12.5,
+  fontWeight: 700,
+  color: "rgba(255,255,255,0.5)",
+  cursor: "pointer",
+  textAlign: "center",
 };
 const sectionLabelStyle: React.CSSProperties = {
   display: "block",
