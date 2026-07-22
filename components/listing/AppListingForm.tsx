@@ -45,6 +45,7 @@ import { useAiLengthPicker } from "@/lib/useAiLengthPicker";
 import { useConfirm } from "@/lib/useConfirm";
 import { useLimits } from "@/lib/useLimits";
 import Select from "./shared/Select";
+import PlatformPicker, { PlatformIcon } from "./shared/PlatformPicker";
 import TransferMethodPicker from "./shared/TransferMethodPicker";
 import ProofUploader, { type ProofImage } from "./shared/ProofUploader";
 import { APP_TRANSFER_METHODS } from "./shared/transferMethods";
@@ -974,29 +975,25 @@ export default function AppListingForm() {
             {errors.platforms && <ErrorBox>{errors.platforms}</ErrorBox>}
 
             <span style={sectionLabelStyle}>Platforms</span>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
-              {(["ios", "android", "web"] as Platform[]).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => togglePlatform(p)}
-                  disabled={globalNotLive}
-                  style={{
-                    ...platformToggleStyle,
-                    ...(platforms.has(p) ? activeAmberStyle : {}),
-                    opacity: globalNotLive ? 0.35 : 1,
-                    cursor: globalNotLive ? "not-allowed" : "pointer",
-                  }}
-                >
-                  {PLATFORM_META[p].label}
-                </button>
-              ))}
+            <div style={{ marginBottom: 12 }}>
+              <PlatformPicker
+                keys={["ios", "android", "web"]}
+                meta={PLATFORM_META}
+                selected={platforms as Set<string>}
+                onToggle={(p) => togglePlatform(p as Platform)}
+                accent={ACCENT}
+                disabled={globalNotLive}
+              />
             </div>
 
             {!globalNotLive && (["ios", "android", "web"] as Platform[]).map((p) =>
               platforms.has(p) ? (
                 <div key={p} style={{ marginBottom: 16, padding: 14, background: "rgba(255,255,255,0.03)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700 }}>{PLATFORM_META[p].label}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 7 }}>
+                      <PlatformIcon platform={p} size={15} color="rgba(255,255,255,0.7)" />
+                      {PLATFORM_META[p].label}
+                    </span>
                     <button onClick={() => togglePlatformNotLive(p)} style={notLiveBtnStyle(notLive[p])}>
                       {notLive[p] ? "Live — switch back" : "Not live yet"}
                     </button>
