@@ -13,7 +13,6 @@ import {
 } from "@/lib/useTransferDeal";
 import { TdmIcon, TdmArrowIcon, TdmCheckmarkIcon } from "./tdmIcons";
 import type { PaymentStatus } from "@/lib/useDealChat";
-import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the UI layer of Js/transfer-deal.js (933 lines) — checklist grid
 // (2-column, per .tdm-checklist-column in globals.css), per-item modal
@@ -53,10 +52,14 @@ export default function TransferDealModal(props: TransferDealModalProps) {
   const [activeItem, setActiveItem] = useState<{ key: string; type: TdmItemType; label: string } | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  // Lock page scroll while open (mounted only when open, see
-  // DealChatPanel's conditional render), same shared lock as every other
-  // modal/overlay in the app.
-  useScrollLock(true);
+  // Lock page scroll while open, same as the rest of the app's modals.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
 
   function handleClose() {
     onClose();
@@ -230,6 +233,13 @@ function FloatingCta({ finalized, enabled, onClick }: { finalized: boolean; enab
 }
 
 // ---------- Item modal ----------
+// STALE: this component's branching (`type === "transfer" | "upload" |
+// "input"`) still targets the old 3-value TdmItemType. lib/useTransferDeal.ts
+// now exports the 5-value action-type model (registry_transfer,
+// collaborator_invite, file_upload, secure_secret, account_ownership) plus
+// per-item `altType` for seller's-choice items (e.g. Source Code
+// Repository). This file is expected to be replaced with the new popup —
+// left as-is on purpose rather than patched to half-match the new types.
 function ItemModal({
   type,
   label,
