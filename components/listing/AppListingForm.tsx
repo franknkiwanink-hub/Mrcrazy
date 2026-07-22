@@ -210,6 +210,17 @@ export default function AppListingForm() {
 
   const [step, setStep] = useState(1);
 
+  // See GameListingForm.tsx's changeStep for why this exists — without it
+  // the newly-rendered step keeps whatever scroll position the previous
+  // step was left at, instead of opening at its own top.
+  function changeStep(n: number) {
+    setStep(n);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }
+
+
   // Step 1 — Basics
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
@@ -615,7 +626,7 @@ export default function AppListingForm() {
       if (step === 2 && !validateStep2()) return;
       if (step === 3 && !validateStep3()) return;
     }
-    setStep(n);
+    changeStep(n);
     saveDraft(n);
   }
 
@@ -626,15 +637,15 @@ export default function AppListingForm() {
     setSubmitError("");
 
     if (!validateStep1()) {
-      setStep(1);
+      changeStep(1);
       return;
     }
     if (!validateStep2()) {
-      setStep(2);
+      changeStep(2);
       return;
     }
     if (!validateStep3()) {
-      setStep(3);
+      changeStep(3);
       return;
     }
     const priceVal = price.trim();
@@ -952,7 +963,7 @@ export default function AppListingForm() {
             {errors.screenshots && <ErrorBox>{errors.screenshots}</ErrorBox>}
 
             <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
-              <PrevButton onClick={() => setStep(1)} />
+              <PrevButton onClick={() => changeStep(1)} />
               <NextButton onClick={() => goToStep(3)} />
             </div>
           </div>
@@ -1030,26 +1041,8 @@ export default function AppListingForm() {
                       />
                       {(p === "ios" || p === "android") && (
                         <div className="sr-lf-row-2" style={{ marginTop: 10 }}>
-                          <Field label="Installs">
-                            <input
-                              type="number"
-                              min="0"
-                              value={platformStats[p].installs}
-                              onChange={(e) => setPlatformStat(p, "installs", e.target.value)}
-                              placeholder="e.g. 10000"
-                              style={inputStyle}
-                            />
-                          </Field>
-                          <Field label="Monthly Active Users">
-                            <input
-                              type="number"
-                              min="0"
-                              value={platformStats[p].mau}
-                              onChange={(e) => setPlatformStat(p, "mau", e.target.value)}
-                              placeholder="e.g. 2500"
-                              style={inputStyle}
-                            />
-                          </Field>
+                          <RangeStatField label="Installs" value={platformStats[p].installs} onChange={(v) => setPlatformStat(p, "installs", v)} accent={ACCENT} />
+                          <RangeStatField label="Monthly Active Users" value={platformStats[p].mau} onChange={(v) => setPlatformStat(p, "mau", v)} accent={ACCENT} />
                         </div>
                       )}
                     </div>
@@ -1125,7 +1118,7 @@ export default function AppListingForm() {
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
-              <PrevButton onClick={() => setStep(2)} />
+              <PrevButton onClick={() => changeStep(2)} />
               <NextButton onClick={() => goToStep(4)} />
             </div>
           </div>
@@ -1229,7 +1222,7 @@ export default function AppListingForm() {
             )}
 
             <div style={{ display: "flex", gap: 10 }}>
-              <PrevButton onClick={() => setStep(3)} disabled={submitting} />
+              <PrevButton onClick={() => changeStep(3)} disabled={submitting} />
               <button onClick={handleSubmit} disabled={submitting || success} style={{ ...nextBtnStyle, opacity: submitting || success ? 0.6 : 1 }}>
                 {submitting ? "Publishing…" : "Publish Listing"}
               </button>
@@ -1377,6 +1370,74 @@ function TechField({
           placeholder="Type your own…"
           style={{ ...inputStyle, marginTop: 8 }}
           autoFocus
+        />
+      )}
+    </Field>
+  );
+}
+
+// Installs / Monthly Active Users field — a range picker first (so most
+// sellers can answer in one tap without guessing an exact figure), then a
+// plain number input scoped to whichever bucket was picked, so the value
+// actually saved is always a real number the seller typed, never a
+// midpoint/guess derived from the bucket. "10,000+" has no upper bound.
+const STAT_BUCKETS = [
+  { label: "Under 100", min: 0, max: 99 },
+  { label: "101 – 500", min: 101, max: 500 },
+  { label: "501 – 1,000", min: 501, max: 1000 },
+  { label: "1,001 – 5,000", min: 1001, max: 5000 },
+  { label: "5,001 – 9,999", min: 5001, max: 9999 },
+  { label: "10,000+", min: 10000, max: null },
+];
+function bucketForValue(v: string): string {
+  const n = parseFloat(v);
+  if (!v || isNaN(n)) return "";
+  const b = STAT_BUCKETS.find((b) => n >= b.min && (b.max === null || n <= b.max));
+  return b ? b.label : "";
+}
+function RangeStatField({
+  label,
+  value,
+  onChange,
+  accent,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  accent: string;
+  placeholder?: string;
+}) {
+  const [bucket, setBucket] = useState(() => bucketForValue(value));
+  const activeBucket = STAT_BUCKETS.find((b) => b.label === bucket);
+  return (
+    <Field label={label}>
+      <Select
+        value={bucket}
+        onChange={(v) => {
+          setBucket(v);
+          // Clear any existing value that no longer fits the newly
+          // picked bucket, so the number field re-prompts instead of
+          // silently keeping a stale, out-of-range figure.
+          const b = STAT_BUCKETS.find((b) => b.label === v);
+          const n = parseFloat(value);
+          if (b && (!value || isNaN(n) || n < b.min || (b.max !== null && n > b.max))) {
+            onChange("");
+          }
+        }}
+        options={STAT_BUCKETS.map((b) => b.label)}
+        placeholder={placeholder || "Select a range"}
+        accent={accent}
+      />
+      {bucket !== "" && (
+        <input
+          type="number"
+          min={activeBucket?.min ?? 0}
+          max={activeBucket?.max ?? undefined}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={activeBucket?.max === null ? "e.g. 25000" : `${activeBucket?.min}–${activeBucket?.max}`}
+          style={{ ...inputStyle, marginTop: 8 }}
         />
       )}
     </Field>
