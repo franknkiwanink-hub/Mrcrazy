@@ -6,6 +6,7 @@ import { fmtFinVal, isBoosted, isPremiumSeller, trackListing } from "@/lib/listi
 import { useCurrency } from "@/lib/CurrencyContext";
 import SellerStrip from "./SellerStrip";
 import SaveButton from "./SaveButton";
+import VerifiedBadge from "./VerifiedBadge";
 
 export default function AppCard({
   listing,
@@ -98,6 +99,7 @@ export default function AppCard({
         <div className="sr-app-head-txt">
           <div className="sr-app-name-row">
             <h3 className="sr-app-name">{title}</h3>
+            <VerifiedBadge listing={listing} />
             <span className="sr-app-cat">{category}</span>
           </div>
           {desc ? (
