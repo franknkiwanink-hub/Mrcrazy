@@ -10,6 +10,7 @@ import AttachedRepoBlock from "./AttachedRepoBlock";
 import DealCtaBar from "@/components/deal/DealCtaBar";
 import { useAdGatedPreview } from "@/lib/useAdGatedPreview";
 import ShareButton from "@/components/listing/ShareButton";
+import VerifiedBadge from "@/components/marketplace/VerifiedBadge";
 import { listingShareUrl } from "@/lib/share";
 
 // Ports the `type === 'website'` branch of mpOpenModal (marketplace.js,
@@ -75,8 +76,9 @@ export default function WebsiteListingBody({ listing }: { listing: Listing }) {
             </div>
           </div>
           <div className="modal-hero-bottom-row">
-            <div className="modal-hero-title-block">
+            <div className="modal-hero-title-block" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <h2 className="modal-hero-title">{title}</h2>
+              <VerifiedBadge listing={listing} />
             </div>
           </div>
         </div>
