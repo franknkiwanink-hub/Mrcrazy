@@ -107,7 +107,7 @@ export default function Select({
           height: 44,
           padding: "0 14px",
           background: "#09090b",
-          border: `1px solid ${open ? accent : "#3f3f46"}`,
+          border: `1px solid ${open ? accent : "rgba(255,255,255,0.28)"}`,
           borderRadius: 8,
           fontSize: 14,
           color: selected ? "#fff" : "rgba(255,255,255,0.35)",
