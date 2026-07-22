@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { doc, updateDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type { ApiKey, SettingsState } from "@/lib/useSettingsState";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
+import { useConfirm } from "@/lib/useConfirm";
 
 const PlusIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -34,16 +35,15 @@ export default function ApiPanel({
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
+  const { confirm, alert, ConfirmHost } = useConfirm();
 
   const [keyLabel, setKeyLabel] = useState("");
   const [externalKeyInput, setExternalKeyInput] = useState("");
   const [generating, setGenerating] = useState(false);
   const [validating, setValidating] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
-  const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
   const [keyCountBadge, setKeyCountBadge] = useState("");
-  const [limitReached, setLimitReached] = useState<{ plan: string; maxKeys: number; activeCount: number } | null>(null);
 
   const activeKeys = state.apiKeys.filter((k) => k.active !== false);
   const externalKeys = (state.externalApiKeys || []) as ExternalApiKey[];
@@ -69,18 +69,18 @@ export default function ApiPanel({
   async function handleAddExternal() {
     const key = externalKeyInput.trim();
     if (!key) {
-      toast("Please enter an API key to add.");
+      toast("Please enter an API key to add.", "error");
       return;
     }
     setValidating(true);
     try {
       if (key.length < 20) {
-        toast("That does not look like a valid API key.");
+        toast("That does not look like a valid API key.", "error");
         return;
       }
       const user = auth.currentUser;
       if (!user) {
-        toast("Not signed in.");
+        toast("Not signed in.", "error");
         return;
       }
       const { collection, query, where, getDocs } = await import("firebase/firestore");
@@ -97,13 +97,13 @@ export default function ApiPanel({
         const next = externalKeys.concat([entry]);
         await updateDoc(doc(db, "users", user.uid), { externalApiKeys: next });
         setState((prev) => ({ ...prev, externalApiKeys: next }));
-        toast("API key validated and connected! Admin commands unlocked.");
+        toast("API key validated and connected! Admin commands unlocked.", "success");
         setExternalKeyInput("");
       } else {
-        toast("Key saved but could not auto-validate. Status set to pending.");
+        toast("Key saved but could not auto-validate. Status set to pending.", "info");
       }
     } catch (err: any) {
-      toast(`Validation error: ${err.message}`);
+      toast(`Validation error: ${err.message}`, "error");
     } finally {
       setValidating(false);
     }
@@ -115,11 +115,10 @@ export default function ApiPanel({
   async function handleGenerate() {
     const user = auth.currentUser;
     if (!user) {
-      toast("Not signed in.");
+      toast("Not signed in.", "error");
       return;
     }
     setGenerating(true);
-    setLimitReached(null);
     try {
       const idToken = await user.getIdToken();
       const chk = await fetch("/api/deal", {
@@ -129,8 +128,15 @@ export default function ApiPanel({
       });
       const chkData = await chk.json();
       if (!chkData.allowed) {
-        setLimitReached({ plan: chkData.plan, maxKeys: chkData.maxKeys, activeCount: chkData.activeCount });
         setGenerating(false);
+        await alert({
+          theme: "warning",
+          title: "Key Limit Reached",
+          msg: `Your ${chkData.plan} plan allows up to ${chkData.maxKeys} active API key${
+            chkData.maxKeys !== 1 ? "s" : ""
+          }. You currently have ${chkData.activeCount}. Upgrade your plan or revoke an existing key to create a new one.`,
+          okText: "Got it",
+        });
         return;
       }
 
@@ -150,9 +156,9 @@ export default function ApiPanel({
       };
       setState((prev) => ({ ...prev, apiKeys: prev.apiKeys.concat([newKey]) }));
       setKeyLabel("");
-      toast("API key saved — access it anytime via the Agent Model in your Profile section.");
+      toast("API key saved — access it anytime via the Agent Model in your Profile section.", "success");
     } catch (err: any) {
-      toast(`Error: ${err.message}`);
+      toast(`Error: ${err.message}`, "error");
     } finally {
       setGenerating(false);
     }
@@ -160,12 +166,17 @@ export default function ApiPanel({
 
   // Ports the revoke handler — ownership of keyId is verified
   // server-side in /api/account's revokeApiKey action, not trusted from
-  // the client. Uses the same inline confirm-overlay pattern already
-  // established for Sign Out (SettingsSidebar) and Cancel Subscription
-  // (BillingPanel) since no shared modal system exists in this port yet.
+  // the client.
   async function handleRevoke(keyId: string) {
     const user = auth.currentUser;
     if (!user) return;
+    const ok = await confirm({
+      theme: "danger",
+      title: "Revoke Key",
+      msg: "This will permanently deactivate this API key. Automations using it will stop working immediately.",
+      confirmText: "Revoke",
+    });
+    if (!ok) return;
     setRevokingId(keyId);
     try {
       const idToken = await user.getIdToken();
@@ -180,12 +191,11 @@ export default function ApiPanel({
         ...prev,
         apiKeys: prev.apiKeys.map((k) => (k.id === keyId ? { ...k, active: false } : k)),
       }));
-      toast("API key revoked.");
+      toast("API key revoked.", "success");
     } catch (err: any) {
-      toast(`Error: ${err.message}`);
+      toast(`Error: ${err.message}`, "error");
     } finally {
       setRevokingId(null);
-      setConfirmRevokeId(null);
     }
   }
 
@@ -260,7 +270,7 @@ export default function ApiPanel({
             <button
               className="danger-btn"
               style={{ padding: "0.45rem 0.85rem", fontSize: "0.74rem", alignSelf: "flex-start" }}
-              onClick={() => setConfirmRevokeId(k.id)}
+              onClick={() => handleRevoke(k.id)}
               disabled={revokingId === k.id}
             >
               <RevokeIcon />
