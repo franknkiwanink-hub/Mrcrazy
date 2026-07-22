@@ -100,6 +100,14 @@ export interface Listing {
   globalBuildUrl?: string;
   additionalFiles?: ListingBuildFile[];
   notLive?: boolean;
+  // Legacy binary uploads (older listings created before the link-only
+  // change to app builds) — no current form writes these, but existing
+  // listings that already have them still need to render/download them.
+  apkUrl?: string;
+  apkStorageUrl?: string;
+  apkIpaFileName?: string;
+  apkFileName?: string;
+  notLiveBuildFiles?: { global?: ListingBuildFile[] };
   attachedRepo?: AttachedRepo;
   transferMethods?: string[];
   saves?: number;
