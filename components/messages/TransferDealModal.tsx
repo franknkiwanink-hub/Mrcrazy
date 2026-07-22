@@ -51,6 +51,11 @@ export default function TransferDealModal(props: TransferDealModalProps) {
   const tdm = useTransferDeal({ chatRoomId, sellerUid, buyerUid, listingId, dealId, paymentStatus, isSeller, syncThreads });
 
   const [activeItem, setActiveItem] = useState<{ key: string; item: TdmChecklistItem } | null>(null);
+  // The full-screen "Protected Transaction" cover always shows first for
+  // an opened item. Continue is intentionally a no-op right now (per
+  // instruction — item panels ship in a later pass), so this stays false;
+  // flip it inside ItemCoverScreen's onContinue to reveal the panel below.
+  const [itemPanelUnlocked, setItemPanelUnlocked] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
 
   // Lock page scroll while open, same as the rest of the app's modals.
@@ -108,12 +113,35 @@ export default function TransferDealModal(props: TransferDealModalProps) {
       </nav>
 
       <main className="tdm-checklist-main">
-        <ChecklistGrid tab={tdm.tab} completed={tdm.completed} onOpenItem={(key, item) => setActiveItem({ key, item })} />
+        <ChecklistGrid
+          tab={tdm.tab}
+          completed={tdm.completed}
+          onOpenItem={(key, item) => {
+            setActiveItem({ key, item });
+            setItemPanelUnlocked(false);
+          }}
+        />
       </main>
 
       <FloatingCta finalized={tdm.isTabFinalized} enabled={tdm.anyCompletedInTab} onClick={() => tdm.anyCompletedInTab && !tdm.isTabFinalized && setPreviewOpen(true)} />
 
-      {activeItem ? (
+      {activeItem && !itemPanelUnlocked ? (
+        <ItemCoverScreen
+          key={activeItem.key}
+          item={activeItem.item}
+          onCancel={() => setActiveItem(null)}
+          onContinue={() => {
+            // Continue is a placeholder for now, per instruction — the
+            // per-item panels (file upload, secure secret, collaborator
+            // invite, recipient proof) ship in a later pass. Flipping
+            // this flag is what will reveal ItemModal below once ready;
+            // left as a no-op call today so nothing advances past the
+            // cover screen yet.
+          }}
+        />
+      ) : null}
+
+      {activeItem && itemPanelUnlocked ? (
         <ItemModal
           key={activeItem.key}
           item={activeItem.item}
@@ -233,6 +261,95 @@ function FloatingCta({ finalized, enabled, onClick }: { finalized: boolean; enab
     <button className={cls} disabled={finalized || !enabled} onClick={onClick}>
       {finalized ? "TRANSFERRED \u2713" : "TRANSFER NOW"}
     </button>
+  );
+}
+
+// ---------- Full-screen "Protected Transaction" cover ----------
+// Shown first whenever a checklist item is opened — a trust/reassurance
+// screen, not an item-specific one, so its image and copy stay fixed
+// (the Siterifty escrow branding, per instruction) rather than varying
+// per item. Continue is currently a no-op placeholder; the per-item
+// completion panels (ItemModal below) ship in a later pass.
+const TDM_COVER_IMAGE = "https://cdn.phototourl.com/member/2026-07-22-9c8f1cef-62db-491b-8337-161189536aad.jpg";
+
+function ItemCoverScreen({ item, onCancel, onContinue }: { item: TdmChecklistItem; onCancel: () => void; onContinue: () => void }) {
+  const [scrolled, setScrolled] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  return (
+    <div className="tdm-cover-overlay">
+      <button type="button" className="tdm-cover-cancel" onClick={onCancel}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" width="15" height="15">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+        Cancel
+      </button>
+
+      <div
+        className="tdm-cover-scroll"
+        ref={scrollRef}
+        onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 12)}
+      >
+        <section className="tdm-cover-hero">
+          <div className="tdm-cover-hero-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3z" />
+              <path d="M9 12l2 2 4-4" />
+            </svg>
+          </div>
+          <h1 className="tdm-cover-title">Protected Transaction</h1>
+          <p className="tdm-cover-desc">
+            This is a <strong>secured escrow</strong> — it&apos;s only between <strong>you and the buyer</strong>. This transaction is
+            protected by <span className="tdm-cover-highlight">Siterifty</span>. In case you have questions or don&apos;t understand,{" "}
+            <strong>contact us before sending anything.</strong>
+          </p>
+        </section>
+
+        <div className="tdm-cover-image-section">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={TDM_COVER_IMAGE} alt="Siterifty Escrow — protected transaction" loading="eager" />
+        </div>
+
+        <div className="tdm-cover-content">
+          <div className="tdm-cover-notice">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <p>
+              <strong>Reminder:</strong> Only proceed once you fully understand the escrow terms for <strong>{item.label}</strong>. Your
+              funds are held securely by <strong>Siterifty</strong> until both parties confirm.
+            </p>
+          </div>
+
+          <a href="#" className="tdm-cover-footer-link" onClick={(e) => e.preventDefault()}>
+            <span>Contact Siterifty Support</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" width="13" height="13">
+              <line x1="5" y1="12" x2="19" y2="12" />
+              <polyline points="12 5 19 12 12 19" />
+            </svg>
+          </a>
+        </div>
+      </div>
+
+      <button type="button" className={`tdm-cover-continue${scrolled ? "" : " tdm-cover-continue-fixed"}`} onClick={onContinue}>
+        Continue
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
+          <line x1="5" y1="12" x2="19" y2="12" />
+          <polyline points="12 5 19 12 12 19" />
+        </svg>
+      </button>
+    </div>
   );
 }
 
