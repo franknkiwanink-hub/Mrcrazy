@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type { SettingsState } from "@/lib/useSettingsState";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
 
 const CopyIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
@@ -31,7 +31,7 @@ export default function ReferralsPanel({
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
   const [refCount, setRefCount] = useState<number | null>(null);
   const [refEarned, setRefEarned] = useState<number | null>(null);
 
@@ -77,10 +77,10 @@ export default function ReferralsPanel({
     if (navigator.clipboard?.writeText) {
       navigator.clipboard
         .writeText(refLink)
-        .then(() => toast("Referral link copied!"))
-        .catch(() => toast("Could not copy — please copy manually."));
+        .then(() => toast("Referral link copied!", "success"))
+        .catch(() => toast("Could not copy — please copy manually.", "error"));
     } else {
-      toast("Could not copy — please copy manually.");
+      toast("Could not copy — please copy manually.", "error");
     }
   }
 
@@ -202,7 +202,6 @@ export default function ReferralsPanel({
         </span>
       </div>
 
-      <ToastHost />
     </>
   );
 }
