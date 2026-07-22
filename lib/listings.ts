@@ -17,6 +17,26 @@ export interface ListingFinancials {
   revenue?: number;
   expenses?: number;
   profit?: number;
+  // Screenshot proof of the claimed monthly revenue (e.g. a payment
+  // processor or analytics dashboard). Required client-side whenever
+  // revenue > 0 — see FinancialProof in each listing form.
+  revenueProofUrls?: string[];
+}
+
+// Monthly traffic claim + its supporting analytics screenshots (GA4,
+// Search Console, host panel, etc). Optional overall, but once a visits
+// number is entered at least one screenshot is required client-side.
+export interface ListingTraffic {
+  monthlyVisits?: number;
+  proofUrls?: string[];
+}
+
+// Per-platform install/engagement stats for store-distributed app & game
+// platforms (iOS App Store, Android Play Store). Required client-side
+// whenever that platform is marked Live.
+export interface PlatformStats {
+  installs?: number;
+  mau?: number;
 }
 
 export interface ListingTech {
@@ -64,6 +84,7 @@ export interface Listing {
   ownerEmail?: string;
   ownerPlan?: string;
   financials?: ListingFinancials & { model?: string; subMonthly?: number; subAnnual?: number };
+  traffic?: ListingTraffic;
   tech?: ListingTech;
   settings?: ListingSettings;
   images?: string[];
@@ -84,8 +105,12 @@ export interface Listing {
     iosUrl?: string | null;
     androidUrl?: string | null;
     webUrl?: string | null;
+    // Present for Game listings, which can also distribute on Steam or as
+    // a direct desktop download alongside/instead of iOS/Android/Web.
+    steamUrl?: string | null;
+    desktopUrl?: string | null;
     previewUrl?: string | null;
-    notLive?: { ios?: boolean; android?: boolean; web?: boolean };
+    notLive?: { ios?: boolean; android?: boolean; web?: boolean; steam?: boolean; desktop?: boolean };
     // iOS/Android "not live" builds are always an externally-hosted link
     // now (Drive/Dropbox/etc) — Siterifty never stores APK/IPA binaries.
     // Only "web" not-live still uploads a file (html/css/js, zipped into
@@ -93,21 +118,19 @@ export interface Listing {
     // AppListingForm.tsx), since that's small and can be rendered live.
     iosBuildUrl?: string | null;
     androidBuildUrl?: string | null;
+    steamBuildUrl?: string | null;
+    desktopBuildUrl?: string | null;
     webBuildFiles?: ListingBuildFile[] | null;
+    // Installs + Monthly Active Users per store-distributed platform
+    // (iOS/Android only — see PlatformStats/PLATFORM_META.isStore).
+    // Required client-side whenever that platform is marked Live.
+    stats?: { ios?: PlatformStats; android?: PlatformStats };
   };
   // Link to an externally-hosted build for an app that isn't published
   // anywhere yet (globalNotLive) — never an uploaded binary.
   globalBuildUrl?: string;
   additionalFiles?: ListingBuildFile[];
   notLive?: boolean;
-  // Legacy binary uploads (older listings created before the link-only
-  // change to app builds) — no current form writes these, but existing
-  // listings that already have them still need to render/download them.
-  apkUrl?: string;
-  apkStorageUrl?: string;
-  apkIpaFileName?: string;
-  apkFileName?: string;
-  notLiveBuildFiles?: { global?: ListingBuildFile[] };
   attachedRepo?: AttachedRepo;
   transferMethods?: string[];
   saves?: number;
@@ -303,7 +326,8 @@ export interface CreateListingParams {
   category?: string;
   tech?: ListingTech;
   settings?: ListingSettings;
-  financials: { price: number; revenue: number; expenses: number };
+  financials: { price: number; revenue: number; expenses: number; revenueProofUrls?: string[] };
+  traffic?: { monthlyVisits?: number; proofUrls?: string[] };
   transferMethods?: string[];
   gameType?: string;
   videoUrl?: string;
