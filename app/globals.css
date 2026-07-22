@@ -10842,6 +10842,115 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
      .tdm-recipient-step-sub { font-size: 0.76rem; color: #888; line-height: 1.5; }
      .tdm-recipient-step .tdm-buyer-email { margin-bottom: 0; margin-top: 0.4rem; }
 
+     /* ── Full-screen "Protected Transaction" cover (shown before any item's
+        completion panel) — ported from the standalone mockup, restyled
+        onto the app's lime accent (#a3e635) and dark surface tokens
+        instead of the mockup's blue palette. ── */
+     .tdm-cover-overlay {
+       position: fixed; inset: 0; z-index: 10020; background: #000;
+       display: flex; flex-direction: column; align-items: center;
+       font-family: inherit; color: #e8e8e8;
+     }
+     .tdm-cover-cancel {
+       position: absolute; top: 16px; right: 16px; z-index: 5;
+       display: inline-flex; align-items: center; gap: 6px;
+       background: rgba(10,10,10,0.85); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+       border: 1px solid #1a1a1a; color: #9a9a9a; font-size: 0.8rem; font-weight: 500;
+       padding: 8px 14px; border-radius: 8px; cursor: pointer; font-family: inherit;
+       transition: color 0.2s, border-color 0.2s, background 0.2s;
+     }
+     .tdm-cover-cancel:hover { color: #e8e8e8; border-color: #2a2a2a; background: rgba(20,20,20,0.9); }
+
+     .tdm-cover-scroll {
+       width: 100%; height: 100%; overflow-y: auto;
+       display: flex; flex-direction: column; align-items: center;
+     }
+
+     .tdm-cover-hero {
+       width: 100%; display: flex; flex-direction: column; align-items: center;
+       text-align: center; padding: 60px 24px 40px; position: relative;
+     }
+     .tdm-cover-hero::after {
+       content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+       width: 280px; height: 280px;
+       background: radial-gradient(circle at center, color-mix(in srgb, #a3e635 6%, transparent) 0%, transparent 70%);
+       border-radius: 50%; pointer-events: none; z-index: 0;
+     }
+     .tdm-cover-hero-icon {
+       position: relative; z-index: 1; display: flex; align-items: center; justify-content: center;
+       width: 44px; height: 44px; border-radius: 50%;
+       background: color-mix(in srgb, #a3e635 8%, transparent);
+       border: 1px solid color-mix(in srgb, #a3e635 20%, transparent);
+       color: #a3e635; margin-bottom: 22px;
+     }
+     .tdm-cover-hero-icon svg { width: 20px; height: 20px; }
+     .tdm-cover-title {
+       position: relative; z-index: 1; font-size: 1.4rem; font-weight: 700; color: #f0f0f0;
+       margin: 0 0 12px; letter-spacing: -0.025em; line-height: 1.25;
+     }
+     .tdm-cover-desc {
+       position: relative; z-index: 1; font-size: 0.875rem; color: #9a9a9a;
+       line-height: 1.65; max-width: 460px; font-weight: 400;
+     }
+     .tdm-cover-desc strong { color: #d0d0d0; font-weight: 600; }
+     .tdm-cover-highlight { color: #a3e635; font-weight: 600; }
+
+     .tdm-cover-image-section {
+       width: 100%; max-width: 700px; aspect-ratio: 16 / 9; background: #030303;
+       border-top: 1px solid #1a1a1a; border-bottom: 1px solid #1a1a1a;
+       overflow: hidden; display: flex; align-items: center; justify-content: center;
+     }
+     .tdm-cover-image-section img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+     .tdm-cover-content {
+       width: 100%; max-width: 460px; padding: 36px 24px 120px;
+       display: flex; flex-direction: column; align-items: center; text-align: center;
+     }
+
+     .tdm-cover-notice {
+       display: flex; align-items: flex-start; gap: 12px; width: 100%;
+       background: color-mix(in srgb, #a3e635 5%, transparent);
+       border: 1px solid color-mix(in srgb, #a3e635 14%, transparent);
+       border-radius: 10px; padding: 15px 16px; margin-bottom: 24px; text-align: left;
+     }
+     .tdm-cover-notice svg { flex-shrink: 0; margin-top: 1px; color: #a3e635; }
+     .tdm-cover-notice p { font-size: 0.8rem; color: #b9c9a0; line-height: 1.55; margin: 0; }
+     .tdm-cover-notice p strong { color: #d7ecb8; font-weight: 600; }
+
+     .tdm-cover-footer-link {
+       display: inline-flex; align-items: center; gap: 6px; margin-top: 18px;
+       font-size: 0.75rem; color: #5c5c5c; text-decoration: none;
+       transition: color 0.2s;
+     }
+     .tdm-cover-footer-link span { text-decoration: underline; text-underline-offset: 4px; text-decoration-color: #1f1f1f; }
+     .tdm-cover-footer-link:hover { color: #b0b0b0; }
+
+     .tdm-cover-continue {
+       display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+       width: calc(100% - 48px); max-width: 460px; padding: 14px 24px;
+       font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em; color: #000;
+       background: #a3e635; border: none; border-radius: 10px; cursor: pointer;
+       font-family: inherit; position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+       z-index: 10021; box-shadow: 0 16px 44px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.03);
+       transition: background 0.2s, box-shadow 0.2s, transform 0.2s;
+     }
+     .tdm-cover-continue:hover { background: #b3f04a; box-shadow: 0 8px 28px color-mix(in srgb, #a3e635 30%, transparent); }
+     .tdm-cover-continue:active { transform: translateX(-50%) scale(0.98); }
+     .tdm-cover-continue:not(.tdm-cover-continue-fixed) {
+       position: static; transform: none; width: 100%; margin-top: 4px; box-shadow: none;
+     }
+     .tdm-cover-continue:not(.tdm-cover-continue-fixed):active { transform: scale(0.98); }
+
+     @media (max-width: 500px) {
+       .tdm-cover-hero { padding: 44px 18px 32px; }
+       .tdm-cover-title { font-size: 1.2rem; }
+       .tdm-cover-desc { font-size: 0.8rem; }
+       .tdm-cover-content { padding: 28px 18px 120px; }
+       .tdm-cover-notice { padding: 13px; gap: 10px; }
+       .tdm-cover-continue { padding: 13px 20px; font-size: 0.85rem; width: calc(100% - 36px); bottom: 20px; }
+     }
+
+
 
      /* floating cta */
      .tdm-floating-cta {
