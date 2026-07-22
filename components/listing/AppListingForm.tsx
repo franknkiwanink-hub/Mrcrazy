@@ -66,6 +66,13 @@ const AGE_OPTIONS = ["< 3 months", "3–5 months", "6–11 months", "1+ year", "
 const STRUCTURE_OPTIONS = ["Sole Proprietorship", "LLC", "Corporation", "Partnership", "Other"];
 const MONETIZATION_OPTIONS = ["Ads", "Subscription", "One-time purchase", "In-app purchases", "Freemium", "Other"];
 
+// Tech Stack dropdown options — was free-text, converted to pick-from-list
+// + "Other" (see TechField in WebsiteListingForm.tsx for the same pattern
+// and rationale).
+const FRONTEND_OPTIONS = ["React Native", "Flutter", "Swift/SwiftUI", "Kotlin", "Java", "Ionic", "Xamarin", "Unity", "Other"];
+const BACKEND_OPTIONS = ["Node.js", "Firebase", "Supabase", "Django", "Flask", "Ruby on Rails", "Laravel", "None / Client-only", "Other"];
+const DATABASE_OPTIONS = ["Firestore", "PostgreSQL", "MySQL", "MongoDB", "Supabase", "SQLite", "Realm", "None", "Other"];
+
 type Platform = "ios" | "android" | "web";
 // "Not live" builds are link-only for iOS/Android — no binary APK/IPA/AAB
 // upload accepted anywhere in this form (that storage would be wasted on
@@ -781,7 +788,7 @@ export default function AppListingForm() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", marginTop: 92, background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
+    <div style={{ marginTop: 92, background: "#000", color: "#fff", fontFamily: "'Segoe UI',system-ui,sans-serif" }}>
       <AiLengthPickerHost />
       <ConfirmHost />
       <input ref={bannerInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onBannerChange} />
@@ -889,7 +896,7 @@ export default function AppListingForm() {
               {aiError && <ErrorBox>{aiError}</ErrorBox>}
             </Field>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+            <div className="sr-lf-row-2" style={{ marginBottom: 16 }}>
               <Field label="Category">
                 <Select value={category} onChange={setCategory} options={CATEGORY_OPTIONS} accent={ACCENT} />
               </Field>
@@ -1022,7 +1029,7 @@ export default function AppListingForm() {
                         style={inputStyle}
                       />
                       {(p === "ios" || p === "android") && (
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+                        <div className="sr-lf-row-2" style={{ marginTop: 10 }}>
                           <Field label="Installs">
                             <input
                               type="number"
@@ -1128,32 +1135,40 @@ export default function AppListingForm() {
           <div>
             {errors.fin && <ErrorBox>{errors.fin}</ErrorBox>}
 
-            <Field label="Asking Price ($)" required>
-              <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="1000" style={inputStyle} />
-            </Field>
+            <div className="sr-lf-fin-card">
+              <Field label="Asking Price ($)" required>
+                <div className="sr-lf-money">
+                  <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="1000" style={inputStyle} />
+                </div>
+              </Field>
 
-            {globalNotLive && (
-              <div style={{ padding: 12, background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.2)", borderRadius: 10, marginBottom: 16, fontSize: 12, color: ACCENT }}>
-                This app is marked &quot;Not Live&quot; — revenue, expenses, and monetization model aren&apos;t applicable yet and are disabled. Price is still required.
+              {globalNotLive && (
+                <div style={{ padding: 12, background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.2)", borderRadius: 10, marginBottom: 16, fontSize: 12, color: ACCENT }}>
+                  This app is marked &quot;Not Live&quot; — revenue, expenses, and monetization model aren&apos;t applicable yet and are disabled. Price is still required.
+                </div>
+              )}
+
+              <div className="sr-lf-row-2" style={{ opacity: globalNotLive ? 0.4 : 1 }}>
+                <Field label="Monthly Revenue ($)">
+                  <div className="sr-lf-money">
+                    <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} placeholder="200" disabled={globalNotLive} style={inputStyle} />
+                  </div>
+                </Field>
+                <Field label="Monthly Expenses ($)">
+                  <div className="sr-lf-money">
+                    <input type="number" min="0" value={expenses} onChange={(e) => setExpenses(e.target.value)} placeholder="20" disabled={globalNotLive} style={inputStyle} />
+                  </div>
+                </Field>
               </div>
-            )}
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16, opacity: globalNotLive ? 0.4 : 1 }}>
-              <Field label="Monthly Revenue ($)">
-                <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} placeholder="200" disabled={globalNotLive} style={inputStyle} />
-              </Field>
-              <Field label="Monthly Expenses ($)">
-                <input type="number" min="0" value={expenses} onChange={(e) => setExpenses(e.target.value)} placeholder="20" disabled={globalNotLive} style={inputStyle} />
-              </Field>
             </div>
 
             {!globalNotLive && (parseFloat(revenue) || 0) > 0 && (
-              <div style={{ marginBottom: 24 }}>
+              <div className="sr-lf-proof-card">
                 <span style={sectionLabelStyle}>
                   Proof of Revenue <span style={{ color: "#f87171" }}>*</span>
                 </span>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
-                  Upload a screenshot of your App Store Connect, Play Console, or payment processor dashboard showing this revenue.
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 10 }}>
+                  Upload a screenshot of your App Store Connect, Play Console, or payment processor dashboard showing this revenue. Listings without proof can't be published.
                 </div>
                 <ProofUploader
                   images={revenueProof}
@@ -1170,7 +1185,7 @@ export default function AppListingForm() {
                 <Select value={monetization} onChange={setMonetization} options={MONETIZATION_OPTIONS} accent={ACCENT} disabled={globalNotLive} />
               </Field>
               {monetization === "Subscription" && !globalNotLive && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                <div className="sr-lf-row-2" style={{ marginTop: 12 }}>
                   <Field label="Sub. Price — Monthly ($)">
                     <input type="number" min="0" value={subMonthly} onChange={(e) => setSubMonthly(e.target.value)} placeholder="9.99" style={inputStyle} />
                   </Field>
@@ -1181,16 +1196,10 @@ export default function AppListingForm() {
               )}
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
-              <Field label="Frontend (optional)">
-                <input value={techFrontend} onChange={(e) => setTechFrontend(e.target.value)} placeholder="React Native" style={inputStyle} />
-              </Field>
-              <Field label="Backend (optional)">
-                <input value={techBackend} onChange={(e) => setTechBackend(e.target.value)} placeholder="Node.js" style={inputStyle} />
-              </Field>
-              <Field label="Database (optional)">
-                <input value={techDatabase} onChange={(e) => setTechDatabase(e.target.value)} placeholder="Firestore" style={inputStyle} />
-              </Field>
+            <div className="sr-lf-row-3" style={{ marginBottom: 16 }}>
+              <TechField label="Frontend" value={techFrontend} onChange={setTechFrontend} options={FRONTEND_OPTIONS} accent={ACCENT} />
+              <TechField label="Backend" value={techBackend} onChange={setTechBackend} options={BACKEND_OPTIONS} accent={ACCENT} />
+              <TechField label="Database" value={techDatabase} onChange={setTechDatabase} options={DATABASE_OPTIONS} accent={ACCENT} />
             </div>
 
             {!globalNotLive && (
@@ -1322,6 +1331,59 @@ function Field({
   );
 }
 
+// Tech Stack field — dropdown of common presets + "Other" fallback text
+// input. See WebsiteListingForm.tsx's TechField for the full rationale.
+function TechField({
+  label,
+  value,
+  onChange,
+  options,
+  accent,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  accent: string;
+}) {
+  // See WebsiteListingForm.tsx's TechField for why forcedOther is needed
+  // (choosing "Other" clears value to "", which can't be distinguished
+  // from "nothing selected yet" by value alone).
+  const isKnownPreset = options.includes(value);
+  const [forcedOther, setForcedOther] = useState(value !== "" && !isKnownPreset);
+  const showOther = forcedOther || (value !== "" && !isKnownPreset);
+  const selectValue = showOther ? "Other" : value;
+  return (
+    <Field label={`${label} (optional)`}>
+      <Select
+        value={selectValue}
+        onChange={(v) => {
+          if (v === "Other") {
+            setForcedOther(true);
+            onChange("");
+          } else {
+            setForcedOther(false);
+            onChange(v);
+          }
+        }}
+        options={options}
+        placeholder="Select"
+        accent={accent}
+      />
+      {showOther && (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Type your own…"
+          style={{ ...inputStyle, marginTop: 8 }}
+          autoFocus
+        />
+      )}
+    </Field>
+  );
+}
+
+
 function CharCount({ value, min, max }: { value: string; min: number; max: number }) {
   const len = value.trim().length;
   const ok = len >= min && len <= max;
@@ -1382,7 +1444,7 @@ const fieldLabelStyle: React.CSSProperties = {
   display: "block", fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.5)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em",
 };
 const inputStyle: React.CSSProperties = {
-  width: "100%", height: 44, padding: "0 14px", background: "#09090b", border: "1px solid #3f3f46",
+  width: "100%", height: 44, padding: "0 14px", background: "#09090b", border: "1px solid rgba(255,255,255,0.28)",
   borderRadius: 8, fontSize: 14, color: "#fff", outline: "none", fontFamily: "inherit", boxSizing: "border-box",
 };
 const fileTagStyle: React.CSSProperties = {
