@@ -28,61 +28,83 @@ import type { PaymentStatus } from "@/lib/useDealChat";
 //     works fully whenever a listing already has attachedRepo set.
 
 export type TdmListingType = "website" | "game" | "app";
-export type TdmItemType = "transfer" | "upload" | "input";
+// Action types, replacing the old generic transfer/upload/input trio with
+// what each item actually requires:
+//  - registry_transfer: a formal transfer protocol with a receiving party
+//    (domain EPP/auth-code push, app/game store's own "transfer app" tool)
+//  - collaborator_invite: add the buyer as a collaborator on the seller's
+//    existing account (GitHub/GitLab repo invite) rather than handing over
+//    credentials or a code dump
+//  - file_upload: an actual file (backup, export, asset, key file) bundled
+//    into the delivery ZIP
+//  - secure_secret: a short secret string (API key, keystore password) —
+//    never rendered as a plain text box; stored/transmitted encrypted and
+//    revealed once, not zipped in cleartext
+//  - account_ownership: seller adds the buyer as owner/admin on their
+//    existing account via that platform's own ownership-transfer feature,
+//    then the seller is removed — never a shared password
+export type TdmItemType = "registry_transfer" | "collaborator_invite" | "file_upload" | "secure_secret" | "account_ownership";
 
 export interface TdmChecklistItem {
   label: string;
   icon: string;
   type: TdmItemType;
+  /** When set, the seller can complete this item via either `type` or
+   *  `altType` (e.g. Source Code Repository: collaborator_invite OR
+   *  file_upload). The popup UI decides how to present the choice. */
+  altType?: TdmItemType;
 }
 
 export const TDM_CATEGORIES: Record<TdmListingType, { left: TdmChecklistItem[]; right: TdmChecklistItem[] }> = {
   website: {
     left: [
-      { label: "Domain Transfer", icon: "domain", type: "transfer" },
-      { label: "Website Files Backup", icon: "files", type: "upload" },
-      { label: "Database Export", icon: "database", type: "upload" },
-      { label: "Hosting Account Ownership", icon: "hosting", type: "transfer" },
-      { label: "SSL Certificate Keys", icon: "ssl", type: "input" },
+      { label: "Domain Transfer", icon: "domain", type: "registry_transfer" },
+      { label: "Source Code Repository", icon: "sourcecode", type: "collaborator_invite", altType: "file_upload" },
+      { label: "Website Files Backup", icon: "files", type: "file_upload" },
+      { label: "Database Export", icon: "database", type: "file_upload" },
+      { label: "Hosting Account Ownership", icon: "hosting", type: "account_ownership" },
+      { label: "SSL Certificate Keys", icon: "ssl", type: "file_upload" },
     ],
     right: [
-      { label: "Email Account Ownership", icon: "email", type: "transfer" },
-      { label: "Social Media Admin Rights", icon: "social", type: "transfer" },
-      { label: "Mailing List & Automations", icon: "mailinglist", type: "transfer" },
-      { label: "Ad Revenue Account Ownership", icon: "adrevenue", type: "transfer" },
-      { label: "Payment Gateway Accounts", icon: "payment", type: "transfer" },
+      { label: "Email Account Ownership", icon: "email", type: "account_ownership" },
+      { label: "Social Media Admin Rights", icon: "social", type: "account_ownership" },
+      { label: "Mailing List & Automations", icon: "mailinglist", type: "account_ownership" },
+      { label: "Ad Revenue Account Ownership", icon: "adrevenue", type: "account_ownership" },
+      { label: "Payment Gateway Accounts", icon: "payment", type: "account_ownership" },
     ],
   },
   game: {
     left: [
-      { label: "Store Page Ownership", icon: "storepage", type: "transfer" },
-      { label: "Full Source Code Backup", icon: "sourcecode", type: "upload" },
-      { label: "Game Assets", icon: "gameassets", type: "upload" },
-      { label: "Engine & Plugin Licenses", icon: "engine", type: "transfer" },
-      { label: "Keystore & Code Signing", icon: "keystore", type: "input" },
+      { label: "Store Page Ownership", icon: "storepage", type: "registry_transfer" },
+      { label: "Full Source Code Backup", icon: "sourcecode", type: "collaborator_invite", altType: "file_upload" },
+      { label: "Game Assets", icon: "gameassets", type: "file_upload" },
+      { label: "Engine & Plugin Licenses", icon: "engine", type: "registry_transfer" },
+      { label: "Keystore & Code Signing", icon: "keystore", type: "file_upload" },
+      { label: "Keystore Password", icon: "keystore", type: "secure_secret" },
     ],
     right: [
-      { label: "Backend / Multiplayer Servers", icon: "multiplayer", type: "transfer" },
-      { label: "In-App Purchase Setup", icon: "iap", type: "transfer" },
-      { label: "Ad Monetisation Accounts", icon: "ads", type: "transfer" },
-      { label: "Player Community Ownership", icon: "community", type: "transfer" },
-      { label: "Build Pipeline & CI/CD", icon: "pipeline", type: "transfer" },
+      { label: "Backend / Multiplayer Servers", icon: "multiplayer", type: "account_ownership" },
+      { label: "In-App Purchase Setup", icon: "iap", type: "account_ownership" },
+      { label: "Ad Monetisation Accounts", icon: "ads", type: "account_ownership" },
+      { label: "Player Community Ownership", icon: "community", type: "account_ownership" },
+      { label: "Build Pipeline & CI/CD", icon: "pipeline", type: "account_ownership" },
     ],
   },
   app: {
     left: [
-      { label: "Play Store Account Transfer", icon: "playstore", type: "transfer" },
-      { label: "App Store Account Transfer", icon: "appstore", type: "transfer" },
-      { label: "Domain Name Transfer", icon: "domain", type: "transfer" },
-      { label: "Source Code Repository", icon: "sourcecode", type: "input" },
-      { label: "Database Export", icon: "database", type: "upload" },
+      { label: "Play Store Account Transfer", icon: "playstore", type: "registry_transfer" },
+      { label: "App Store Account Transfer", icon: "appstore", type: "registry_transfer" },
+      { label: "Domain Name Transfer", icon: "domain", type: "registry_transfer" },
+      { label: "Source Code Repository", icon: "sourcecode", type: "collaborator_invite", altType: "file_upload" },
+      { label: "Database Export", icon: "database", type: "file_upload" },
     ],
     right: [
-      { label: "Backend Server Access", icon: "hosting", type: "transfer" },
-      { label: "Keystore & Signing Keys", icon: "keystore", type: "input" },
-      { label: "API & Third-Party Keys", icon: "api", type: "input" },
-      { label: "Payment Processor Accounts", icon: "payment", type: "transfer" },
-      { label: "User Support System Transfer", icon: "support", type: "transfer" },
+      { label: "Backend Server Access", icon: "hosting", type: "account_ownership" },
+      { label: "Keystore & Signing Keys", icon: "keystore", type: "file_upload" },
+      { label: "Keystore Password", icon: "keystore", type: "secure_secret" },
+      { label: "API & Third-Party Keys", icon: "api", type: "secure_secret" },
+      { label: "Payment Processor Accounts", icon: "payment", type: "account_ownership" },
+      { label: "User Support System Transfer", icon: "support", type: "account_ownership" },
     ],
   },
 };
@@ -93,20 +115,30 @@ export function tdmGetTabItems(tab: TdmListingType): TdmChecklistItem[] {
 }
 
 export const TDM_TYPE_THEME: Record<TdmItemType, { accent: string; heading: string; blurb: string }> = {
-  transfer: {
+  registry_transfer: {
     accent: "#a3e635",
-    heading: "Ownership Transfer",
-    blurb: "Send an official transfer or ownership-change request to the buyer\u2019s account below, then upload a screenshot as proof.",
+    heading: "Registry Transfer",
+    blurb: "Initiate the official transfer through the registry or platform's own transfer tool (e.g. domain EPP/auth code, store's \u201ctransfer app\u201d), then upload proof.",
   },
-  upload: {
+  account_ownership: {
+    accent: "#facc15",
+    heading: "Account Ownership Transfer",
+    blurb: "Add the buyer as owner/admin using the platform's own ownership-transfer feature, then remove yourself once confirmed. Never share your password.",
+  },
+  collaborator_invite: {
+    accent: "#38bdf8",
+    heading: "Collaborator Invite",
+    blurb: "Invite the buyer as a collaborator on your existing repository instead of sharing credentials or a code dump.",
+  },
+  file_upload: {
     accent: "#60a5fa",
     heading: "File Upload",
-    blurb: "Upload the backup, export, or asset files for this item. They\u2019ll be bundled into the final delivery ZIP.",
+    blurb: "Upload the backup, export, asset, or key file for this item. It will be bundled into the final delivery ZIP.",
   },
-  input: {
+  secure_secret: {
     accent: "#e879f9",
-    heading: "Key / Credential",
-    blurb: "Paste the key, token, or credential string for this item. It will be stored securely and included in the final delivery.",
+    heading: "Secure Secret",
+    blurb: "Enter the key, token, or password for this item. It's encrypted and revealed to the buyer only once \u2014 never stored or sent in plain text.",
   },
 };
 
