@@ -147,6 +147,15 @@ export interface Listing {
   // listings whose only proof is a Play Store/App Store/itch.io link — NOT
   // ownership proof, just "we checked the link resolves and looks related".
   linkCheck?: { url: string; status: "link-checked" | "link-provided"; checkedAt?: unknown };
+  // Legacy binary-upload fields — older listings created before the
+  // link-only change (see UpdateListingParams above, which already had
+  // these; Listing itself was missing them, which is what
+  // AppListingBody.tsx's collectBuildFiles reads from).
+  apkUrl?: string;
+  apkStorageUrl?: string;
+  apkIpaFileName?: string;
+  apkFileName?: string;
+  notLiveBuildFiles?: { global?: ListingBuildFile[] };
 }
 
 export interface FeedResponse {
