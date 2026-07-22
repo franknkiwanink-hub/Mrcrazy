@@ -5,7 +5,7 @@ import { EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 import { collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type { SettingsState } from "@/lib/useSettingsState";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
 
 const AlertIcon = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e74c3c" strokeWidth="2">
@@ -73,7 +73,7 @@ export default function DangerZonePanel({}: {
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
 
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<string | null>(null);
@@ -165,10 +165,10 @@ export default function DangerZonePanel({}: {
       }, 2000);
       setExportProgress("✓ Download started!");
       setTimeout(() => setExportProgress(null), 3000);
-      toast("Data export downloaded successfully.");
+      toast("Data export downloaded successfully.", "success");
     } catch (err: any) {
       setExportProgress(null);
-      toast(`Export failed: ${err.message}`);
+      toast(`Export failed: ${err.message}`, "error");
     } finally {
       setExporting(false);
     }
@@ -200,7 +200,7 @@ export default function DangerZonePanel({}: {
         deletionConfirmedAt: serverTimestamp(),
       });
       await user.delete();
-      toast("Account permanently deleted. Goodbye.");
+      toast("Account permanently deleted. Goodbye.", "success");
       setTimeout(() => {
         window.location.reload();
       }, 2000);
@@ -213,7 +213,7 @@ export default function DangerZonePanel({}: {
         // password prompt, same as the original's inline overlay.
         setReauthError("Authentication failed.");
       } else {
-        toast(`Deletion failed: ${err.message}`);
+        toast(`Deletion failed: ${err.message}`, "error");
       }
       setDeleteStage("idle");
     }
@@ -292,89 +292,39 @@ export default function DangerZonePanel({}: {
           overlay from the original's deleteAccountBtn handler exactly
           (same copy, same required-before-delete step). */}
       {showReauth ? (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 99999,
-            background: "rgba(0,0,0,0.88)",
-            backdropFilter: "blur(14px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "1rem",
-          }}
-        >
-          <div
-            style={{
-              background: "#0c0c0c",
-              border: "1px solid rgba(255,255,255,0.14)",
-              borderRadius: "1.1rem",
-              width: "100%",
-              maxWidth: 380,
-              padding: "1.5rem",
-              display: "flex",
-              flexDirection: "column",
-              gap: "1rem",
-            }}
-          >
-            <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "#fff" }}>Confirm your password</span>
-            <p style={{ fontSize: "0.8rem", color: "#777", margin: 0 }}>
-              Required to permanently delete your account.
-            </p>
-            <input
-              type="password"
-              placeholder="Current password"
-              autoComplete="current-password"
-              value={reauthPassword}
-              onChange={(e) => setReauthPassword(e.target.value)}
-              style={{
-                background: "#080808",
-                border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: "0.7rem",
-                padding: "0.75rem 1rem",
-                fontSize: "0.9rem",
-                color: "#e8e8e8",
-                outline: "none",
-                fontFamily: "inherit",
-                width: "100%",
-                boxSizing: "border-box",
-              }}
-            />
-            {reauthError ? <div style={{ color: "#e74c3c", fontSize: "0.75rem" }}>{reauthError}</div> : null}
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <button
-                style={{
-                  flex: 1,
-                  padding: "0.8rem",
-                  borderRadius: "0.75rem",
-                  background: "#111",
-                  border: "1px solid #2a2a2a",
-                  color: "#888",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
+        <div id="srf-modal-overlay" className="visible" onClick={() => deleteStage !== "verifying" && setShowReauth(false)}>
+          <div id="srf-modal-box" onClick={(e) => e.stopPropagation()}>
+            <div id="srf-modal-icon-wrap">
+              <div id="srf-modal-icon" className="theme-danger">
+                <AlertIcon />
+              </div>
+            </div>
+            <div id="srf-modal-body">
+              <div id="srf-modal-title">Confirm your password</div>
+              <div id="srf-modal-msg">Required to permanently delete your account.</div>
+            </div>
+            <div id="srf-modal-input-wrap" style={{ display: "block" }}>
+              <input
+                id="srf-modal-input"
+                type="password"
+                placeholder="Current password"
+                autoComplete="current-password"
+                autoFocus
+                value={reauthPassword}
+                onChange={(e) => setReauthPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") confirmReauthAndDelete();
                 }}
-                onClick={() => setShowReauth(false)}
-                disabled={deleteStage === "verifying"}
-              >
+              />
+              {reauthError ? (
+                <div style={{ color: "#f87171", fontSize: "0.75rem", marginTop: 8 }}>{reauthError}</div>
+              ) : null}
+            </div>
+            <div id="srf-modal-actions">
+              <button className="srf-modal-btn cancel" onClick={() => setShowReauth(false)} disabled={deleteStage === "verifying"}>
                 Cancel
               </button>
-              <button
-                style={{
-                  flex: 2,
-                  padding: "0.8rem",
-                  borderRadius: "0.75rem",
-                  background: "#e74c3c",
-                  border: "none",
-                  color: "#fff",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-                onClick={confirmReauthAndDelete}
-                disabled={deleteStage === "verifying"}
-              >
+              <button className="srf-modal-btn confirm-danger" onClick={confirmReauthAndDelete} disabled={deleteStage === "verifying"}>
                 {deleteStage === "verifying" ? "Verifying…" : "Delete Account"}
               </button>
             </div>
@@ -382,7 +332,6 @@ export default function DangerZonePanel({}: {
         </div>
       ) : null}
 
-      <ToastHost />
     </>
   );
 }
