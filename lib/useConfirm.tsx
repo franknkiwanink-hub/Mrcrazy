@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useScrollLock } from "./useScrollLock";
 
 // Replaces the old global window.srfModal.confirm()/alert()/prompt()
 // dialogs. The CSS for this (#srf-modal-overlay, #srf-modal-box,
@@ -91,6 +92,12 @@ function ThemeIcon({ theme }: { theme: ConfirmTheme }) {
 
 export function useConfirm() {
   const [pending, setPending] = useState<PendingState>(null);
+
+  // Every other modal/overlay in the app locks background scroll while
+  // open (see useScrollLock.ts) — this dialog was the one exception,
+  // which is why the page kept scrolling behind e.g. the "Restore Draft?"
+  // prompt in the listing forms.
+  useScrollLock(pending !== null);
 
   const confirm = useCallback((opts: ConfirmOptions) => {
     return new Promise<boolean>((resolve) => {
