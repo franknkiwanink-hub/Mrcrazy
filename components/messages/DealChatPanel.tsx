@@ -16,6 +16,7 @@ import {
 import { doc, deleteDoc, collection, getDocs, writeBatch, addDoc } from "firebase/firestore";
 import { db, auth } from "@/lib/firebase";
 import TransferDealModal from "./TransferDealModal";
+import RequestPaymentOverlay from "./RequestPaymentOverlay";
 import SignInRequired from "@/components/auth/SignInRequired";
 import { buildListingSlug } from "@/lib/slug";
 
@@ -51,6 +52,7 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   const [deleteAfterCancel, setDeleteAfterCancel] = useState<{ deleteAt: number } | null>(null);
   const [deleteCountdown, setDeleteCountdown] = useState("");
   const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [requestPaymentOverlayOpen, setRequestPaymentOverlayOpen] = useState(false);
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -167,32 +169,17 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   }
 
   async function handlePay() {
-    if (!chat.room) return;
-    const amount = chat.room.escrowAmount ?? chat.room.listingPrice;
-    if (!amount || amount <= 0) {
-      await alert({ theme: "danger", title: "No amount set", msg: "Could not determine the deal amount. Please contact support." });
-      return;
-    }
-    if (!chat.room.dealId) {
-      await alert({ theme: "danger", title: "Missing deal info", msg: "This chat is missing its deal reference. Please reopen it from your Deals inbox." });
-      return;
-    }
-    const ok = await confirm({
+    // chat.payEscrow (wallet-to-wallet escrow funding, in useDealChat.ts)
+    // is a FUTURE PAYMENT METHOD — not called here. We don't currently
+    // hold a money-transmitter/custodial license to let buyers pay sellers
+    // directly from wallet balance (deposits are already off in the
+    // wallet modal — see WalletModal.tsx). Re-wire this to chat.payEscrow
+    // once a licensed payment provider is integrated.
+    await alert({
       theme: "success",
-      title: "Pay Into Escrow",
-      msg: `$${Number(amount).toLocaleString()} will be moved from your wallet into escrow for this deal. The seller can deliver once funded, and you'll confirm before it's released.`,
-      confirmText: "Pay Now",
+      title: "Payments moving to a new checkout",
+      msg: "We're switching escrow payments to a new payment provider. Paying into escrow from here is temporarily unavailable — check back shortly.",
     });
-    if (!ok) return;
-    setCtaBusy(true);
-    try {
-      await chat.payEscrow(amount);
-      await alert({ theme: "success", title: "Payment Sent", msg: `$${Number(amount).toLocaleString()} is now held in escrow. The seller has been notified.` });
-    } catch (err) {
-      await alert({ theme: "danger", title: "Payment Failed", msg: err instanceof Error ? err.message : "Something went wrong. Please try again." });
-    } finally {
-      setCtaBusy(false);
-    }
   }
 
   async function handleRelease() {
@@ -235,16 +222,19 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
 
   async function handleRemindBuyer() {
     if (!chat.room) return;
+    // Already sent one — block further sends until it's cleared (guards
+    // against the seller spamming unlimited payment requests).
+    if (chat.room.paymentRequestPending) return;
     const label = priceLabel(chat.room.escrowAmount, chat.room.listingPrice);
-    setCtaBusy(true);
+    setRequestPaymentOverlayOpen(true);
     try {
       await chat.remindBuyer(label);
-      await alert({ theme: "success", title: "Request Sent", msg: "The buyer has been notified to complete payment." });
     } catch {
+      setRequestPaymentOverlayOpen(false);
       await alert({ theme: "danger", title: "Failed", msg: "Could not send the request. Please try again." });
-    } finally {
-      setCtaBusy(false);
     }
+    // Overlay itself holds the 3s "sending" beat, then shows the green
+    // checkmark and calls onDone (closing itself) — no ctaBusy needed here.
   }
 
   async function handleCancelDeal() {
@@ -403,6 +393,9 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   return (
     <div id="dealChatPanel" style={{ display: "flex" }}>
       <ConfirmHost />
+      {requestPaymentOverlayOpen ? (
+        <RequestPaymentOverlay onDone={() => setRequestPaymentOverlayOpen(false)} />
+      ) : null}
       {transferModalOpen && room ? (
         <TransferDealModal
           chatRoomId={chatRoomId}
@@ -468,6 +461,7 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
             room={room}
             isSeller={isSeller}
             busy={ctaBusy}
+            requestPending={room.paymentRequestPending}
             onPay={handlePay}
             onRelease={handleRelease}
             onDispute={handleDispute}
@@ -645,6 +639,7 @@ function AnnouncementBar({
   room,
   isSeller,
   busy,
+  requestPending,
   onPay,
   onRelease,
   onDispute,
@@ -654,6 +649,7 @@ function AnnouncementBar({
   room: { paymentStatus: PaymentStatus; escrowAmount: number | null; listingPrice: number | null };
   isSeller: boolean;
   busy: boolean;
+  requestPending: boolean;
   onPay: () => void;
   onRelease: () => void;
   onDispute: () => void;
@@ -704,8 +700,10 @@ function AnnouncementBar({
     if (isSeller) {
       icon = ICON_SHIELD;
       label = "Awaiting Payment";
-      msg = "Waiting for buyer to pay " + price + " into escrow";
-      cta = { text: "Request Payment", onClick: onRemindBuyer };
+      msg = requestPending
+        ? "Payment request sent — waiting for buyer to pay " + price + " into escrow"
+        : "Waiting for buyer to pay " + price + " into escrow";
+      cta = { text: requestPending ? "Request Sent" : "Request Payment", onClick: onRemindBuyer };
     } else {
       icon = ICON_CARDS;
       label = "Payment Due";
@@ -761,7 +759,7 @@ function AnnouncementBar({
         ) : null}
       </div>
       {cta ? (
-        <button className="dcp-ann-cta" disabled={busy} onClick={cta.onClick}>
+        <button className="dcp-ann-cta" disabled={busy || (isSeller && status === "unfunded" && requestPending)} onClick={cta.onClick}>
           {busy ? "Processing…" : cta.text}
         </button>
       ) : null}
