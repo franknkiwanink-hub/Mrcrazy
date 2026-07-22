@@ -3,12 +3,13 @@
 import { useCallback, useState } from "react";
 
 // Replaces the old global window.srfModal.confirm()/alert()/prompt()
-// dialogs, which were never ported to this app (see the comment in
-// SellerProfileHeader.tsx that established the inline-overlay pattern
-// this hook generalizes). The deal chat panel needs several of these
-// (pay confirm, release confirm, dispute reason prompt, cancel confirm,
-// report confirm, plain alerts) — one shared hook avoids five ad-hoc
-// copies of the same overlay markup.
+// dialogs. The CSS for this (#srf-modal-overlay, #srf-modal-box,
+// .srf-modal-btn, theme-* variants) already exists in app/globals.css —
+// this hook now renders that exact markup instead of an ad-hoc inline
+// overlay, matching the pattern lib/useAiLengthPicker.tsx already uses
+// for #srfAiLenOverlay. One shared hook avoids ad-hoc copies of the same
+// dialog scattered across settings panels, listing forms, and the deal
+// chat panel.
 
 export type ConfirmTheme = "success" | "warning" | "danger" | "info" | "report";
 
@@ -33,6 +34,7 @@ interface AlertOptions {
   theme?: ConfirmTheme;
   title: string;
   msg: string;
+  okText?: string;
 }
 
 type PendingState =
@@ -41,13 +43,51 @@ type PendingState =
   | { kind: "alert"; opts: AlertOptions; resolve: () => void }
   | null;
 
-const THEME_COLOR: Record<ConfirmTheme, string> = {
-  success: "#a3e635",
-  warning: "#fbbf24",
-  danger: "#f87171",
-  info: "#60a5fa",
-  report: "#fb7185",
+// Maps our theme names to the .srf-modal-btn confirm-* modifier and the
+// #srf-modal-icon theme-* modifier — both already defined in globals.css.
+const THEME_CLASS: Record<ConfirmTheme, string> = {
+  success: "success",
+  warning: "warning",
+  danger: "danger",
+  info: "info",
+  report: "report",
 };
+
+function ThemeIcon({ theme }: { theme: ConfirmTheme }) {
+  switch (theme) {
+    case "danger":
+    case "warning":
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+      );
+    case "success":
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 6L9 17l-5-5" />
+        </svg>
+      );
+    case "report":
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+          <line x1="4" y1="22" x2="4" y2="15" />
+        </svg>
+      );
+    case "info":
+    default:
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="16" x2="12" y2="12" />
+          <line x1="12" y1="8" x2="12.01" y2="8" />
+        </svg>
+      );
+  }
+}
 
 export function useConfirm() {
   const [pending, setPending] = useState<PendingState>(null);
@@ -76,59 +116,75 @@ export function useConfirm() {
 
   const ConfirmHost = useCallback(() => {
     if (!pending) return null;
-    const color = THEME_COLOR[pending.opts.theme || "info"];
+    const theme = pending.opts.theme || "info";
+    const isPrompt = pending.kind === "prompt";
+    const isAlert = pending.kind === "alert";
+    const confirmBtnClass = isPrompt ? "confirm-input" : `confirm-${THEME_CLASS[theme]}`;
+
+    function handleDismiss() {
+      if (pending?.kind === "confirm") pending.resolve(false);
+      else if (pending?.kind === "prompt") pending.resolve(null);
+      else pending?.resolve();
+      close();
+    }
+
+    function handleCancel() {
+      if (pending?.kind === "confirm") pending.resolve(false);
+      else if (pending?.kind === "prompt") pending.resolve(null);
+      close();
+    }
+
+    function handleConfirm() {
+      if (pending?.kind === "confirm") pending.resolve(true);
+      else if (pending?.kind === "prompt") pending.resolve(pending.value.trim() || null);
+      else pending?.resolve();
+      close();
+    }
 
     return (
-      <div
-        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 10001, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
-        onClick={() => {
-          if (pending.kind === "confirm") pending.resolve(false);
-          else if (pending.kind === "prompt") pending.resolve(null);
-          else pending.resolve();
-          close();
-        }}
-      >
-        <div
-          style={{ background: "#111", border: `1px solid ${color}33`, padding: 24, borderRadius: 14, color: "#fff", maxWidth: 380, width: "100%" }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: "1.05rem" }}>{pending.opts.title}</h3>
-          <p style={{ opacity: 0.7, fontSize: 13.5, lineHeight: 1.5, margin: "0 0 16px" }}>{pending.opts.msg}</p>
+      <div id="srf-modal-overlay" className="visible" onClick={handleDismiss}>
+        <div id="srf-modal-box" onClick={(e) => e.stopPropagation()}>
+          <div id="srf-modal-icon-wrap">
+            <div id="srf-modal-icon" className={`theme-${isPrompt ? "input" : theme}`}>
+              <ThemeIcon theme={theme} />
+            </div>
+          </div>
 
-          {pending.kind === "prompt" ? (
-            <input
-              autoFocus
-              type="text"
-              placeholder={pending.kind === "prompt" ? (pending.opts.inputPlaceholder || "") : ""}
-              value={pending.value}
-              onChange={(e) => setPending({ ...pending, value: e.target.value })}
-              style={{ width: "100%", padding: "0.6rem 0.75rem", borderRadius: 8, background: "#0a0a0a", border: "1px solid #222", color: "#fff", fontSize: 13.5, marginBottom: 16, boxSizing: "border-box" }}
-            />
+          <div id="srf-modal-body">
+            <div id="srf-modal-title">{pending.opts.title}</div>
+            <div id="srf-modal-msg">{pending.opts.msg}</div>
+          </div>
+
+          {isPrompt ? (
+            <div id="srf-modal-input-wrap" style={{ display: "block" }}>
+              <input
+                id="srf-modal-input"
+                autoFocus
+                type="text"
+                placeholder={(pending as Extract<PendingState, { kind: "prompt" }>).opts.inputPlaceholder || ""}
+                value={(pending as Extract<PendingState, { kind: "prompt" }>).value}
+                onChange={(e) =>
+                  setPending((prev) =>
+                    prev && prev.kind === "prompt" ? { ...prev, value: e.target.value } : prev
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleConfirm();
+                }}
+              />
+            </div>
           ) : null}
 
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            {pending.kind !== "alert" ? (
-              <button
-                onClick={() => {
-                  if (pending.kind === "confirm") pending.resolve(false);
-                  else pending.resolve(null);
-                  close();
-                }}
-                style={{ padding: "0.5rem 1rem", borderRadius: 8, background: "transparent", border: "1px solid #333", color: "#aaa", fontSize: 13, cursor: "pointer" }}
-              >
+          <div id="srf-modal-actions">
+            {!isAlert ? (
+              <button className="srf-modal-btn cancel" onClick={handleCancel}>
                 {(pending.kind === "confirm" || pending.kind === "prompt") ? (pending.opts.cancelText || "Cancel") : "Cancel"}
               </button>
             ) : null}
-            <button
-              onClick={() => {
-                if (pending.kind === "confirm") pending.resolve(true);
-                else if (pending.kind === "prompt") pending.resolve(pending.value.trim() || null);
-                else pending.resolve();
-                close();
-              }}
-              style={{ padding: "0.5rem 1.1rem", borderRadius: 8, background: color, border: "none", color: "#000", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
-            >
-              {pending.kind === "alert" ? "OK" : (pending.opts.confirmText || "Confirm")}
+            <button className={`srf-modal-btn ${isAlert ? "ok-only" : confirmBtnClass}`} onClick={handleConfirm}>
+              {isAlert
+                ? (pending.opts as AlertOptions).okText || "OK"
+                : (pending.opts as ConfirmOptions | PromptOptions).confirmText || "Confirm"}
             </button>
           </div>
         </div>
