@@ -3643,6 +3643,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
 .sr-site-main { padding: 12px 14px 13px; display: flex; flex-direction: column; min-width: 0;
   border-top: 1px solid var(--sr-line); }
 .sr-site-headline { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.sr-site-title-group { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .sr-site-title { margin: 0; font-size: 13.5px; font-weight: 700; color: var(--sr-text); line-height: 1.3;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .sr-site-price { font-size: 14px; font-weight: 800; color: var(--sr-site); flex-shrink: 0; }
@@ -3722,6 +3723,25 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
 }
 .sr-app-desc { margin: 4px 0 0; font-size: 11.5px; color: var(--sr-text-dim); line-height: 1.45;
   display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* Shared across SiteCard/AppCard/GameCard/listing detail — see
+   components/marketplace/VerifiedBadge.tsx for which tier renders which
+   class, and exactly what each tier does/doesn't prove. */
+.sr-verified-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+  padding: 2px 8px 2px 6px; border-radius: 100px; white-space: nowrap;
+}
+.sr-verified-badge--verified {
+  background: rgba(163,230,53,.14); color: #a3e635; border: 1px solid rgba(163,230,53,.35);
+}
+.sr-verified-badge--checked {
+  background: rgba(96,165,250,.14); color: #60a5fa; border: 1px solid rgba(96,165,250,.35);
+}
+.sr-verified-badge--provided {
+  background: rgba(255,255,255,.06); color: var(--sr-text-dim); border: 1px solid rgba(255,255,255,.12);
+}
+
 .sr-app-price { font-size: 16px; font-weight: 800; color: var(--sr-app); flex-shrink: 0; white-space: nowrap; margin-top: auto; padding-top: 8px; }
 .sr-app-stats {
   display: grid; grid-template-columns: repeat(3,1fr); gap: 6px;
@@ -3786,8 +3806,9 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
   padding: 3px 9px; border-radius: 100px;
 }
 .sr-game-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 0; }
+.sr-game-title-group { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
 .sr-game-title { margin: 0; font-size: 14px; font-weight: 700; color: var(--sr-text);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .sr-game-price { font-size: 14px; font-weight: 800; color: var(--sr-game); flex-shrink: 0; }
 .sr-game-stats { display: flex; gap: 14px; padding: 8px 12px; margin: 8px 0 0; border-top: 1px solid var(--sr-line-soft); border-bottom: 1px solid var(--sr-line-soft); }
 .sr-game-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: nowrap; padding: 10px 12px 12px; }
@@ -12457,6 +12478,8 @@ body.theme-active .sd-header { background: color-mix(in srgb, var(--app-theme-co
 .srf-tools-url-input::placeholder { color: var(--st-text-faint); }
 .srf-tools-url-input:focus { border-color: rgba(163,230,53,0.5); }
 .srf-tools-url-input.srf-tools-input-err { border-color: var(--st-red); }
+select.srf-tools-url-input { cursor: pointer; }
+select.srf-tools-url-input option { background: #0d0d0d; color: #fff; }
 .srf-tools-btn-lime {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   height: 48px; padding: 0 22px; flex-shrink: 0;
