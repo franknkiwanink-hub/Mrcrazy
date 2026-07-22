@@ -733,55 +733,6 @@ async function _syncBoostedAdIfActive(db, listingId, listingData) {
   }
 }
 
-// Builds the denormalized card-display snapshot stored on boostedAds/{id}.
-// Only the fields ListingCard actually renders — kept intentionally small
-// since this doc is read on every BoostedRow load, uncached, unlike the
-// full listings doc. Shared by handleBoostListing (paypal handler, at
-// purchase time) and _syncBoostedAdIfActive below (at edit time), so both
-// call sites build the exact same shape from a listing's current data.
-function _boostedAdSnapshot(listingId, listingData, boostedUntilTs) {
-  return {
-    listingId,
-    type:         listingData.type || 'website',
-    ownerId:      listingData.ownerId || null,
-    title:        listingData.title || 'Untitled',
-    tagline:      listingData.tagline || null,
-    url:          listingData.url || null,
-    images:       Array.isArray(listingData.images) ? listingData.images.slice(0, 6) : [],
-    imageCover:   listingData.imageCover || (listingData.images && listingData.images[0]) || null,
-    appIcon:      listingData.appIcon || null,
-    category:     listingData.category || null,
-    gameType:     listingData.gameType || null,
-    financials:   listingData.financials || null,
-    settings:     listingData.settings || null,
-    verified:     !!listingData.verified,
-    boostedUntil: boostedUntilTs,
-  };
-}
-
-// If `listingId` currently has an active (non-expired) boostedAds doc,
-// overwrites it with a fresh snapshot built from `listingData` — keeping
-// the paid ad's display in sync with the seller's latest edit, per the
-// "boosted ads must stay live-accurate, never stale" requirement. A no-op
-// (one extra read, no write) for the common case of an unboosted listing,
-// so ordinary edits pay only a single cheap lookup, not a wasted write.
-async function _syncBoostedAdIfActive(db, listingId, listingData) {
-  try {
-    const adRef = db.collection('boostedAds').doc(listingId);
-    const adSnap = await adRef.get();
-    if (!adSnap.exists) return;
-    const boostedUntilTs = adSnap.data().boostedUntil;
-    const stillActive = boostedUntilTs?.toMillis?.() > Date.now();
-    if (!stillActive) return; // expired — leave it for lazy cleanup, don't resurrect it
-    await adRef.set(_boostedAdSnapshot(listingId, listingData, boostedUntilTs));
-  } catch (err) {
-    // Non-fatal — worst case the boosted ad card shows slightly stale
-    // fields until the next successful edit or boost top-up corrects it.
-    // Must never fail/roll back the listing edit itself.
-    console.error('[_syncBoostedAdIfActive] failed for', listingId, err);
-  }
-}
-
 async function handleUpdate(body, idToken) {
   const {
     listingId, title, description, url,
