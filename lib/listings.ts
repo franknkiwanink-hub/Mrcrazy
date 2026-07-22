@@ -100,6 +100,15 @@ export interface Listing {
   globalBuildUrl?: string;
   additionalFiles?: ListingBuildFile[];
   notLive?: boolean;
+  // Legacy binary-upload fields — older listings created before the
+  // link-only change may still have these; no current form writes them
+  // anymore (see UpdateListingParams below, kept there for back-compat
+  // submission, and AppListingBody.tsx which still renders them if present).
+  apkUrl?: string;
+  apkStorageUrl?: string;
+  apkIpaFileName?: string;
+  apkFileName?: string;
+  notLiveBuildFiles?: { global?: ListingBuildFile[] };
   attachedRepo?: AttachedRepo;
   transferMethods?: string[];
   saves?: number;
