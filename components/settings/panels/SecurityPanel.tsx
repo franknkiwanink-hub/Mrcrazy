@@ -5,7 +5,7 @@ import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 
 import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type { SettingsState } from "@/lib/useSettingsState";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
 
 const SaveIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
@@ -32,7 +32,7 @@ export default function SecurityPanel({
   state: SettingsState;
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -48,7 +48,7 @@ export default function SecurityPanel({
   async function handlePasswordSave() {
     const user = auth.currentUser;
     if (!user) {
-      toast("Not signed in.");
+      toast("Not signed in.", "error");
       return;
     }
     if (!currentPassword) {
@@ -100,9 +100,9 @@ export default function SecurityPanel({
     setState((prev) => ({ ...prev, twoFactorEnabled: checked }));
     try {
       await updateDoc(doc(db, "users", user.uid), { twoFactorEnabled: checked });
-      toast(`2FA ${checked ? "enabled" : "disabled"}.`);
+      toast(`2FA ${checked ? "enabled" : "disabled"}.`, "success");
     } catch {
-      toast("Save failed.");
+      toast("Save failed.", "error");
     }
   }
 
@@ -113,9 +113,9 @@ export default function SecurityPanel({
     setState((prev) => ({ ...prev, loginAlerts: checked }));
     try {
       await updateDoc(doc(db, "users", user.uid), { loginAlerts: checked });
-      toast(`Login alerts ${checked ? "on" : "off"}.`);
+      toast(`Login alerts ${checked ? "on" : "off"}.`, "success");
     } catch {
-      toast("Save failed.");
+      toast("Save failed.", "error");
     }
   }
 
@@ -202,7 +202,6 @@ export default function SecurityPanel({
         <Toggle checked={loginAlerts} onChange={handleLoginAlertsChange} />
       </div>
 
-      <ToastHost />
     </>
   );
 }
