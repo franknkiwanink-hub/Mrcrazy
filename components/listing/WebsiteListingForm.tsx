@@ -30,6 +30,10 @@ import { createListing, generateVerification, checkVerification } from "@/lib/li
 import { aiStudioCall, aiPlanCap } from "@/lib/aiStudio";
 import { useAiLengthPicker } from "@/lib/useAiLengthPicker";
 import { useLimits } from "@/lib/useLimits";
+import Select from "./shared/Select";
+import TransferMethodPicker from "./shared/TransferMethodPicker";
+import ProofUploader, { type ProofImage } from "./shared/ProofUploader";
+import { WEBSITE_TRANSFER_METHODS } from "./shared/transferMethods";
 
 const ACCENT = "#a3e635";
 const DRAFT_KEY = "srf_draft_website";
@@ -46,19 +50,6 @@ const FALLBACK_DESC_MAX = 5000;
 const CATEGORY_OPTIONS = ["E-commerce", "Portfolio", "Blog", "SaaS", "Game", "Community", "Other"];
 const AGE_OPTIONS = ["< 3 months", "3–5 months", "6–11 months", "1+ year", "2+ years", "3+ years", "5+ years", "10+ years"];
 const STRUCTURE_OPTIONS = ["Sole Proprietorship", "LLC", "Corporation", "Partnership", "Other"];
-
-const TRANSFER_METHODS: { value: string; label: string; sub?: string; featured?: boolean }[] = [
-  { value: "html_css_js", label: "HTML/CSS/JS Files", sub: "Hand off source files directly in chat — no complications", featured: true },
-  { value: "domain_push", label: "Domain Push (Registrar Transfer)" },
-  { value: "zip_download", label: "Full Site ZIP (Files + DB)" },
-  { value: "cpanel", label: "cPanel / Control Panel" },
-  { value: "github", label: "GitHub / GitLab Repo Transfer" },
-  { value: "hosting_handover", label: "Hosting Account Handover" },
-  { value: "db_dump", label: "Database Dump (.sql)" },
-  { value: "ftp", label: "FTP Credentials Only" },
-  { value: "site_builder", label: "Site Builder Transfer (Wix, Shopify…)" },
-  { value: "escrow_migration", label: "Escrow-Based Manual Migration" },
-];
 
 // Per-slot aspect ratio requirement — mirrors LFM_SLOT_RATIOS exactly.
 type SlotSpec = {
@@ -105,6 +96,7 @@ interface Draft {
   revenue?: string;
   expenses?: string;
   transferMethods?: string[];
+  monthlyVisits?: string;
 }
 
 const IMGUR_CLIENT_ID = "891e5bb4aa94282";
@@ -245,6 +237,12 @@ export default function WebsiteListingForm() {
   const [price, setPrice] = useState("");
   const [revenue, setRevenue] = useState("");
   const [expenses, setExpenses] = useState("");
+  // Proof of the claimed monthly revenue — required whenever revenue > 0.
+  const [revenueProof, setRevenueProof] = useState<ProofImage[]>([]);
+  // Optional traffic claim + its supporting analytics screenshots —
+  // screenshots become required the moment a visits number is entered.
+  const [monthlyVisits, setMonthlyVisits] = useState("");
+  const [trafficProof, setTrafficProof] = useState<ProofImage[]>([]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -292,6 +290,7 @@ export default function WebsiteListingForm() {
       if (d.revenue) setRevenue(d.revenue);
       if (d.expenses) setExpenses(d.expenses);
       if (d.transferMethods?.length) setTransferMethods(d.transferMethods);
+      if (d.monthlyVisits) setMonthlyVisits(d.monthlyVisits);
       if (d.step && d.step > 1) setStep(d.step);
     } catch {
       // ignore corrupt draft
@@ -303,7 +302,7 @@ export default function WebsiteListingForm() {
     try {
       const d: Draft = {
         step: nextStep, isTemplate, tplUploadType, tplLinkUrl, url, title, desc, frontend, backend, database, monetization,
-        location, reason, category, age, structure, price, revenue, expenses, transferMethods,
+        location, reason, category, age, structure, price, revenue, expenses, transferMethods, monthlyVisits,
       };
       localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
     } catch {
@@ -554,6 +553,16 @@ export default function WebsiteListingForm() {
       setErrors({ fin: "Please fill in Price, Monthly Revenue, and Monthly Expenses." });
       return;
     }
+    const revenueNum = parseFloat(revenue) || 0;
+    if (revenueNum > 0 && revenueProof.length === 0) {
+      setErrors({ fin: "Please upload at least one screenshot proving your claimed monthly revenue (e.g. Stripe, PayPal, or ad-network dashboard)." });
+      return;
+    }
+    const visitsNum = parseFloat(monthlyVisits) || 0;
+    if (monthlyVisits.trim() && visitsNum > 0 && trafficProof.length === 0) {
+      setErrors({ fin: "Please upload at least one analytics screenshot (e.g. Google Analytics or Search Console) to support your monthly visits number." });
+      return;
+    }
     if (!user) {
       setSubmitError("You must be logged in to list.");
       return;
@@ -588,7 +597,22 @@ export default function WebsiteListingForm() {
         }
       }
 
-      setProgress({ pct: 85, label: "Saving listing to marketplace…" });
+      // Upload financial/traffic proof screenshots, if any — these back up
+      // the numbers entered in the Financials step (see validateStep before
+      // handleSubmit ever gets called: revenue > 0 requires at least one,
+      // and a non-zero monthly visits figure requires at least one too).
+      let revenueProofUrls: string[] = [];
+      if (revenueProof.length > 0) {
+        setProgress({ pct: 87, label: "Uploading revenue proof…" });
+        for (const img of revenueProof) revenueProofUrls.push(await uploadToImgur(img.file));
+      }
+      let trafficProofUrls: string[] = [];
+      if (trafficProof.length > 0) {
+        setProgress({ pct: 89, label: "Uploading traffic proof…" });
+        for (const img of trafficProof) trafficProofUrls.push(await uploadToImgur(img.file));
+      }
+
+      setProgress({ pct: 92, label: "Saving listing to marketplace…" });
 
       const { listingId } = await createListing({
         idToken,
@@ -607,7 +631,11 @@ export default function WebsiteListingForm() {
           price: parseFloat(price),
           revenue: parseFloat(revenue),
           expenses: parseFloat(expenses),
+          revenueProofUrls,
         },
+        traffic: monthlyVisits.trim()
+          ? { monthlyVisits: parseFloat(monthlyVisits) || 0, proofUrls: trafficProofUrls }
+          : undefined,
         transferMethods,
         attachedRepo: null,
       });
@@ -965,22 +993,13 @@ export default function WebsiteListingForm() {
             {errors.settings && <ErrorBox>{errors.settings}</ErrorBox>}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 20 }}>
               <Field label="Category">
-                <select value={category} onChange={(e) => setCategory(e.target.value)} style={inputStyle}>
-                  <option value="">Select</option>
-                  {CATEGORY_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <Select value={category} onChange={setCategory} options={CATEGORY_OPTIONS} accent={ACCENT} />
               </Field>
               <Field label="Site Age">
-                <select value={age} onChange={(e) => setAge(e.target.value)} style={inputStyle}>
-                  <option value="">Select</option>
-                  {AGE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <Select value={age} onChange={setAge} options={AGE_OPTIONS} accent={ACCENT} />
               </Field>
               <Field label="Business Structure">
-                <select value={structure} onChange={(e) => setStructure(e.target.value)} style={inputStyle}>
-                  <option value="">Select</option>
-                  {STRUCTURE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <Select value={structure} onChange={setStructure} options={STRUCTURE_OPTIONS} accent={ACCENT} />
               </Field>
             </div>
 
@@ -990,33 +1009,16 @@ export default function WebsiteListingForm() {
             </div>
 
             <span style={sectionLabelStyle}>
-              Transfer Methods <span style={{ color: "#f87171" }}>*</span>
+              Delivery Method <span style={{ color: "#f87171" }}>*</span>
             </span>
             {errors.transfer && <ErrorBox>{errors.transfer}</ErrorBox>}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 24 }}>
-              {TRANSFER_METHODS.map((m) => (
-                <label
-                  key={m.value}
-                  style={{
-                    gridColumn: m.featured ? "1/-1" : undefined,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "10px 12px",
-                    background: transferMethods.includes(m.value) ? "rgba(163,230,53,0.08)" : "rgba(255,255,255,0.03)",
-                    border: `1px solid ${transferMethods.includes(m.value) ? "rgba(163,230,53,0.3)" : "rgba(255,255,255,0.08)"}`,
-                    borderRadius: 10,
-                    cursor: "pointer",
-                    fontSize: 13,
-                  }}
-                >
-                  <input type="checkbox" checked={transferMethods.includes(m.value)} onChange={() => toggleTransfer(m.value)} style={{ accentColor: ACCENT }} />
-                  <span style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontWeight: 600 }}>{m.featured ? "⚡ " : ""}{m.label}</span>
-                    {m.sub && <span style={{ fontSize: 11, opacity: 0.5 }}>{m.sub}</span>}
-                  </span>
-                </label>
-              ))}
+            <div style={{ marginBottom: 24 }}>
+              <TransferMethodPicker
+                methods={WEBSITE_TRANSFER_METHODS}
+                selected={transferMethods}
+                onToggle={toggleTransfer}
+                accent={ACCENT}
+              />
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
@@ -1046,6 +1048,52 @@ export default function WebsiteListingForm() {
               <span style={{ fontSize: 20, fontWeight: 800, color: profit >= 0 ? ACCENT : "#f87171" }}>
                 {profit >= 0 ? "+" : ""}${profit.toFixed(2)}
               </span>
+            </div>
+
+            {(parseFloat(revenue) || 0) > 0 && (
+              <div style={{ marginBottom: 24 }}>
+                <span style={sectionLabelStyle}>
+                  Proof of Revenue <span style={{ color: "#f87171" }}>*</span>
+                </span>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
+                  Upload a screenshot of your Stripe, PayPal, ad network, or bank dashboard showing this revenue. Buyers trust listings with verified numbers.
+                </div>
+                <ProofUploader
+                  images={revenueProof}
+                  onAdd={(img) => setRevenueProof((prev) => [...prev, img])}
+                  onRemove={(i) => setRevenueProof((prev) => prev.filter((_, idx) => idx !== i))}
+                  max={3}
+                  accent={ACCENT}
+                />
+              </div>
+            )}
+
+            <div style={{ marginBottom: 24 }}>
+              <span style={sectionLabelStyle}>Traffic (optional)</span>
+              <Field label="Monthly Visits">
+                <input
+                  type="number"
+                  min="0"
+                  value={monthlyVisits}
+                  onChange={(e) => setMonthlyVisits(e.target.value)}
+                  placeholder="e.g. 12000"
+                  style={inputStyle}
+                />
+              </Field>
+              {(parseFloat(monthlyVisits) || 0) > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
+                    Since you entered a visits number, upload 1–3 analytics screenshots (Google Analytics, Search Console, or your host's dashboard) to back it up. <span style={{ color: "#f87171" }}>Required.</span>
+                  </div>
+                  <ProofUploader
+                    images={trafficProof}
+                    onAdd={(img) => setTrafficProof((prev) => [...prev, img])}
+                    onRemove={(i) => setTrafficProof((prev) => prev.filter((_, idx) => idx !== i))}
+                    max={3}
+                    accent={ACCENT}
+                  />
+                </div>
+              )}
             </div>
 
             {submitError && <ErrorBox>{submitError}</ErrorBox>}
