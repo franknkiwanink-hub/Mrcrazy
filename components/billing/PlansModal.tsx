@@ -33,11 +33,11 @@ interface PlanInfo {
 const PLAN_DATA: Record<PlanKey, PlanInfo> = {
   starter: {
     name: "Starter",
-    price: 15,
-    fee: "20%",
+    price: 10,
+    fee: "15%",
     color: "#60a5fa",
     tagline: "For developers listing regularly",
-    pills: ["15 listings/wk", "20% fee"],
+    pills: ["15 listings/wk", "15% fee"],
     features: [
       { text: "Escrow protection", on: true },
       { text: "Wallet access", on: true },
@@ -49,7 +49,7 @@ const PLAN_DATA: Record<PlanKey, PlanInfo> = {
   },
   growth: {
     name: "Growth",
-    price: 30,
+    price: 20,
     fee: "10%",
     color: "#a3e635",
     tagline: "For serious sellers scaling up",
@@ -65,7 +65,7 @@ const PLAN_DATA: Record<PlanKey, PlanInfo> = {
   },
   pro: {
     name: "Pro",
-    price: 60,
+    price: 30,
     fee: "5%",
     color: "#d8b4fe",
     tagline: "For high-volume power sellers",
