@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { auth } from "@/lib/firebase";
 import { useLimits } from "@/lib/useLimits";
+import { useCurrency } from "@/lib/CurrencyContext";
 import AutoWithdrawAddon from "@/components/wallet/AutoWithdrawAddon";
 
 // Ports the WITHDRAW section from wallet.js (payment method, scheduler,
@@ -61,6 +62,7 @@ export default function WithdrawTab({
   const [msg, setMsg] = useState<{ text: string; kind: "ok" | "err" | "" }>({ text: "", kind: "" });
 
   const { limits } = useLimits();
+  const { formatBalance } = useCurrency();
   const WITHDRAW_MIN = limits.wallet.withdrawMin ?? FALLBACK_WITHDRAW_MIN;
   const WITHDRAW_MAX = limits.wallet.withdrawMax ?? FALLBACK_WITHDRAW_MAX;
   const WITHDRAW_FEE_RATE = limits.wallet.withdrawFee ?? FALLBACK_WITHDRAW_FEE_RATE;
@@ -87,7 +89,7 @@ export default function WithdrawTab({
     setMsg({ text: "", kind: "" });
 
     if (!amt || amt < WITHDRAW_MIN || amt > WITHDRAW_MAX) {
-      setMsg({ text: `Enter an amount between $${WITHDRAW_MIN} and $${WITHDRAW_MAX.toLocaleString()}.`, kind: "err" });
+      setMsg({ text: `Enter an amount between $${WITHDRAW_MIN} and $${WITHDRAW_MAX.toLocaleString()} USD.`, kind: "err" });
       return;
     }
     if (amt > withdrawable) {
@@ -95,7 +97,7 @@ export default function WithdrawTab({
         text:
           withdrawable <= 0
             ? "You don't have any withdrawable balance yet. Deposited funds can be spent on Siterifty but can't be cashed out — only sale earnings, money received, and referral bonuses qualify."
-            : `You can only withdraw up to $${withdrawable.toFixed(2)} — the rest of your balance came from deposits, which aren't withdrawable.`,
+            : `You can only withdraw up to $${withdrawable.toFixed(2)} USD — the rest of your balance came from deposits, which aren't withdrawable.`,
         kind: "err",
       });
       return;
@@ -152,7 +154,7 @@ export default function WithdrawTab({
       const whenMsg = scheduledForIso
         ? `on ${new Date(scheduledForIso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} at ${new Date(scheduledForIso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
         : `within ${etaMsg}`;
-      setMsg({ text: `✓ Withdrawal requested. You'll receive $${result.receive.toFixed(2)} ${whenMsg}.`, kind: "ok" });
+      setMsg({ text: `✓ Withdrawal requested. You'll receive $${result.receive.toFixed(2)} USD ${whenMsg}.`, kind: "ok" });
       setAmount("");
       setEmail("");
       setBankAccountName("");
@@ -172,10 +174,10 @@ export default function WithdrawTab({
     <div className={`wallet-panel${active ? " active" : ""}`} id="walletPanelWithdraw">
       <div id="walletWithdrawAvailBanner">
         <span>Available to withdraw</span>
-        <strong id="walletWithdrawAvailAmt">${withdrawable.toFixed(2)}</strong>
+        <strong id="walletWithdrawAvailAmt">{formatBalance(withdrawable)}</strong>
       </div>
 
-      <div className="wallet-field-label">Amount to withdraw</div>
+      <div className="wallet-field-label">Amount to withdraw (USD)</div>
       <div className="wallet-amount-input-wrap">
         <span className="wallet-amount-currency">$</span>
         <input
@@ -347,12 +349,12 @@ export default function WithdrawTab({
       </div>
 
       <div className="wallet-fee-breakdown" id="walletWithdrawFeeRow" style={showFee ? undefined : { display: "none" }}>
-        <div className="wallet-fee-line"><span>Withdrawal amount</span><span id="walletWithdrawGross">${amt ? amt.toFixed(2) : "0.00"}</span></div>
-        <div className="wallet-fee-line"><span id="walletWithdrawFeeLabel">Processing fee (5%)</span><span id="walletWithdrawFee">${fee.toFixed(2)}</span></div>
-        <div className="wallet-fee-line total"><span>You'll receive</span><span id="walletWithdrawReceive">${receive.toFixed(2)}</span></div>
+        <div className="wallet-fee-line"><span>Withdrawal amount (USD)</span><span id="walletWithdrawGross">${amt ? amt.toFixed(2) : "0.00"}</span></div>
+        <div className="wallet-fee-line"><span id="walletWithdrawFeeLabel">Processing fee (5%, USD)</span><span id="walletWithdrawFee">${fee.toFixed(2)}</span></div>
+        <div className="wallet-fee-line total"><span>You'll receive (USD)</span><span id="walletWithdrawReceive">${receive.toFixed(2)}</span></div>
       </div>
 
-      <div className="wallet-hint" id="walletWithdrawHint">Min ${WITHDRAW_MIN} · Max ${WITHDRAW_MAX.toLocaleString()} · PayPal: 1–3 business days · Bank: 3–5 business days · Bitcoin: 1–2 business days</div>
+      <div className="wallet-hint" id="walletWithdrawHint">Min ${WITHDRAW_MIN} · Max ${WITHDRAW_MAX.toLocaleString()} USD · PayPal: 1–3 business days · Bank: 3–5 business days · Bitcoin: 1–2 business days</div>
       {msg.text ? <div id="walletWithdrawMsg" className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}>{msg.text}</div> : <div id="walletWithdrawMsg" className="wallet-msg" />}
       <button className="wallet-submit-btn" id="walletWithdrawSubmit" onClick={handleSubmit} disabled={submitting}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
