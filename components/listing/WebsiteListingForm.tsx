@@ -1,17 +1,13 @@
 "use client";
 
-// Ports Js/listing-form.js (the "website" branch), including the "It's a
-// template" sub-flow: template file upload (HTML/CSS/JS), combined-HTML
-// live preview, Test Play modal, and external-demo-link mode — mirrors
-// _handleTplFiles/_combineAndPreviewTpl/_uploadCombinedTplHtml from the
-// original exactly, reusing the same combine/upload approach already
-// ported for the game-listing build upload (see GameListingForm.tsx).
+// Ports Js/listing-form.js (the "website" branch). Website listings are
+// their own type — the old inline "It's a template" sub-flow has been
+// removed; templates now get their own listing type/form (see
+// TemplateListingForm.tsx) with its own tab on /sell.
 //
 // Field-for-field mirror of the original 3-step modal:
 //   Step 1 (Basics): 4 screenshots (2 portrait 3:4, 2 landscape), URL, title,
-//     description. In Template mode: URL is skipped (auto-set to
-//     '[TEMPLATE]' and disabled), and an optional template-files upload
-//     section appears (Upload Build / External Link, same as Game's).
+//     description.
 //   Step 2 (Tech & Settings): frontend/backend/database/monetization, category/age/structure,
 //     location + reason (optional), transfer methods (checkboxes, at least 1 required)
 //   Step 3 (Financials): price, monthly revenue, monthly expenses (profit auto-calculated)
@@ -89,9 +85,6 @@ interface SlotImage {
 
 interface Draft {
   step?: number;
-  isTemplate?: boolean;
-  tplUploadType?: "upload" | "link";
-  tplLinkUrl?: string;
   url?: string;
   title?: string;
   desc?: string;
@@ -124,55 +117,6 @@ async function uploadToImgur(file: File): Promise<string> {
   const json = await res.json();
   if (!json.success) throw new Error("Imgur upload failed: " + (json.data && json.data.error));
   return json.data.link;
-}
-
-// Combines uploaded html/css/js files into one playable HTML blob — mirrors
-// _combineAndPreviewTpl exactly (CSS inlined in <style> before </head>, JS
-// inlined in <script> before </body>). Same approach as GameListingForm's
-// combineGameFiles.
-function combineTplFiles(files: File[]): Promise<string> {
-  const htmlFile = files.find((f) => /\.html?$/i.test(f.name));
-  const cssFiles = files.filter((f) => /\.css$/i.test(f.name));
-  const jsFiles = files.filter((f) => /\.js$/i.test(f.name));
-
-  const readText = (f: File) =>
-    new Promise<string>((resolve) => {
-      const r = new FileReader();
-      r.onload = (e) => resolve((e.target?.result as string) || "");
-      r.readAsText(f);
-    });
-
-  return (async () => {
-    let htmlContent = htmlFile
-      ? await readText(htmlFile)
-      : '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Template</title></head><body></body></html>';
-    let cssContent = "";
-    for (const f of cssFiles) cssContent += "\n/* " + f.name + " */\n" + (await readText(f));
-    let jsContent = "";
-    for (const f of jsFiles) jsContent += "\n// " + f.name + "\n" + (await readText(f));
-
-    let finalHtml = htmlContent;
-    if (cssContent) {
-      const styleTag = "<style>" + cssContent + "</style>";
-      finalHtml = finalHtml.includes("</head>") ? finalHtml.replace("</head>", styleTag + "</head>") : finalHtml.replace("<body>", "<body>" + styleTag);
-    }
-    if (jsContent) {
-      const scriptTag = "<script>" + jsContent + "</" + "script>";
-      finalHtml = finalHtml.includes("</body>") ? finalHtml.replace("</body>", scriptTag + "</body>") : finalHtml + scriptTag;
-    }
-    return finalHtml;
-  })();
-}
-
-async function uploadTextToStorage(filename: string, content: string, idToken: string): Promise<string> {
-  const res = await fetch("/api/storage", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({ filename, content, encoding: "utf8" }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || "File upload failed.");
-  return json.url;
 }
 
 export default function WebsiteListingForm() {
@@ -236,17 +180,6 @@ export default function WebsiteListingForm() {
     }
   }
 
-  // ── Template mode ("It's a template") ──
-  const [isTemplate, setIsTemplate] = useState(false);
-  const [tplUploadType, setTplUploadType] = useState<"upload" | "link">("upload");
-  const tplFileInputRef = useRef<HTMLInputElement>(null);
-  const [tplUploadedFiles, setTplUploadedFiles] = useState<File[]>([]);
-  const [tplCombinedHtml, setTplCombinedHtml] = useState<string>("");
-  const [tplPreviewBlobUrl, setTplPreviewBlobUrl] = useState<string | null>(null);
-  const [tplTestPlayOpen, setTplTestPlayOpen] = useState(false);
-  const [tplDuplicateError, setTplDuplicateError] = useState("");
-  const [tplLinkUrl, setTplLinkUrl] = useState("");
-
   const [frontend, setFrontend] = useState("");
   const [backend, setBackend] = useState("");
   const [database, setDatabase] = useState("");
@@ -302,9 +235,6 @@ export default function WebsiteListingForm() {
           return;
         }
         const d: Draft = JSON.parse(raw);
-        if (d.isTemplate) setIsTemplate(true);
-        if (d.tplUploadType) setTplUploadType(d.tplUploadType);
-        if (d.tplLinkUrl) setTplLinkUrl(d.tplLinkUrl);
         if (d.url) setUrl(d.url);
         if (d.title) setTitle(d.title);
         if (d.desc) setDesc(d.desc);
@@ -334,7 +264,7 @@ export default function WebsiteListingForm() {
   function saveDraft(nextStep = step) {
     try {
       const d: Draft = {
-        step: nextStep, isTemplate, tplUploadType, tplLinkUrl, url, title, desc, frontend, backend, database, monetization,
+        step: nextStep, url, title, desc, frontend, backend, database, monetization,
         location, reason, category, age, structure, price, revenue, expenses, transferMethods, monthlyVisits,
       };
       localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
@@ -351,10 +281,8 @@ export default function WebsiteListingForm() {
   }
 
   function hasAnyData() {
-    return (
-      [url, title, desc, frontend, backend, database, monetization, price, revenue, expenses].some(
-        (v) => v.trim().length > 0
-      ) || tplUploadedFiles.length > 0
+    return [url, title, desc, frontend, backend, database, monetization, price, revenue, expenses].some(
+      (v) => v.trim().length > 0
     );
   }
 
@@ -370,7 +298,6 @@ export default function WebsiteListingForm() {
       if (save) saveDraft();
       else clearDraft();
     }
-    if (tplPreviewBlobUrl) URL.revokeObjectURL(tplPreviewBlobUrl);
     router.push("/marketplace");
   }
 
@@ -453,61 +380,6 @@ export default function WebsiteListingForm() {
     });
   }
 
-  // ── Template toggle ──
-  function toggleTemplate() {
-    setIsTemplate((prev) => {
-      const next = !prev;
-      setUrl(next ? "[TEMPLATE]" : "");
-      return next;
-    });
-  }
-
-  // ── Template file upload (optional, template mode only) ──
-  // Mirrors _handleTplFiles: filters to html/css/js, allows only one HTML
-  // file, dedupes names, then combines + previews.
-  async function handleTplFiles(fileList: FileList) {
-    setTplDuplicateError("");
-    const allowed = [".html", ".htm", ".css", ".js"];
-    let valid = Array.from(fileList).filter((f) => allowed.includes("." + f.name.split(".").pop()!.toLowerCase()));
-    if (valid.length === 0) {
-      setErrors((e) => ({ ...e, tplUpload: "Please upload HTML, CSS, or JS files." }));
-      return;
-    }
-    const htmlFiles = valid.filter((f) => /\.html?$/i.test(f.name));
-    if (htmlFiles.length > 1) {
-      setTplDuplicateError("Only one HTML file allowed.");
-      valid = valid.filter((f) => !/\.html?$/i.test(f.name) || f === htmlFiles[0]);
-    }
-    const names = valid.map((f) => f.name);
-    if (new Set(names).size !== names.length) {
-      setTplDuplicateError("Duplicate file names detected.");
-      const seen = new Set<string>();
-      valid = valid.filter((f) => {
-        if (seen.has(f.name)) return false;
-        seen.add(f.name);
-        return true;
-      });
-    }
-    if (valid.length === 0) return;
-    setErrors((e) => ({ ...e, tplUpload: "" }));
-    setTplUploadedFiles(valid);
-    const finalHtml = await combineTplFiles(valid);
-    setTplCombinedHtml(finalHtml);
-    if (tplPreviewBlobUrl) URL.revokeObjectURL(tplPreviewBlobUrl);
-    const blob = new Blob([finalHtml], { type: "text/html" });
-    setTplPreviewBlobUrl(URL.createObjectURL(blob));
-  }
-
-  function removeTplFiles() {
-    setTplUploadedFiles([]);
-    setTplCombinedHtml("");
-    setTplDuplicateError("");
-    if (tplPreviewBlobUrl) {
-      URL.revokeObjectURL(tplPreviewBlobUrl);
-      setTplPreviewBlobUrl(null);
-    }
-  }
-
   // ── Validation ──
   function clearAllErrors() {
     setErrors({});
@@ -520,16 +392,14 @@ export default function WebsiteListingForm() {
       setErrors({ img: "Please upload all 4 images (2 portrait + 2 landscape) before continuing." });
       return false;
     }
-    if (!isTemplate) {
-      const urlVal = url.trim();
-      if (!urlVal) {
-        setErrors({ url: "Please enter a website URL or click \"It's a template\"." });
-        return false;
-      }
-      if (!/^https?:\/\/.+/.test(urlVal)) {
-        setErrors({ url: "Please enter a valid URL starting with https://." });
-        return false;
-      }
+    const urlVal = url.trim();
+    if (!urlVal) {
+      setErrors({ url: "Please enter a website URL." });
+      return false;
+    }
+    if (!/^https?:\/\/.+/.test(urlVal)) {
+      setErrors({ url: "Please enter a valid URL starting with https://." });
+      return false;
     }
     const t = title.trim();
     if (t.length < TITLE_MIN || t.length > TITLE_MAX) {
@@ -618,22 +488,6 @@ export default function WebsiteListingForm() {
 
       const idToken = await user.getIdToken();
 
-      // Optional: upload the template's HTML/CSS/JS build (if provided) so
-      // the listing has a real, hosted, playable preview — mirrors the
-      // original's behavior exactly, including that this whole step is
-      // skipped for non-code templates (Figma/Canva/etc) that only use
-      // screenshots + description.
-      let tplBuildUrl: string | null = null;
-      let tplDemoUrl: string | null = null;
-      if (isTemplate) {
-        if (tplUploadType === "upload" && tplCombinedHtml) {
-          setProgress({ pct: 82, label: "Uploading template build…" });
-          tplBuildUrl = await uploadTextToStorage("template.html", tplCombinedHtml, idToken);
-        } else if (tplUploadType === "link" && tplLinkUrl.trim()) {
-          tplDemoUrl = tplLinkUrl.trim();
-        }
-      }
-
       // Upload financial/traffic proof screenshots, if any — these back up
       // the numbers entered in the Financials step (see validateStep before
       // handleSubmit ever gets called: revenue > 0 requires at least one,
@@ -654,10 +508,7 @@ export default function WebsiteListingForm() {
       const { listingId } = await createListing({
         idToken,
         type: "website",
-        isTemplate,
-        url: isTemplate ? "[TEMPLATE]" : url.trim(),
-        tplBuildUrl,
-        tplDemoUrl,
+        url: url.trim(),
         title: title.trim(),
         description: desc.trim(),
         images: imgUrls,
@@ -781,28 +632,6 @@ export default function WebsiteListingForm() {
           Add screenshots, details, and set your price.
         </p>
 
-        {/* Type toggle — Website / Template */}
-        <div style={{ display: "flex", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: 4, marginBottom: 28, gap: 4 }}>
-          <button
-            onClick={() => isTemplate && toggleTemplate()}
-            style={{
-              ...typeBtnStyle,
-              ...(!isTemplate ? { background: "rgba(163,230,53,0.12)", color: ACCENT, boxShadow: "0 0 0 1px rgba(163,230,53,0.15)" } : {}),
-            }}
-          >
-            Website
-          </button>
-          <button
-            onClick={() => !isTemplate && toggleTemplate()}
-            style={{
-              ...typeBtnStyle,
-              ...(isTemplate ? { background: "rgba(163,230,53,0.12)", color: ACCENT, boxShadow: "0 0 0 1px rgba(163,230,53,0.15)" } : {}),
-            }}
-          >
-            Template
-          </button>
-        </div>
-
         {/* Step tabs */}
         <div style={{ display: "flex", gap: 8, margin: "24px 0 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: 12 }}>
           {["1. Basics", "2. Tech & Settings", "3. Financials"].map((label, i) => (
@@ -846,138 +675,20 @@ export default function WebsiteListingForm() {
 
             <div style={{ marginBottom: 16 }}>
               <label style={fieldLabelStyle}>
-                Website URL {!isTemplate && <span style={{ color: "#f87171" }}>*</span>}
+                Website URL <span style={{ color: "#f87171" }}>*</span>
               </label>
-              <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
-                <input
-                  type="url"
-                  value={url}
-                  disabled={isTemplate}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="https://example.com"
-                  style={{ ...inputStyle, flex: 1, minWidth: 0, opacity: isTemplate ? 0.4 : 1 }}
-                />
-                <button
-                  type="button"
-                  onClick={toggleTemplate}
-                  style={{
-                    background: isTemplate ? "rgba(163,230,53,0.12)" : "rgba(255,255,255,0.06)",
-                    border: `1px solid ${isTemplate ? "rgba(163,230,53,0.3)" : "rgba(255,255,255,0.12)"}`,
-                    color: isTemplate ? ACCENT : "rgba(255,255,255,0.5)",
-                    padding: "0 12px",
-                    borderRadius: 10,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                    flexShrink: 0,
-                  }}
-                >
-                  {isTemplate ? "URL skipped" : "It's a template"}
-                </button>
-              </div>
+              <input
+                type="url"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://example.com"
+                style={inputStyle}
+              />
               <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginTop: 4 }}>
-                Full link to your live website. If it&apos;s a template, click the button to skip URL.
+                Full link to your live website.
               </div>
               {errors.url && <ErrorBox>{errors.url}</ErrorBox>}
             </div>
-
-            {/* Template file upload — optional, template mode only */}
-            {isTemplate && (
-              <div style={{ marginBottom: 20 }}>
-                <span style={sectionLabelStyle}>
-                  Template Files <span style={{ color: "rgba(255,255,255,0.3)", textTransform: "none", letterSpacing: "normal", fontWeight: 500 }}>(optional)</span>
-                </span>
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginBottom: 10 }}>
-                  If your template is HTML/CSS/JS, upload it below for a live preview and Test Play. Not required — templates made in other tools (Figma, Canva, etc.) can skip this and just use screenshots + description.
-                </div>
-
-                <div style={{ display: "flex", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: 4, marginBottom: 14, gap: 4 }}>
-                  <button
-                    onClick={() => setTplUploadType("upload")}
-                    style={{ ...typeBtnStyle, ...(tplUploadType === "upload" ? { background: "rgba(163,230,53,0.12)", color: ACCENT, boxShadow: "0 0 0 1px rgba(163,230,53,0.15)" } : {}) }}
-                  >
-                    Upload Files
-                  </button>
-                  <button
-                    onClick={() => setTplUploadType("link")}
-                    style={{ ...typeBtnStyle, ...(tplUploadType === "link" ? { background: "rgba(163,230,53,0.12)", color: ACCENT, boxShadow: "0 0 0 1px rgba(163,230,53,0.15)" } : {}) }}
-                  >
-                    External Link
-                  </button>
-                </div>
-
-                {tplUploadType === "upload" ? (
-                  <div>
-                    <div
-                      onClick={() => tplFileInputRef.current?.click()}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        if (e.dataTransfer.files.length) handleTplFiles(e.dataTransfer.files);
-                      }}
-                      style={{
-                        border: `2px dashed ${tplUploadedFiles.length ? "rgba(163,230,53,0.4)" : "rgba(255,255,255,0.15)"}`,
-                        borderRadius: 14,
-                        padding: 24,
-                        textAlign: "center",
-                        cursor: "pointer",
-                        background: "rgba(255,255,255,0.02)",
-                      }}
-                    >
-                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 8 }}>
-                        {tplUploadedFiles.length
-                          ? `${tplUploadedFiles.length} file${tplUploadedFiles.length > 1 ? "s" : ""} selected — click to add more`
-                          : "Click or drag to upload your template files (HTML, CSS, JS)"}
-                      </div>
-                      {tplUploadedFiles.length > 0 && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", marginTop: 8 }}>
-                          {tplUploadedFiles.map((f) => (
-                            <span key={f.name} style={fileTagStyle}>{f.name}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginTop: 6 }}>
-                      Upload your main HTML file + any CSS/JS. Only one HTML file allowed.
-                    </div>
-                    {tplDuplicateError && <ErrorBox>{tplDuplicateError}</ErrorBox>}
-                    {errors.tplUpload && <ErrorBox>{errors.tplUpload}</ErrorBox>}
-                    {tplUploadedFiles.length > 0 && (
-                      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                        <button onClick={() => setTplTestPlayOpen(true)} style={testPlayBtnStyle}>▶ Test Play</button>
-                        <button onClick={removeTplFiles} style={prevBtnStyle}>Remove Files</button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div>
-                    <label style={fieldLabelStyle}>Template Demo URL</label>
-                    <input
-                      type="url"
-                      value={tplLinkUrl}
-                      onChange={(e) => setTplLinkUrl(e.target.value)}
-                      placeholder="https://mytemplate-demo.site"
-                      style={inputStyle}
-                    />
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginTop: 4 }}>
-                      Optional link to a live demo of the template.
-                    </div>
-                  </div>
-                )}
-                <input
-                  ref={tplFileInputRef}
-                  type="file"
-                  accept=".html,.htm,.css,.js"
-                  multiple
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    if (e.target.files?.length) handleTplFiles(e.target.files);
-                    e.target.value = "";
-                  }}
-                />
-              </div>
-            )}
 
             <Field label="Title" required error={errors.title}>
               <input
@@ -1155,11 +866,11 @@ export default function WebsiteListingForm() {
 
             {success && (
               <div style={{ padding: 16, background: "rgba(163,230,53,0.1)", border: "1px solid rgba(163,230,53,0.3)", borderRadius: 10, marginBottom: 16 }}>
-                <div style={{ color: ACCENT, fontWeight: 700, textAlign: "center", marginBottom: isTemplate ? 0 : 12 }}>
+                <div style={{ color: ACCENT, fontWeight: 700, textAlign: "center", marginBottom: 12 }}>
                   ✓ Published!
                 </div>
 
-                {!isTemplate && verifyStep === "idle" && (
+                {verifyStep === "idle" && (
                   <div style={{ textAlign: "center" }}>
                     <div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", marginBottom: 10 }}>
                       Want the green &quot;Verified&quot; badge? Prove you own this domain — takes about a minute. Totally optional.
@@ -1213,14 +924,6 @@ export default function WebsiteListingForm() {
                 {verifyError && (
                   <div style={{ marginTop: 10, fontSize: 12, color: "#f87171", textAlign: "center" }}>{verifyError}</div>
                 )}
-
-                {isTemplate && (
-                  <div style={{ textAlign: "center" }}>
-                    <button onClick={() => router.push("/marketplace")} style={{ ...nextBtnStyle, width: "auto", padding: "10px 20px", marginTop: 4 }}>
-                      Go to marketplace
-                    </button>
-                  </div>
-                )}
               </div>
             )}
 
@@ -1234,26 +937,6 @@ export default function WebsiteListingForm() {
         )}
       </div>
 
-      {/* Test Play modal (template build preview) */}
-      {tplTestPlayOpen && tplPreviewBlobUrl && (
-        <div
-          onClick={() => setTplTestPlayOpen(false)}
-          style={{
-            position: "fixed", inset: 0, zIndex: 10000, background: "rgba(0,0,0,0.85)",
-            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
-          }}
-        >
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, height: "80vh", background: "#000", borderRadius: 16, border: "1px solid rgba(163,230,53,0.3)", overflow: "hidden", position: "relative" }}>
-            <button
-              onClick={() => setTplTestPlayOpen(false)}
-              style={{ position: "absolute", top: 10, right: 10, zIndex: 1, width: 32, height: 32, borderRadius: "50%", background: "rgba(0,0,0,0.7)", color: "#fff", border: "none", cursor: "pointer" }}
-            >
-              ✕
-            </button>
-            <iframe src={tplPreviewBlobUrl} sandbox="allow-scripts allow-same-origin" style={{ width: "100%", height: "100%", border: "none" }} />
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1548,25 +1231,4 @@ const prevBtnStyle: React.CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
-const fileTagStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 6,
-  background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.12)",
-  borderRadius: 8,
-  padding: "5px 10px",
-  fontSize: 11.5,
-  color: "rgba(255,255,255,0.75)",
-};
-const testPlayBtnStyle: React.CSSProperties = {
-  flex: 1,
-  height: 44,
-  background: "rgba(163,230,53,0.12)",
-  color: ACCENT,
-  border: "1px solid rgba(163,230,53,0.3)",
-  borderRadius: 10,
-  fontSize: 13,
-  fontWeight: 700,
-  cursor: "pointer",
-};
+
