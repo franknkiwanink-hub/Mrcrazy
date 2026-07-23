@@ -71,23 +71,23 @@ export const FALLBACK_LIMITS: LimitsPayload = {
   plans: {
     free: {
       name: "Free", price: 0, color: "#71717a", tagline: "Get started for free",
-      saleFee: 0.30, saleFeeDisplay: "30%", weeklyListings: 5, unlimited: false,
-      dailyEditsPerListing: 10, description: "Free — 5 listings/week, basic features · 30% fee",
+      saleFee: 0.20, saleFeeDisplay: "20%", weeklyListings: 5, unlimited: false,
+      dailyEditsPerListing: 10, description: "Free — 5 listings/week, basic features · 20% fee",
     },
     starter: {
-      name: "Starter", price: 15, color: "#60a5fa", tagline: "For developers listing regularly",
-      saleFee: 0.20, saleFeeDisplay: "20%", weeklyListings: 15, unlimited: false,
-      dailyEditsPerListing: 25, description: "Starter — $15/mo · 15 listings/week · 20% fee",
+      name: "Starter", price: 10, color: "#60a5fa", tagline: "For developers listing regularly",
+      saleFee: 0.15, saleFeeDisplay: "15%", weeklyListings: 15, unlimited: false,
+      dailyEditsPerListing: 25, description: "Starter — $10/mo · 15 listings/week · 15% fee",
     },
     growth: {
-      name: "Growth", price: 30, color: "#a3e635", tagline: "For serious sellers scaling up",
+      name: "Growth", price: 20, color: "#a3e635", tagline: "For serious sellers scaling up",
       saleFee: 0.10, saleFeeDisplay: "10%", weeklyListings: 30, unlimited: false,
-      dailyEditsPerListing: 50, description: "Growth — $30/mo · 30 listings/week · 10% fee",
+      dailyEditsPerListing: 50, description: "Growth — $20/mo · 30 listings/week · 10% fee",
     },
     pro: {
-      name: "Pro", price: 60, color: "#d8b4fe", tagline: "For high-volume power sellers",
+      name: "Pro", price: 30, color: "#d8b4fe", tagline: "For high-volume power sellers",
       saleFee: 0.05, saleFeeDisplay: "5%", weeklyListings: null, unlimited: true,
-      dailyEditsPerListing: null, description: "Pro — $60/mo · Unlimited listings · 5% fee",
+      dailyEditsPerListing: null, description: "Pro — $30/mo · Unlimited listings · 5% fee",
     },
   },
   wallet: {
