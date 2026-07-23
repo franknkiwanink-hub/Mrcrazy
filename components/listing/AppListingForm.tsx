@@ -199,7 +199,7 @@ async function zipIfMultiple(files: NamedFile[]): Promise<NamedFile[]> {
   return [{ file: zipFile, name: zipFile.name }];
 }
 
-export default function AppListingForm() {
+export default function AppListingForm({ onBack }: { onBack?: () => void } = {}) {
   const router = useRouter();
   const { user, profile } = useAuth();
   const { limits } = useLimits();
@@ -409,7 +409,8 @@ export default function AppListingForm() {
       if (save) saveDraft();
       else clearDraft();
     }
-    router.push("/marketplace");
+    if (onBack) onBack();
+    else router.push("/marketplace");
   }
 
   // ── Image helpers (banner/icon/screenshots — plain read, no normalization needed) ──
