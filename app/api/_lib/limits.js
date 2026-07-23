@@ -64,19 +64,19 @@ export const LIMITS = {
     },
     starter: {
       name:       'Starter',
-      price:      15,
+      price:      10,
       color:      '#60a5fa',
       tagline:    'For developers listing regularly',
     },
     growth: {
       name:       'Growth',
-      price:      30,
+      price:      20,
       color:      '#a3e635',
       tagline:    'For serious sellers scaling up',
     },
     pro: {
       name:       'Pro',
-      price:      60,
+      price:      30,
       color:      '#d8b4fe',
       tagline:    'For high-volume power sellers',
     },
@@ -84,8 +84,8 @@ export const LIMITS = {
 
   // ── Platform fee per sale, by plan (decimal, e.g. 0.30 = 30%) ─────────────
   saleFees: {
-    free:    0.30,
-    starter: 0.20,
+    free:    0.20,
+    starter: 0.15,
     growth:  0.10,
     pro:     0.05,
   },
