@@ -422,7 +422,7 @@ const DEAL_AUTO_RELEASE_MS = 72 * 60 * 60 * 1000; // 72 hours
 const DEAL_MSG_MIN_LENGTH = LIMITS.deals.messageMinLength;
 
 // ── Platform escrow fee recipient ────────────────────────────────────────────
-// The seller's plan-based cut (LIMITS.saleFees — 30%/20%/10%/5% by plan) is
+// The seller's plan-based cut (LIMITS.saleFees — 20%/15%/10%/5% by plan) is
 // deducted at escrow release and credited to this account's wallet, same as
 // any other wallet credit (walletBalance + withdrawableBalance, transaction
 // record, notification). The account is identified by email, set via the
@@ -1893,7 +1893,7 @@ async function _releaseEscrowForRoom(db, chatRoomId, dealId, { auto = false } = 
     const sellerSnap = await tx.get(sellerRef);
     if (!sellerSnap.exists) throw new Error('Seller not found');
 
-    // ── Plan-based platform fee (LIMITS.saleFees — 30%/20%/10%/5% by plan) ──
+    // ── Plan-based platform fee (LIMITS.saleFees — 20%/15%/10%/5% by plan) ──
     const sellerPlan = sellerSnap.data().plan || 'free';
     const feeRate     = LIMITS.saleFees[sellerPlan] ?? LIMITS.saleFees.free;
     const platformFee = parseFloat((amt * feeRate).toFixed(2));
