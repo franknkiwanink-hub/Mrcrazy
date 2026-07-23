@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import SellerBadges from "./SellerBadges";
 import { fetchSellerDealStats, type FullSeller, type SellerDealStats } from "@/lib/useSeller";
 import { useAuth } from "@/lib/AuthContext";
-import { useScrollLock } from "@/lib/useScrollLock";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 const SOCIAL_DEFS = [
   {
@@ -55,9 +55,6 @@ export default function SellerDetailsOverlay({
   cachedStats: SellerDealStats | null;
   onClose: () => void;
 }) {
-  // Mounted only while open (parent conditionally renders this overlay),
-  // so the lock is unconditional here.
-  useScrollLock(true);
   const { user } = useAuth();
   const isOwn = user?.uid === seller.uid;
   const [stats, setStats] = useState<SellerDealStats | null>(cachedStats);
@@ -82,7 +79,7 @@ export default function SellerDetailsOverlay({
   const showSocials = seller.showSocial || isOwn;
   const canShowEmail = !!seller.contactEmail && (seller.showEmail || isOwn);
 
-  const fmtMoney = (n: number) => "$" + Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  const { formatFinFull } = useCurrency();
   const byCategory = stats?.byCategory || { website: 0, app: 0, game: 0 };
   const catTotal = byCategory.website + byCategory.app + byCategory.game;
 
@@ -210,11 +207,11 @@ export default function SellerDetailsOverlay({
               <div className="sp-dstat-lbl">Lifetime deals</div>
             </div>
             <div className={`sp-dstat${!stats ? " sp-skel-stat2" : ""}`}>
-              <div className="sp-dstat-val" id="spDetailsStatRevenue">{stats ? fmtMoney(stats.lifetimeRevenue) : "—"}</div>
+              <div className="sp-dstat-val" id="spDetailsStatRevenue">{stats ? formatFinFull(stats.lifetimeRevenue) : "—"}</div>
               <div className="sp-dstat-lbl">Lifetime revenue</div>
             </div>
             <div className={`sp-dstat${!stats ? " sp-skel-stat2" : ""}`}>
-              <div className="sp-dstat-val" id="spDetailsStat7d">{stats ? fmtMoney(stats.last7DaysRevenue) : "—"}</div>
+              <div className="sp-dstat-val" id="spDetailsStat7d">{stats ? formatFinFull(stats.last7DaysRevenue) : "—"}</div>
               <div className="sp-dstat-lbl">Revenue · 7 days</div>
             </div>
           </div>
