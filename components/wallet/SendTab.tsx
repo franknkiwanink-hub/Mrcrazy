@@ -52,11 +52,11 @@ export default function SendTab({
       return;
     }
     if (!amt || amt < TRANSFER_MIN || amt > TRANSFER_MAX) {
-      setMsg({ text: `Enter an amount between $${TRANSFER_MIN} and $${TRANSFER_MAX.toLocaleString()}.`, kind: "err" });
+      setMsg({ text: `Enter an amount between $${TRANSFER_MIN} and $${TRANSFER_MAX.toLocaleString()} USD.`, kind: "err" });
       return;
     }
     if (amt > balance) {
-      setMsg({ text: `Insufficient balance — you have $${balance.toFixed(2)}.`, kind: "err" });
+      setMsg({ text: `Insufficient balance — you have $${balance.toFixed(2)} USD.`, kind: "err" });
       return;
     }
 
@@ -73,7 +73,7 @@ export default function SendTab({
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Transfer failed");
 
-      setMsg({ text: `✓ Sent $${amt.toFixed(2)} to ${result.recipientName}.`, kind: "ok" });
+      setMsg({ text: `✓ Sent $${amt.toFixed(2)} USD to ${result.recipientName}.`, kind: "ok" });
       setEmail("");
       setAmount("");
       setNote("");
@@ -107,7 +107,7 @@ export default function SendTab({
       </div>
       <RecipientPreview status={status} recipient={recipient} errorMsg={errorMsg} />
 
-      <div className="wallet-field-label" style={{ marginTop: 16 }}>Amount to send</div>
+      <div className="wallet-field-label" style={{ marginTop: 16 }}>Amount to send (USD)</div>
       <div className="wallet-amount-input-wrap">
         <span className="wallet-amount-currency">$</span>
         <input
@@ -135,8 +135,8 @@ export default function SendTab({
       />
 
       <div className="wallet-fee-breakdown" id="walletSendFeeRow" style={showFee ? undefined : { display: "none" }}>
-        <div className="wallet-fee-line"><span id="walletSendFeeLabel">Transfer fee (5%)</span><span id="walletSendFee">${fee.toFixed(2)}</span></div>
-        <div className="wallet-fee-line total"><span>They'll receive</span><span id="walletSendReceive">${receive.toFixed(2)}</span></div>
+        <div className="wallet-fee-line"><span id="walletSendFeeLabel">Transfer fee (5%, USD)</span><span id="walletSendFee">${fee.toFixed(2)}</span></div>
+        <div className="wallet-fee-line total"><span>They'll receive (USD)</span><span id="walletSendReceive">${receive.toFixed(2)}</span></div>
       </div>
       {msg.text ? <div id="walletSendMsg" className={`wallet-msg${msg.kind ? ` ${msg.kind}` : ""}`}>{msg.text}</div> : <div id="walletSendMsg" className="wallet-msg" />}
       <button className="wallet-submit-btn" id="walletSendSubmit" onClick={handleSubmit} disabled={submitting}>
