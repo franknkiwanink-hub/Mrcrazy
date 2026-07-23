@@ -72,11 +72,11 @@ export default function AutoWithdrawAddon({ onEnabled }: { onEnabled: () => void
         return;
       }
       if (!th || th < MIN_THRESHOLD || th > MAX_THRESHOLD) {
-        setMsg({ text: `Threshold must be between $${MIN_THRESHOLD} and $${MAX_THRESHOLD.toLocaleString()}.`, kind: "err" });
+        setMsg({ text: `Threshold must be between $${MIN_THRESHOLD} and $${MAX_THRESHOLD.toLocaleString()} USD.`, kind: "err" });
         return;
       }
       if (keep < MIN_KEEP || keep > MAX_KEEP) {
-        setMsg({ text: `Keep-in-wallet amount must be between $${MIN_KEEP} and $${MAX_KEEP.toLocaleString()}.`, kind: "err" });
+        setMsg({ text: `Keep-in-wallet amount must be between $${MIN_KEEP} and $${MAX_KEEP.toLocaleString()} USD.`, kind: "err" });
         return;
       }
       if (keep >= th) {
@@ -134,7 +134,7 @@ export default function AutoWithdrawAddon({ onEnabled }: { onEnabled: () => void
 
           <div id="awdExtra" className={`agent-toggle-extra${enabled ? " visible" : ""}`}>
             <div className="agent-threshold-row">
-              <span className="agent-threshold-label">When withdrawable reaches</span>
+              <span className="agent-threshold-label">When withdrawable reaches (USD)</span>
               <span className="wallet-amount-currency" style={{ fontSize: 12 }}>$</span>
               <input
                 id="awdThreshold"
@@ -149,7 +149,7 @@ export default function AutoWithdrawAddon({ onEnabled }: { onEnabled: () => void
               />
             </div>
             <div className="agent-threshold-row" style={{ marginTop: 8 }}>
-              <span className="agent-threshold-label">Keep in wallet</span>
+              <span className="agent-threshold-label">Keep in wallet (USD)</span>
               <span className="wallet-amount-currency" style={{ fontSize: 12 }}>$</span>
               <input
                 id="awdKeepBalance"
