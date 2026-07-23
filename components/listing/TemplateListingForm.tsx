@@ -5,9 +5,12 @@
 // wasn't reachable as its own thing from the /sell type-picker. Split out
 // here so Template is a first-class tab, and Website stays website-only.
 //
-// Structurally mirrors WebsiteListingForm.tsx's 3-step flow, with the
-// website-specific bits swapped for template-specific ones:
-//   Step 1 (Basics): 4 screenshots (2 portrait 3:4, 2 landscape), title,
+// Structurally mirrors WebsiteListingForm.tsx's 3-step flow, but Basics is
+// intentionally lighter for templates: no fixed portrait/landscape slots or
+// aspect-ratio checks — just 1-6 screenshots of any size, since a template
+// doesn't have a live site's card-image conventions to match. The
+// website-specific bits are otherwise swapped for template-specific ones:
+//   Step 1 (Basics): 1-6 screenshots (any orientation/size), title,
 //     description, and the template files/demo-link flow (Upload Files —
 //     HTML/CSS/JS, combined into one playable preview + Test Play — or an
 //     External Link to a hosted demo). Both optional: templates built in
@@ -40,7 +43,7 @@ import TransferMethodPicker from "./shared/TransferMethodPicker";
 import ProofUploader, { type ProofImage } from "./shared/ProofUploader";
 import { WEBSITE_TRANSFER_METHODS } from "./shared/transferMethods";
 
-const ACCENT = "#a3e635";
+const ACCENT = "#c084fc"; // purple — matches the Template icon on /sell, distinct from Website's lime green
 const DRAFT_KEY = "srf_draft_template";
 
 // Fallback limits — used only until useLimits() resolves live values from
@@ -62,24 +65,12 @@ const BACKEND_OPTIONS = ["Node.js", "Express", "Django", "Flask", "Ruby on Rails
 const DATABASE_OPTIONS = ["PostgreSQL", "MySQL", "MongoDB", "Firestore", "Supabase", "SQLite", "Redis", "None", "Other"];
 const TEMPLATE_MONETIZATION_OPTIONS = ["One-time purchase", "License tiers", "Subscription", "Marketplace royalties", "Not monetized yet", "Other"];
 
-// Per-slot aspect ratio requirement — mirrors the website form's slots.
-type SlotSpec = {
-  orientation: "portrait" | "landscape";
-  w: number | null;
-  h: number | null;
-  label: string;
-  role: string;
-  caption: string;
-  hint: string;
-};
-
-const SLOT_SPECS: SlotSpec[] = [
-  { orientation: "portrait", w: 3, h: 4, label: "3:4 portrait", role: "portrait", caption: "Portrait 1 (shown on card)", hint: "3:4 ratio — e.g. 900×1200px" },
-  { orientation: "portrait", w: 3, h: 4, label: "3:4 portrait", role: "portrait", caption: "Portrait 2 (gallery)", hint: "3:4 ratio — e.g. 900×1200px" },
-  { orientation: "landscape", w: null, h: null, label: "landscape", role: "landscape", caption: "Landscape 1 (shown on card)", hint: "wider than tall" },
-  { orientation: "landscape", w: null, h: null, label: "landscape", role: "landscape", caption: "Landscape 2 (gallery)", hint: "wider than tall" },
-];
-const RATIO_TOLERANCE = 0.06;
+// Templates are lighter-weight than websites: no fixed portrait/landscape
+// slots, no aspect-ratio enforcement — just "add a few screenshots" (1
+// required, up to MAX_IMAGES), since a template's cover art / demo shots
+// don't need to match a live site's card-image conventions.
+const MIN_IMAGES = 1;
+const MAX_IMAGES = 6;
 
 interface SlotImage {
   file: File;
@@ -187,9 +178,8 @@ export default function TemplateListingForm() {
     }
   }
 
-  const [images, setImages] = useState<(SlotImage | null)[]>([null, null, null, null]);
+  const [images, setImages] = useState<SlotImage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const targetIdxRef = useRef<number | null>(null);
 
   const [title, setTitle] = useState("");
   const [desc, setDesc] = useState("");
@@ -340,41 +330,21 @@ export default function TemplateListingForm() {
     router.push("/marketplace");
   }
 
-  // ── Image slot handling ──
-  function openSlotPicker(idx: number) {
-    targetIdxRef.current = idx;
+  // ── Image handling — simple add-a-few-screenshots flow, no fixed
+  // portrait/landscape slots or aspect-ratio checks (unlike the website
+  // form's card-image requirements, which don't apply to a template gallery) ──
+  function openSlotPicker() {
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
       fileInputRef.current.click();
     }
   }
 
-  function readFile(file: File, idx: number) {
+  function readFile(file: File) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       const img = new Image();
       img.onload = () => {
-        const spec = SLOT_SPECS[idx];
-        if (spec.orientation === "landscape") {
-          if (img.naturalWidth <= img.naturalHeight) {
-            setErrors((e) => ({
-              ...e,
-              img: `That image is ${img.naturalWidth}×${img.naturalHeight}, which is portrait or square. Please upload a landscape image (wider than it is tall) for this slot.`,
-            }));
-            return;
-          }
-        } else if (spec.w != null && spec.h != null) {
-          const actualRatio = img.naturalWidth / img.naturalHeight;
-          const targetRatio = spec.w / spec.h;
-          const diff = Math.abs(actualRatio - targetRatio) / targetRatio;
-          if (diff > RATIO_TOLERANCE) {
-            setErrors((e) => ({
-              ...e,
-              img: `That image is ${img.naturalWidth}×${img.naturalHeight}, which isn't a ${spec.label} image. Please upload an image close to a ${spec.label} ratio for this slot.`,
-            }));
-            return;
-          }
-        }
         setErrors((e) => ({ ...e, img: "" }));
         const canvas = document.createElement("canvas");
         canvas.width = img.naturalWidth;
@@ -384,11 +354,7 @@ export default function TemplateListingForm() {
           (blob) => {
             if (!blob) return;
             const normalized = new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
-            setImages((prev) => {
-              const next = [...prev];
-              next[idx] = { file: normalized, dataUrl: ev.target?.result as string };
-              return next;
-            });
+            setImages((prev) => [...prev, { file: normalized, dataUrl: ev.target?.result as string }]);
           },
           "image/jpeg",
           0.92
@@ -401,21 +367,20 @@ export default function TemplateListingForm() {
 
   async function onFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
-    const idx = targetIdxRef.current;
-    if (!f || idx == null) return;
+    if (!f) return;
     if (!f.type.startsWith("image/")) {
       await alert({ theme: "warning", title: "Invalid File", msg: "Please select an image file (PNG, JPG, or WebP)." });
       return;
     }
-    readFile(f, idx);
+    if (images.length >= MAX_IMAGES) {
+      await alert({ theme: "warning", title: "Too Many Images", msg: `You can upload up to ${MAX_IMAGES} screenshots.` });
+      return;
+    }
+    readFile(f);
   }
 
   function removeImage(idx: number) {
-    setImages((prev) => {
-      const next = [...prev];
-      next[idx] = null;
-      return next;
-    });
+    setImages((prev) => prev.filter((_, i) => i !== idx));
   }
 
   // ── Template file upload — filters to html/css/js, allows only one HTML
@@ -470,9 +435,8 @@ export default function TemplateListingForm() {
 
   function validateStep1(): boolean {
     clearAllErrors();
-    const filled = images.filter(Boolean);
-    if (filled.length !== 4) {
-      setErrors({ img: "Please upload all 4 images (2 portrait + 2 landscape) before continuing." });
+    if (images.length < MIN_IMAGES) {
+      setErrors({ img: `Please upload at least ${MIN_IMAGES} screenshot before continuing.` });
       return false;
     }
     const t = title.trim();
@@ -524,10 +488,9 @@ export default function TemplateListingForm() {
     clearAllErrors();
     setSubmitError("");
 
-    const filled = images.filter(Boolean);
-    if (filled.length !== 4) {
+    if (images.length < MIN_IMAGES) {
       changeStep(1);
-      setErrors({ img: "Please upload all 4 images (2 portrait + 2 landscape)." });
+      setErrors({ img: `Please upload at least ${MIN_IMAGES} screenshot.` });
       return;
     }
     if (!price.trim() || !revenue.trim() || !expenses.trim()) {
@@ -548,11 +511,11 @@ export default function TemplateListingForm() {
     try {
       setProgress({ pct: 0, label: "Uploading images to Imgur…" });
       const imgUrls: string[] = [];
-      for (let i = 0; i < 4; i++) {
-        const imgFile = images[i]!.file;
+      for (let i = 0; i < images.length; i++) {
+        const imgFile = images[i].file;
         const uploadedUrl = await uploadToImgur(imgFile);
         imgUrls.push(uploadedUrl);
-        setProgress({ pct: Math.round(((i + 1) / 4) * 75), label: `Uploading image ${i + 1} of 4…` });
+        setProgress({ pct: Math.round(((i + 1) / images.length) * 75), label: `Uploading image ${i + 1} of ${images.length}…` });
       }
 
       const idToken = await user.getIdToken();
@@ -642,7 +605,7 @@ export default function TemplateListingForm() {
             Back
           </button>
           <div style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-0.03em" }}>
-            Siterifty<span style={{ color: "rgba(163,230,53,0.55)" }}>.com</span>
+            Siterifty<span style={{ color: "rgba(192,132,252,0.55)" }}>.com</span>
           </div>
         </div>
         <span style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: ACCENT }}>
@@ -652,10 +615,10 @@ export default function TemplateListingForm() {
 
       <div style={{ maxWidth: 820, margin: "0 auto", padding: "28px 16px 80px" }}>
         <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 6 }}>
-          List a <em style={{ fontStyle: "normal", color: "rgba(163,230,53,0.85)" }}>Template</em>
+          List a <em style={{ fontStyle: "normal", color: "rgba(192,132,252,0.85)" }}>Template</em>
         </h1>
         <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", marginBottom: 28 }}>
-          Add screenshots, an optional build/demo, and set your price.
+          A few screenshots, an optional build/demo, and your price — lighter than a full site listing.
         </p>
 
         {/* Step tabs */}
@@ -665,7 +628,7 @@ export default function TemplateListingForm() {
               key={label}
               onClick={() => goToStep(i + 1)}
               style={{
-                background: step === i + 1 ? "rgba(163,230,53,0.1)" : "none",
+                background: step === i + 1 ? "rgba(192,132,252,0.1)" : "none",
                 color: step === i + 1 ? ACCENT : "rgba(255,255,255,0.25)",
                 border: "none",
                 fontSize: 13,
@@ -685,17 +648,14 @@ export default function TemplateListingForm() {
             <span style={sectionLabelStyle}>
               Screenshots <span style={{ color: "#f87171" }}>*</span>
             </span>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-              {SLOT_SPECS.map((spec, idx) => (
-                <ImageSlot
-                  key={idx}
-                  image={images[idx]}
-                  spec={spec}
-                  landscape={spec.role === "landscape"}
-                  onClick={() => openSlotPicker(idx)}
-                  onRemove={() => removeImage(idx)}
-                />
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginBottom: 10 }}>
+              Add {MIN_IMAGES === 1 ? "at least 1 screenshot" : `at least ${MIN_IMAGES} screenshots`} — any size or orientation, up to {MAX_IMAGES}.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginBottom: 12 }}>
+              {images.map((image, idx) => (
+                <ImageSlot key={idx} image={image} onRemove={() => removeImage(idx)} />
               ))}
+              {images.length < MAX_IMAGES && <AddImageTile onClick={openSlotPicker} />}
             </div>
             {errors.img && <ErrorBox>{errors.img}</ErrorBox>}
 
@@ -711,13 +671,13 @@ export default function TemplateListingForm() {
               <div style={{ display: "flex", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: 4, marginBottom: 14, gap: 4 }}>
                 <button
                   onClick={() => setTplUploadType("upload")}
-                  style={{ ...typeBtnStyle, ...(tplUploadType === "upload" ? { background: "rgba(163,230,53,0.12)", color: ACCENT, boxShadow: "0 0 0 1px rgba(163,230,53,0.15)" } : {}) }}
+                  style={{ ...typeBtnStyle, ...(tplUploadType === "upload" ? { background: "rgba(192,132,252,0.12)", color: ACCENT, boxShadow: "0 0 0 1px rgba(192,132,252,0.15)" } : {}) }}
                 >
                   Upload Files
                 </button>
                 <button
                   onClick={() => setTplUploadType("link")}
-                  style={{ ...typeBtnStyle, ...(tplUploadType === "link" ? { background: "rgba(163,230,53,0.12)", color: ACCENT, boxShadow: "0 0 0 1px rgba(163,230,53,0.15)" } : {}) }}
+                  style={{ ...typeBtnStyle, ...(tplUploadType === "link" ? { background: "rgba(192,132,252,0.12)", color: ACCENT, boxShadow: "0 0 0 1px rgba(192,132,252,0.15)" } : {}) }}
                 >
                   External Link
                 </button>
@@ -733,7 +693,7 @@ export default function TemplateListingForm() {
                       if (e.dataTransfer.files.length) handleTplFiles(e.dataTransfer.files);
                     }}
                     style={{
-                      border: `2px dashed ${tplUploadedFiles.length ? "rgba(163,230,53,0.4)" : "rgba(255,255,255,0.15)"}`,
+                      border: `2px dashed ${tplUploadedFiles.length ? "rgba(192,132,252,0.4)" : "rgba(255,255,255,0.15)"}`,
                       borderRadius: 14,
                       padding: 24,
                       textAlign: "center",
@@ -936,7 +896,7 @@ export default function TemplateListingForm() {
             )}
 
             {success && (
-              <div style={{ padding: 16, background: "rgba(163,230,53,0.1)", border: "1px solid rgba(163,230,53,0.3)", borderRadius: 10, marginBottom: 16, textAlign: "center" }}>
+              <div style={{ padding: 16, background: "rgba(192,132,252,0.1)", border: "1px solid rgba(192,132,252,0.3)", borderRadius: 10, marginBottom: 16, textAlign: "center" }}>
                 <div style={{ color: ACCENT, fontWeight: 700, marginBottom: 12 }}>
                   ✓ Published!
                 </div>
@@ -965,7 +925,7 @@ export default function TemplateListingForm() {
             display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
           }}
         >
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, height: "80vh", background: "#000", borderRadius: 16, border: "1px solid rgba(163,230,53,0.3)", overflow: "hidden", position: "relative" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, height: "80vh", background: "#000", borderRadius: 16, border: "1px solid rgba(192,132,252,0.3)", overflow: "hidden", position: "relative" }}>
             <button
               onClick={() => setTplTestPlayOpen(false)}
               style={{ position: "absolute", top: 10, right: 10, zIndex: 1, width: 32, height: 32, borderRadius: "50%", background: "rgba(0,0,0,0.7)", color: "#fff", border: "none", cursor: "pointer" }}
@@ -982,77 +942,66 @@ export default function TemplateListingForm() {
 
 // ── Shared subcomponents ──
 
-function ImageSlot({
-  image,
-  spec,
-  landscape,
-  onClick,
-  onRemove,
-}: {
-  image: SlotImage | null;
-  spec: { caption: string; hint: string };
-  landscape: boolean;
-  onClick: () => void;
-  onRemove: () => void;
-}) {
+function ImageSlot({ image, onRemove }: { image: SlotImage; onRemove: () => void }) {
   return (
     <div
-      onClick={image ? undefined : onClick}
       style={{
-        gridColumn: landscape ? "1/-1" : undefined,
-        height: landscape ? 140 : 180,
+        height: 140,
         background: "rgba(255,255,255,0.03)",
-        border: `2px dashed ${image ? "transparent" : "rgba(255,255,255,0.15)"}`,
+        borderRadius: 14,
+        display: "flex",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <img src={image.dataUrl} alt="Template screenshot" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+      <button
+        type="button"
+        onClick={onRemove}
+        style={{
+          position: "absolute",
+          top: 6,
+          right: 6,
+          width: 24,
+          height: 24,
+          borderRadius: "50%",
+          background: "rgba(0,0,0,0.7)",
+          color: "#fff",
+          border: "none",
+          cursor: "pointer",
+          fontSize: 12,
+        }}
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+function AddImageTile({ onClick }: { onClick: () => void }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        height: 140,
+        background: "rgba(255,255,255,0.03)",
+        border: "2px dashed rgba(255,255,255,0.15)",
         borderRadius: 14,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        cursor: image ? "default" : "pointer",
-        position: "relative",
-        overflow: "hidden",
+        cursor: "pointer",
+        gap: 6,
+        color: "rgba(255,255,255,0.25)",
+        fontSize: 11,
+        fontWeight: 500,
       }}
     >
-      {image ? (
-        <>
-          <img src={image.dataUrl} alt={spec.caption} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove();
-            }}
-            style={{
-              position: "absolute",
-              top: 6,
-              right: 6,
-              width: 24,
-              height: 24,
-              borderRadius: "50%",
-              background: "rgba(0,0,0,0.7)",
-              color: "#fff",
-              border: "none",
-              cursor: "pointer",
-              fontSize: 12,
-            }}
-          >
-            ✕
-          </button>
-        </>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, color: "rgba(255,255,255,0.25)", fontSize: 11, fontWeight: 500, textAlign: "center", padding: 8 }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 22, height: 22, opacity: 0.5 }}>
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <path d="M21 15l-5-5L5 21" />
-          </svg>
-          <span>
-            {spec.caption}
-            <br />
-            <span style={{ fontSize: 10, opacity: 0.6 }}>{spec.hint}</span>
-          </span>
-        </div>
-      )}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} style={{ width: 22, height: 22, opacity: 0.5 }}>
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+      Add screenshot
     </div>
   );
 }
@@ -1269,9 +1218,9 @@ const fileTagStyle: React.CSSProperties = {
 const testPlayBtnStyle: React.CSSProperties = {
   flex: 1,
   height: 44,
-  background: "rgba(163,230,53,0.12)",
+  background: "rgba(192,132,252,0.12)",
   color: ACCENT,
-  border: "1px solid rgba(163,230,53,0.3)",
+  border: "1px solid rgba(192,132,252,0.3)",
   borderRadius: 10,
   fontSize: 13,
   fontWeight: 700,
