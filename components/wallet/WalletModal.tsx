@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { useWalletSummary } from "@/lib/useWalletSummary";
+import { useCurrency } from "@/lib/CurrencyContext";
 import WithdrawTab from "@/components/wallet/WithdrawTab";
 import SendTab from "@/components/wallet/SendTab";
 import HistoryTab from "@/components/wallet/HistoryTab";
@@ -32,6 +33,7 @@ import HistoryTab from "@/components/wallet/HistoryTab";
 export default function WalletModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { profile } = useAuth();
   const { summary, refresh } = useWalletSummary();
+  const { currency, formatBalance } = useCurrency();
   const [tab, setTab] = useState<"deposit" | "withdraw" | "send" | "history">("deposit");
   const [awdOpen, setAwdOpen] = useState(false);
 
@@ -117,15 +119,20 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
             />
             <div id="walletBalanceLabel">Available balance</div>
             <div id="walletBalanceAmt">
-              ${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {formatBalance(balance)}
             </div>
+            {currency !== "USD" && (
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: -4, marginBottom: 4 }}>
+                Actual balance held in USD — shown converted to {currency}
+              </div>
+            )}
             <div id="walletPendingRow" style={hasPending ? undefined : { display: "none" }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 6v6l4 2" strokeLinecap="round" />
               </svg>
               <span>
-                <span id="walletPendingAmt">${summary.pendingBalance.toFixed(2)}</span> pending withdrawal
+                <span id="walletPendingAmt">{formatBalance(summary.pendingBalance)}</span> pending withdrawal
               </span>
             </div>
 
@@ -139,7 +146,7 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
                 </div>
                 <div className="wallet-subbal-mid">
                   <div className="wallet-subbal-label">Withdrawable</div>
-                  <div className="wallet-subbal-amt" id="walletWithdrawableAmt">${summary.withdrawableBalance.toFixed(2)}</div>
+                  <div className="wallet-subbal-amt" id="walletWithdrawableAmt">{formatBalance(summary.withdrawableBalance)}</div>
                 </div>
               </div>
               <div className="wallet-subbal" id="walletSubEscrowHeld">
@@ -151,7 +158,7 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
                 </div>
                 <div className="wallet-subbal-mid">
                   <div className="wallet-subbal-label">In Escrow</div>
-                  <div className="wallet-subbal-amt" id="walletEscrowHeldAmt">${summary.escrowHeld.toFixed(2)}</div>
+                  <div className="wallet-subbal-amt" id="walletEscrowHeldAmt">{formatBalance(summary.escrowHeld)}</div>
                 </div>
               </div>
               <div className="wallet-subbal" id="walletSubEscrowIncoming" style={hasIncoming ? undefined : { display: "none" }}>
@@ -162,7 +169,7 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
                 </div>
                 <div className="wallet-subbal-mid">
                   <div className="wallet-subbal-label">Incoming (Escrow)</div>
-                  <div className="wallet-subbal-amt" id="walletEscrowIncomingAmt">${summary.escrowIncoming.toFixed(2)}</div>
+                  <div className="wallet-subbal-amt" id="walletEscrowIncomingAmt">{formatBalance(summary.escrowIncoming)}</div>
                 </div>
               </div>
             </div>
