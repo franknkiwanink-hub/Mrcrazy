@@ -5,6 +5,7 @@ import { auth } from "@/lib/firebase";
 import { useRecipientLookup } from "@/lib/useRecipientLookup";
 import RecipientPreview from "@/components/wallet/RecipientPreview";
 import { useLimits } from "@/lib/useLimits";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 // Ports the AUTO SEND section from wallet.js (autosend-create/-list/
 // -cancel), including _asendScheduleRow's exact markup (.wallet-tx-row /
@@ -30,6 +31,7 @@ interface Schedule {
 
 export default function AutoSendAddon() {
   const { limits } = useLimits();
+  const { formatBalance } = useCurrency();
   const INTERVALS = limits.autoSend.intervals ?? FALLBACK_INTERVALS;
   const TRANSFER_MIN = limits.wallet.transferMin ?? FALLBACK_TRANSFER_MIN;
   const TRANSFER_MAX = limits.wallet.transferMax ?? FALLBACK_TRANSFER_MAX;
@@ -97,7 +99,7 @@ export default function AutoSendAddon() {
       return;
     }
     if (!amt || amt < TRANSFER_MIN || amt > TRANSFER_MAX) {
-      setMsg({ text: `Enter an amount between $${TRANSFER_MIN} and $${TRANSFER_MAX.toLocaleString()}.`, kind: "err" });
+      setMsg({ text: `Enter an amount between $${TRANSFER_MIN} and $${TRANSFER_MAX.toLocaleString()} USD.`, kind: "err" });
       return;
     }
 
@@ -121,7 +123,7 @@ export default function AutoSendAddon() {
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Could not schedule auto send");
 
-      setMsg({ text: `✓ Scheduled $${amt.toFixed(2)} to ${result.schedule.recipientName} every ${interval} days.`, kind: "ok" });
+      setMsg({ text: `✓ Scheduled $${amt.toFixed(2)} USD to ${result.schedule.recipientName} every ${interval} days.`, kind: "ok" });
       setEmail("");
       setAmount("");
       setNote("");
@@ -155,7 +157,7 @@ export default function AutoSendAddon() {
       </div>
       <RecipientPreview status={status} recipient={recipient} errorMsg={errorMsg} />
 
-      <div className="wallet-field-label" style={{ marginTop: 16 }}>Amount per send</div>
+      <div className="wallet-field-label" style={{ marginTop: 16 }}>Amount per send (USD)</div>
       <div className="wallet-amount-input-wrap">
         <span className="wallet-amount-currency">$</span>
         <input
@@ -215,7 +217,7 @@ export default function AutoSendAddon() {
               </div>
               <div className="wallet-tx-mid">
                 <div className="wallet-tx-label">
-                  ${Number(s.amount).toFixed(2)} to {s.recipientName} · every {s.intervalDays}d
+                  {formatBalance(Number(s.amount))} to {s.recipientName} · every {s.intervalDays}d
                 </div>
                 <div className="wallet-tx-sub">
                   {cancelledOrDone ? "Cancelled" : `Next: ${next} · Sent ${s.runCount || 0}×`}
