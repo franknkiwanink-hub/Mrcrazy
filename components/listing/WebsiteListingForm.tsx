@@ -119,7 +119,7 @@ async function uploadToImgur(file: File): Promise<string> {
   return json.data.link;
 }
 
-export default function WebsiteListingForm() {
+export default function WebsiteListingForm({ onBack }: { onBack?: () => void } = {}) {
   const router = useRouter();
   const { user, profile } = useAuth();
   const { limits } = useLimits();
@@ -298,7 +298,8 @@ export default function WebsiteListingForm() {
       if (save) saveDraft();
       else clearDraft();
     }
-    router.push("/marketplace");
+    if (onBack) onBack();
+    else router.push("/marketplace");
   }
 
   // ── Image slot handling ──
