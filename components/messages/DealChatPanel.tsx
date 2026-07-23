@@ -175,17 +175,17 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   }
 
   async function handlePay() {
-    // chat.payEscrow (wallet-to-wallet escrow funding, in useDealChat.ts)
-    // is a FUTURE PAYMENT METHOD — not called here. We don't currently
-    // hold a money-transmitter/custodial license to let buyers pay sellers
-    // directly from wallet balance (deposits are already off in the
-    // wallet modal — see WalletModal.tsx). Re-wire this to chat.payEscrow
-    // once a licensed payment provider is integrated.
-    await alert({
-      theme: "success",
-      title: "Payments moving to a new checkout",
-      msg: "We're switching escrow payments to a new payment provider. Paying into escrow from here is temporarily unavailable — check back shortly.",
-    });
+    // Takes the buyer to the real checkout summary route (real listing/
+    // price/fee data — see CheckoutRoute.tsx) instead of processing a
+    // payment inline. chat.payEscrow (wallet-to-wallet escrow funding, in
+    // useDealChat.ts) is a FUTURE PAYMENT METHOD — not called here or on
+    // the checkout page. We don't currently hold a money-transmitter/
+    // custodial license to let buyers pay sellers directly from wallet
+    // balance (deposits are already off in the wallet modal — see
+    // WalletModal.tsx). CheckoutRoute's own Pay button shows the same
+    // honest "new provider coming" state this used to show inline here;
+    // re-wire both once a licensed payment provider is integrated.
+    router.push(`/messages/deal/${chatRoomId}/checkout`);
   }
 
   async function handleRelease() {
