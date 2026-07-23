@@ -136,7 +136,7 @@ export default function SellPage() {
             desc="A live site, SaaS, or online business."
             accent="#a3e635"
             icon={<GlobeIcon />}
-            bannerSrc={null}
+            bannerSrc="https://cdn.phototourl.com/member/2026-07-23-94028826-7b73-44cb-aa8e-784df56bc085.jpg"
             onClick={() => setKind("website")}
           />
           <TypeCard
@@ -144,7 +144,7 @@ export default function SellPage() {
             desc="A mobile or web app."
             accent="#fbbf24"
             icon={<AppIcon />}
-            bannerSrc={null}
+            bannerSrc="https://cdn.phototourl.com/member/2026-07-23-a4b0ee23-15a4-44b5-8ea7-b86414ea3e1f.jpg"
             onClick={() => setKind("app")}
           />
           <TypeCard
@@ -152,7 +152,7 @@ export default function SellPage() {
             desc="A browser game or downloadable build."
             accent="#f59e0b"
             icon={<GameIcon />}
-            bannerSrc={null}
+            bannerSrc="https://cdn.phototourl.com/member/2026-07-23-43f253a3-d3dd-411a-970e-066ae0e3b477.jpg"
             onClick={() => setKind("game")}
           />
           <TypeCard
@@ -160,7 +160,7 @@ export default function SellPage() {
             desc="A design or code template, not a live site."
             accent="#c084fc"
             icon={<TemplateIcon />}
-            bannerSrc={null}
+            bannerSrc="https://cdn.phototourl.com/member/2026-07-23-510375af-9619-486a-b1cd-da57626b1755.jpg"
             onClick={() => setKind("template")}
           />
           <TypeCard
@@ -168,7 +168,7 @@ export default function SellPage() {
             desc="Digital assets — graphics, code snippets, plugins, and more."
             accent="#2dd4bf"
             icon={<AssetsIcon />}
-            bannerSrc={null}
+            bannerSrc="https://cdn.phototourl.com/member/2026-07-23-44fc3828-068f-4bfc-82e3-10e2be1c0df7.jpg"
             comingSoon
           />
         </div>
