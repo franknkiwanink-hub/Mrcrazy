@@ -18,6 +18,7 @@ import { db, auth } from "@/lib/firebase";
 import RequestPaymentOverlay from "./RequestPaymentOverlay";
 import SignInRequired from "@/components/auth/SignInRequired";
 import { buildListingSlug } from "@/lib/slug";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 // Ports the deal chat panel from Js/inbox.js (lines 937-2774): sticky
 // item bar, escrow announcement bar + actions (pay/release/dispute),
@@ -37,9 +38,13 @@ function fmtTime(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+// Used only in the escrow release/payment-request confirm dialogs below —
+// these state the exact amount that will actually move, so it's kept in
+// real USD (not the display currency) to avoid any ambiguity about how
+// much money is being released.
 function priceLabel(escrowAmount: number | null, listingPrice: number | null): string {
   const amt = escrowAmount ?? listingPrice;
-  return amt != null ? "$" + Number(amt).toLocaleString() : "the agreed amount";
+  return amt != null ? "$" + Number(amt).toLocaleString() + " USD" : "the agreed amount";
 }
 
 export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
@@ -599,7 +604,9 @@ function VerifyCountdown({ autoReleaseAt }: { autoReleaseAt: number }) {
 }
 
 function ItemBar({ room }: { room: { listingTitle: string; listingImage: string; listingPrice: number | null; listingId: string; chatName: string } }) {
-  const price = room.listingPrice != null ? "$" + Number(room.listingPrice).toLocaleString() : "";
+  const { formatPriceShort } = useCurrency();
+  const price = room.listingPrice != null ? formatPriceShort(room.listingPrice) : "";
+  const priceTooltip = room.listingPrice != null ? `$${Number(room.listingPrice).toLocaleString()} USD` : undefined;
   return (
     <div id="dcpItemBar">
       {room.listingImage ? (
@@ -612,7 +619,7 @@ function ItemBar({ room }: { room: { listingTitle: string; listingImage: string;
       )}
       <div id="dcpItemInfo">
         <div id="dcpItemTitle">{room.listingTitle || room.chatName || "Listing"}</div>
-        <div id="dcpItemPrice">{price}</div>
+        <div id="dcpItemPrice" title={priceTooltip}>{price}</div>
       </div>
       {room.listingId ? (
         <Link id="dcpViewListingBtn" href={`/listing/${buildListingSlug(room.listingTitle, room.listingId)}`} target="_blank" rel="noopener noreferrer">
