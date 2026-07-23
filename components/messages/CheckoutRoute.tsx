@@ -28,7 +28,7 @@ const PAY_LIVE = false;
 // from (and unaffected by) the seller's plan-based payout fee, which is
 // computed later at release time (see app/api/deal/_handler.js) and is
 // not shown here since it doesn't affect what the buyer owes.
-const BUYER_FEE_RATE = 0.1;
+const BUYER_FEE_RATE = 0.15;
 
 function usd(amount: number): string {
   return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -178,7 +178,7 @@ export default function CheckoutRoute({ chatRoomId }: { chatRoomId: string }) {
               <span>{usd(listingPrice)}</span>
             </div>
             <div className="checkout-row">
-              <span>Buyer service fee (10%)</span>
+              <span>Buyer service fee (15%)</span>
               <span>{usd(buyerFee)}</span>
             </div>
             <div className="checkout-fee-note">Covers secure escrow processing and platform protection.</div>
