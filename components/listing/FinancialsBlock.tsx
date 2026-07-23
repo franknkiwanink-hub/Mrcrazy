@@ -4,18 +4,18 @@ import type { Listing } from "@/lib/listings";
 import { useCurrency } from "@/lib/CurrencyContext";
 
 // Ports the shared `finHtml` block from mpOpenModal exactly — same fields,
-// same fallback dash, same profit/loss color class logic. Only "Asking
-// Price" is currency-converted (see CurrencyContext's top comment — this
-// is a display estimate, deals always settle in USD); revenue/expenses/
-// profit are performance metrics being reported on, not an amount anyone
-// pays, so they stay in USD.
+// same fallback dash, same profit/loss color class logic. All figures
+// convert to the visitor's selected display currency (see
+// CurrencyContext's top comment — these are display estimates only;
+// deals always settle in USD via app/api/paypal/_handler.js regardless
+// of what's shown here).
 export default function FinancialsBlock({ listing, accentColor }: { listing: Listing; accentColor: string }) {
   const fin = listing.financials || {};
-  const { currency, formatPrice } = useCurrency();
+  const { currency, formatPrice, formatFinFull } = useCurrency();
   const priceStr = typeof fin.price === "number" ? formatPrice(fin.price) : "—";
-  const revenue = fin.revenue !== undefined ? `$${Number(fin.revenue).toLocaleString()}` : "—";
-  const expenses = fin.expenses !== undefined ? `$${Number(fin.expenses).toLocaleString()}` : "—";
-  const profit = fin.profit !== undefined ? `$${Number(fin.profit).toLocaleString()}` : "—";
+  const revenue = fin.revenue !== undefined ? formatFinFull(Number(fin.revenue)) : "—";
+  const expenses = fin.expenses !== undefined ? formatFinFull(Number(fin.expenses)) : "—";
+  const profit = fin.profit !== undefined ? formatFinFull(Number(fin.profit)) : "—";
   const profitNum = fin.profit !== undefined ? Number(fin.profit) : null;
   const profitCls = profitNum !== null && profitNum >= 0 ? " profit" : profitNum !== null ? " loss" : "";
 
@@ -27,16 +27,16 @@ export default function FinancialsBlock({ listing, accentColor }: { listing: Lis
           <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
         </svg>
         Financials
+        {currency !== "USD" && (
+          <span style={{ fontSize: "0.65rem", color: "#777", fontWeight: 400, marginLeft: 6 }}>
+            (shown in {currency} — deals settle in USD)
+          </span>
+        )}
       </div>
       <div className="modal-financials">
         <div className="fin-card">
           <span className="fin-label">Asking Price</span>
           <span className="fin-value">{priceStr}</span>
-          {currency !== "USD" && typeof fin.price === "number" && (
-            <span style={{ display: "block", fontSize: "0.65rem", color: "#777", marginTop: 2 }}>
-              Estimate — deal settles in USD
-            </span>
-          )}
         </div>
         <div className="fin-card">
           <span className="fin-label">Monthly Revenue</span>
@@ -59,13 +59,13 @@ export default function FinancialsBlock({ listing, accentColor }: { listing: Lis
         {fin.subMonthly ? (
           <div className="fin-card">
             <span className="fin-label">Sub / Month</span>
-            <span className="fin-value">${Number(fin.subMonthly).toLocaleString()}</span>
+            <span className="fin-value">{formatFinFull(Number(fin.subMonthly))}</span>
           </div>
         ) : null}
         {fin.subAnnual ? (
           <div className="fin-card">
             <span className="fin-label">Sub / Year</span>
-            <span className="fin-value">${Number(fin.subAnnual).toLocaleString()}</span>
+            <span className="fin-value">{formatFinFull(Number(fin.subAnnual))}</span>
           </div>
         ) : null}
       </div>
