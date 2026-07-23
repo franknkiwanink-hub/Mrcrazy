@@ -13469,6 +13469,8 @@ select.srf-tools-url-input option { background: #0d0d0d; color: #fff; }
    single short screen, not a long multi-step form. */
 .checkout-route {
   min-height: 100dvh;
+  max-width: 100vw;
+  overflow-x: hidden;
   background: var(--mp-bg);
   padding: 92px 20px 48px;
   display: flex;
@@ -13478,12 +13480,12 @@ select.srf-tools-url-input option { background: #0d0d0d; color: #fff; }
   width: 100%;
   max-width: 880px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
 @media (max-width: 860px) {
-  .checkout-shell { grid-template-columns: 1fr; }
+  .checkout-shell { grid-template-columns: minmax(0, 1fr); }
 }
 
 .checkout-close {
@@ -13508,6 +13510,7 @@ select.srf-tools-url-input option { background: #0d0d0d; color: #fff; }
 
 .checkout-summary,
 .checkout-payment {
+  min-width: 0;
   background: var(--mp-surface);
   border: 1px solid var(--mp-border);
   border-radius: var(--mp-radius-lg);
@@ -13584,7 +13587,7 @@ select.srf-tools-url-input option { background: #0d0d0d; color: #fff; }
 
 .checkout-buyer-row { margin-bottom: 18px; }
 .checkout-buyer-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--mp-text-muted); margin-bottom: 4px; }
-.checkout-buyer-value { font-size: 14px; font-weight: 600; color: var(--mp-text); }
+.checkout-buyer-value { font-size: 14px; font-weight: 600; color: var(--mp-text); overflow-wrap: anywhere; }
 .checkout-buyer-email { font-weight: 400; color: var(--mp-text-sec); }
 
 .checkout-notice {
