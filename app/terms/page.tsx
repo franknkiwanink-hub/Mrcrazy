@@ -66,8 +66,8 @@ export default function TermsPage() {
         <p>
           All payments flow through your Siterifty wallet. When a deal completes, Siterifty
           deducts a platform fee from the sale price before crediting the seller&apos;s wallet.
-          The fee rate depends on the seller&apos;s plan at the time of sale (currently 30% on
-          Free, 20% on Starter, 10% on Growth, 5% on Pro) and is disclosed before a deal is
+          The fee rate depends on the seller&apos;s plan at the time of sale (currently 20% on
+          Free, 15% on Starter, 10% on Growth, 5% on Pro) and is disclosed before a deal is
           accepted.
         </p>
       </StaticSection>
