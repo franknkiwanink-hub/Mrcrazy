@@ -179,9 +179,9 @@ export default function ReferralsPanel({
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
           {[
-            { name: "Starter", price: 15, commission: 4.5 },
-            { name: "Growth", price: 30, commission: 9.0 },
-            { name: "Pro", price: 60, commission: 18.0 },
+            { name: "Starter", price: 10, commission: 3.0 },
+            { name: "Growth", price: 20, commission: 6.0 },
+            { name: "Pro", price: 30, commission: 9.0 },
           ].map((p) => (
             <div key={p.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: "0.82rem", color: "#aaa" }}>
