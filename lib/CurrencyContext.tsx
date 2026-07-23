@@ -47,12 +47,44 @@ interface CurrencyContextValue {
   formatBalance: (usdAmount: number | undefined | null) => string;
 }
 
-const CurrencyContext = createContext<CurrencyContextValue | null>(null);
+// Fallback used only if CurrencyProvider genuinely isn't mounted above a
+// consumer (e.g. a component prerendered/rendered outside the normal app
+// tree). Behaves as if the visitor is on USD with no conversion available
+// — same numbers a signed-out, geo-undetected US visitor would see — so a
+// missing provider degrades to plain USD display instead of crashing the
+// whole page. setCurrency/formatBalance etc. are still fully functional;
+// only convert() is inert (no rates), which is a no-op anyway since
+// currency is always "USD" here.
+function fmtUsd(n: number): string {
+  return `$${n.toLocaleString()}`;
+}
+const DEFAULT_CONTEXT_VALUE: CurrencyContextValue = {
+  currency: DEFAULT_CURRENCY,
+  setCurrency: () => {},
+  rates: null,
+  ratesLoading: false,
+  convert: (usdAmount) => usdAmount,
+  formatPrice: (usdAmount) => (typeof usdAmount === "number" ? fmtUsd(usdAmount) : "Make offer"),
+  formatPriceShort: (usdAmount) => (typeof usdAmount === "number" ? fmtUsd(usdAmount) : "Make offer"),
+  formatFinCompact: (usdAmount) => {
+    if (typeof usdAmount !== "number") return "—";
+    const abs = Math.abs(usdAmount);
+    if (abs >= 1_000_000) return "$" + (usdAmount / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+    if (abs >= 10_000) return "$" + (usdAmount / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
+    return fmtUsd(Math.round(usdAmount));
+  },
+  formatFinFull: (usdAmount) => (typeof usdAmount === "number" ? fmtUsd(usdAmount) : "—"),
+  formatBalance: (usdAmount) =>
+    `$${(typeof usdAmount === "number" ? usdAmount : 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`,
+};
+
+const CurrencyContext = createContext<CurrencyContextValue>(DEFAULT_CONTEXT_VALUE);
 
 export function useCurrency(): CurrencyContextValue {
-  const ctx = useContext(CurrencyContext);
-  if (!ctx) throw new Error("useCurrency must be used within CurrencyProvider");
-  return ctx;
+  return useContext(CurrencyContext);
 }
 
 // Returns null when no preference has ever been stored — distinct from
