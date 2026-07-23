@@ -7,6 +7,7 @@ import type { Listing } from "@/lib/listings";
 import { aiStudioCall } from "@/lib/aiStudio";
 import { useLimits } from "@/lib/useLimits";
 import { useCurrency } from "@/lib/CurrencyContext";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the Send Deal popup + Deal Outcome popup from Js/marketplace.js
 // (mpOpenDeal/mpCloseDeal/mpShowDealOutcome/_mpRenderOutcome/the
@@ -127,6 +128,11 @@ export default function DealPopup({
       if (closeAfterSuccessRef.current) clearTimeout(closeAfterSuccessRef.current);
     };
   }, [listing]);
+
+  // Both popups in this component are custom overlays (not <dialog>), so
+  // like every other modal in the app they need the shared scroll lock —
+  // otherwise the page underneath keeps scrolling while this is open.
+  useScrollLock(Boolean(listing) || outcome !== null);
 
   if (!listing && outcome === null) return null;
 
