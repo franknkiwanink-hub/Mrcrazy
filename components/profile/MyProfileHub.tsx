@@ -12,11 +12,12 @@ import { useEditListingModal } from "@/components/listing/EditListingModalProvid
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
 import { useDisputePicker } from "@/components/dispute/DisputePickerProvider";
 import { useConfirm } from "@/lib/useConfirm";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
 import { useLimits } from "@/lib/useLimits";
 import SellerBadges from "@/components/seller/SellerBadges";
 import { logout } from "@/lib/authActions";
 import { buildListingSlug } from "@/lib/slug";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 // Ports the PROFILE MODAL from Js/profile.js + Js/profile-early.js
 // (index.html lines 12099-12279 and 17189-18238) as a real routed page at
@@ -82,13 +83,14 @@ type SubTab = "account" | "public";
 export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab }) {
   const router = useRouter();
   const { user } = useAuth();
+  const { formatPriceShort } = useCurrency();
   const { openBoost } = useBoostModal();
   const { openAgent } = useAgentModal();
   const { openEdit } = useEditListingModal();
   const { openPlansModal } = usePlansModal();
   const { openDisputePicker } = useDisputePicker();
   const { confirm, ConfirmHost } = useConfirm();
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
   const { limits } = useLimits();
 
   const {
@@ -149,18 +151,18 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
     e.target.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      toast("Please choose an image file.");
+      toast("Please choose an image file.", "error");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      toast("Image must be under 10MB.");
+      toast("Image must be under 10MB.", "error");
       return;
     }
     setAvatarUploading(true);
     try {
       await uploadAvatar(file);
     } catch (err: any) {
-      toast("Upload failed: " + (err.message || "unknown error"));
+      toast("Upload failed: " + (err.message || "unknown error"), "error");
     } finally {
       setAvatarUploading(false);
     }
@@ -209,7 +211,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
       setTimeout(() => setSavingPublic("idle"), 1800);
     } catch {
       setSavingPublic("idle");
-      toast("Save failed. Please try again.");
+      toast("Save failed. Please try again.", "error");
     }
   }
 
@@ -225,7 +227,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
     try {
       await deleteListing(listingId);
     } catch {
-      toast("Could not delete this listing. Please try again.");
+      toast("Could not delete this listing. Please try again.", "error");
     } finally {
       setDeleting(false);
     }
@@ -253,9 +255,9 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
     setCancelling(true);
     try {
       await cancelPlan();
-      toast(`Your ${planLabel} plan has been cancelled. You'll stay on ${planLabel} until the end of your billing period, then revert to Free.`);
+      toast(`Your ${planLabel} plan has been cancelled. You'll stay on ${planLabel} until the end of your billing period, then revert to Free.`, "success");
     } catch (err: any) {
-      toast(err.message || "Cancellation failed. Please try again.");
+      toast(err.message || "Cancellation failed. Please try again.", "error");
     } finally {
       setCancelling(false);
     }
@@ -548,7 +550,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                                 body: JSON.stringify({ idToken }),
                               });
                             } catch {
-                              toast("Could not disconnect GitHub. Please try again.");
+                              toast("Could not disconnect GitHub. Please try again.", "error");
                             }
                           }}
                         >
@@ -564,7 +566,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                               const idToken = await user2.getIdToken();
                               window.location.href = "/api/github?action=connect&idToken=" + encodeURIComponent(idToken);
                             } catch {
-                              toast("Could not start GitHub connection. Please try again.");
+                              toast("Could not start GitHub connection. Please try again.", "error");
                             }
                           }}
                         >
@@ -711,7 +713,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                 ) : (
                   <div className="pm-listings-grid">
                     {favorites.map((f) => {
-                      const price = typeof f.price === "number" ? "$" + f.price.toLocaleString() : "";
+                      const price = formatPriceShort(f.price);
                       return (
                         <div
                           className="pm-listing-card pm-favorite-card"
@@ -729,7 +731,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                               try {
                                 await removeFavorite(f.listingId);
                               } catch {
-                                toast("Could not remove. Please try again.");
+                                toast("Could not remove. Please try again.", "error");
                               }
                             }}
                           >
@@ -853,7 +855,6 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
         </div>
       ) : null}
 
-      <ToastHost />
     </div>
   );
 }
