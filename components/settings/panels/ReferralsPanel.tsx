@@ -5,6 +5,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import type { SettingsState } from "@/lib/useSettingsState";
 import { useSrToast } from "@/components/system/SrToastProvider";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 const CopyIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
@@ -32,6 +33,7 @@ export default function ReferralsPanel({
   setState: React.Dispatch<React.SetStateAction<SettingsState>>;
 }) {
   const { show: toast } = useSrToast();
+  const { formatBalance, currency } = useCurrency();
   const [refCount, setRefCount] = useState<number | null>(null);
   const [refEarned, setRefEarned] = useState<number | null>(null);
 
@@ -163,7 +165,7 @@ export default function ReferralsPanel({
         </div>
         <div style={{ background: "#0a0a0a", border: "1px solid #222", borderRadius: "0.9rem", padding: "1rem", textAlign: "center" }}>
           <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "#60a5fa", letterSpacing: "-0.03em" }}>
-            ${(refEarned ?? 0).toFixed(2)}
+            {formatBalance(refEarned ?? 0)}
           </div>
           <div style={{ fontSize: "0.72rem", color: "#666", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 3 }}>
             Earned
@@ -177,21 +179,26 @@ export default function ReferralsPanel({
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
           {[
-            { name: "Starter", price: "$15/mo", commission: "$4.50" },
-            { name: "Growth", price: "$30/mo", commission: "$9.00" },
-            { name: "Pro", price: "$60/mo", commission: "$18.00" },
+            { name: "Starter", price: 15, commission: 4.5 },
+            { name: "Growth", price: 30, commission: 9.0 },
+            { name: "Pro", price: 60, commission: 18.0 },
           ].map((p) => (
             <div key={p.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: "0.82rem", color: "#aaa" }}>
-                {p.name} <span style={{ color: "#555", fontSize: "0.72rem" }}>· {p.price}</span>
+                {p.name} <span style={{ color: "#555", fontSize: "0.72rem" }}>· {formatBalance(p.price).replace(/\.00$/, "")}/mo</span>
               </span>
               <span style={{ fontSize: "0.85rem", color: "#a3e635", fontWeight: 700 }}>
-                {p.commission} <span style={{ color: "#555", fontWeight: 400, fontSize: "0.7rem" }}>(30%)</span>
+                {formatBalance(p.commission).replace(/\.00$/, "")} <span style={{ color: "#555", fontWeight: 400, fontSize: "0.7rem" }}>(30%)</span>
               </span>
             </div>
           ))}
         </div>
       </div>
+      {currency !== "USD" && (
+        <div style={{ fontSize: "0.68rem", color: "#555", marginTop: "-0.5rem", marginBottom: "0.75rem" }}>
+          Plan prices and commissions billed in USD — shown converted to {currency}
+        </div>
+      )}
 
       <div className="info-card" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
         <InfoIcon />
