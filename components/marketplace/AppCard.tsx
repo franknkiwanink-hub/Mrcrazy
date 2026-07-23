@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { Listing } from "@/lib/listings";
-import { fmtFinVal, isBoosted, isPremiumSeller, trackListing } from "@/lib/listings";
+import { isBoosted, isPremiumSeller, trackListing } from "@/lib/listings";
 import { useCurrency } from "@/lib/CurrencyContext";
 import SellerStrip from "./SellerStrip";
 import SaveButton from "./SaveButton";
@@ -19,7 +19,7 @@ export default function AppCard({
 }) {
   const fin = listing.financials || {};
   const title = listing.title || "Untitled";
-  const { formatPriceShort } = useCurrency();
+  const { formatPriceShort, formatFinCompact } = useCurrency();
   const price = formatPriceShort(fin.price);
   const priceTooltip = typeof fin.price === "number" ? `$${fin.price.toLocaleString()} USD` : undefined;
   const sellerHandle = listing.ownerEmail?.split("@")[0] || "Anonymous";
@@ -30,10 +30,10 @@ export default function AppCard({
     listing.imageCover ||
     `https://placehold.co/128x128/1a1026/a78bfa?text=${encodeURIComponent(title.slice(0, 2))}`;
   const category = listing.category || listing.tech?.frontend || listing.tech?.backend || "App";
-  const revenue = typeof fin.revenue === "number" ? fmtFinVal(fin.revenue) : "—";
-  const expenses = typeof fin.expenses === "number" ? fmtFinVal(fin.expenses) : "—";
+  const revenue = typeof fin.revenue === "number" ? formatFinCompact(fin.revenue) : "—";
+  const expenses = typeof fin.expenses === "number" ? formatFinCompact(fin.expenses) : "—";
   const profit = typeof fin.profit === "number" ? fin.profit : null;
-  const profitStr = profit !== null ? fmtFinVal(Math.abs(profit)) : "—";
+  const profitStr = profit !== null ? formatFinCompact(Math.abs(profit)) : "—";
   const profitCls = profit !== null ? (profit >= 0 ? "sr-pos" : "sr-neg") : "";
   const desc = (listing.description || listing.tagline || "").trim();
   const shots = (listing.images || []).filter(Boolean).slice(0, 3);
