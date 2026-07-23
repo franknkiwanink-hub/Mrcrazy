@@ -111,24 +111,34 @@ function WeeklyLimitBar() {
 export default function SellPage() {
   const [kind, setKind] = useState<ListingKind>(null);
 
-  if (kind === "website") return <WebsiteListingForm />;
-  if (kind === "game") return <GameListingForm />;
-  if (kind === "app") return <AppListingForm />;
-  if (kind === "template") return <TemplateListingForm />;
+  // Scroll to the top whenever we switch between the picker and a form (or
+  // back again) — otherwise the new view inherits whatever scroll position
+  // was left over from the previous one, which is why the form used to open
+  // scrolled to the bottom instead of the top.
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [kind]);
+
+  const backToPicker = () => setKind(null);
+
+  if (kind === "website") return <WebsiteListingForm onBack={backToPicker} />;
+  if (kind === "game") return <GameListingForm onBack={backToPicker} />;
+  if (kind === "app") return <AppListingForm onBack={backToPicker} />;
+  if (kind === "template") return <TemplateListingForm onBack={backToPicker} />;
 
   return (
     <div style={{ minHeight: "100vh", background: "#000", color: "#fff", paddingTop: 92, paddingBottom: 80 }}>
       <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 20px", textAlign: "center" }}>
+        <div style={{ textAlign: "left", marginBottom: 24 }}>
+          <WeeklyLimitBar />
+        </div>
+
         <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 8 }}>
           What are you listing?
         </h1>
         <p style={{ fontSize: 15, color: "rgba(255,255,255,0.4)", marginBottom: 32 }}>
           Choose a type to get started.
         </p>
-
-        <div style={{ textAlign: "left" }}>
-          <WeeklyLimitBar />
-        </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           <TypeCard
@@ -204,7 +214,7 @@ function TypeCard({
         flexDirection: "column",
         width: "100%",
         background: "rgba(255,255,255,0.03)",
-        border: "1px solid rgba(255,255,255,0.08)",
+        border: "1.5px solid rgba(255,255,255,0.85)",
         borderRadius: 20,
         cursor: comingSoon ? "not-allowed" : "pointer",
         textAlign: "left",
