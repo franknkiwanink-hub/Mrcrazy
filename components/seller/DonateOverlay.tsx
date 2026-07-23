@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
-import { useScrollLock } from "@/lib/useScrollLock";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 // Fixed 15% platform fee — mirrors DONATION_FEE_RATE in paypal.js. Used
 // here only for the live "seller receives" preview as the donor types;
@@ -32,9 +32,10 @@ function fmtMoney2(n: number) {
 }
 
 function DonationRowView({ don }: { don: DonationRow }) {
+  const { formatBalance } = useCurrency();
   const name = don.donorName || "Anonymous";
   const initial = name.charAt(0).toUpperCase();
-  const amt = fmtMoney2(Number(don.amount || 0));
+  const amt = formatBalance(Number(don.amount || 0));
   const when = don.createdAt
     ? new Date(don.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
     : "";
@@ -72,11 +73,9 @@ export default function DonateOverlay({
   sellerName: string;
   onClose: () => void;
 }) {
-  // Mounted only while open (parent renders `{donateOpen && <DonateOverlay/>}`),
-  // so the lock is unconditional here.
-  useScrollLock(true);
   const { user, profile } = useAuth();
   const { openAuthModal } = useAuthModal();
+  const { currency, formatBalance } = useCurrency();
   const [summary, setSummary] = useState<DonationsSummary | null>(donateCache.get(sellerUid) || null);
   const [loadingSummary, setLoadingSummary] = useState(!donateCache.has(sellerUid));
   const [amt, setAmt] = useState("");
@@ -133,12 +132,12 @@ export default function DonateOverlay({
       return;
     }
     if (!amtNum || amtNum < 1 || amtNum > 2500) {
-      setMsg({ text: "Enter an amount between $1 and $2,500.", ok: false });
+      setMsg({ text: "Enter an amount between $1 and $2,500 USD.", ok: false });
       return;
     }
     const bal = Number(profile?.walletBalance || 0);
     if (amtNum > bal) {
-      setMsg({ text: `Insufficient balance — you have $${bal.toFixed(2)}.`, ok: false });
+      setMsg({ text: `Insufficient balance — you have $${bal.toFixed(2)} USD.`, ok: false });
       return;
     }
     setSubmitting(true);
@@ -163,7 +162,7 @@ export default function DonateOverlay({
       // wallet-bridge sync is needed here (the original's window.__wallet*
       // bridge calls were working around not having that live listener).
 
-      setMsg({ text: `✓ Donated $${amtNum.toFixed(2)} to ${result.sellerName || sellerName}. Thank you!`, ok: true });
+      setMsg({ text: `✓ Donated $${amtNum.toFixed(2)} USD to ${result.sellerName || sellerName}. Thank you!`, ok: true });
       setAmt("");
       setNote("");
 
@@ -225,7 +224,7 @@ export default function DonateOverlay({
         <div id="spDonateSummary">
           <div className="sp-donate-summary-stat">
             <div className="sp-donate-summary-val" id="spDonateTotalVal">
-              {loadingSummary ? "—" : fmtMoney2(Number(summary?.totalDonated || 0))}
+              {loadingSummary ? "—" : formatBalance(Number(summary?.totalDonated || 0))}
             </div>
             <div className="sp-donate-summary-lbl">Total received</div>
           </div>
@@ -239,7 +238,7 @@ export default function DonateOverlay({
         </div>
 
         <div className="wallet-field-label" style={{ marginTop: 4 }}>
-          Amount to donate
+          Amount to donate (USD)
         </div>
         <div className="wallet-amount-input-wrap">
           <span className="wallet-amount-currency">$</span>
@@ -282,11 +281,11 @@ export default function DonateOverlay({
         {showFee && (
           <div className="wallet-fee-breakdown" id="spDonateFeeRow">
             <div className="wallet-fee-line">
-              <span>Platform fee (15%)</span>
+              <span>Platform fee (15%, USD)</span>
               <span id="spDonateFee">${fee.toFixed(2)}</span>
             </div>
             <div className="wallet-fee-line total">
-              <span>Seller receives</span>
+              <span>Seller receives (USD)</span>
               <span id="spDonateReceive">${receive.toFixed(2)}</span>
             </div>
           </div>
