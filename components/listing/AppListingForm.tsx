@@ -1126,7 +1126,7 @@ export default function AppListingForm() {
             {errors.fin && <ErrorBox>{errors.fin}</ErrorBox>}
 
             <div className="sr-lf-fin-card">
-              <Field label="Asking Price ($)" required>
+              <Field label="Asking Price (USD)" required>
                 <div className="sr-lf-money">
                   <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="1000" style={inputStyle} />
                 </div>
@@ -1139,12 +1139,12 @@ export default function AppListingForm() {
               )}
 
               <div className="sr-lf-row-2" style={{ opacity: globalNotLive ? 0.4 : 1 }}>
-                <Field label="Monthly Revenue ($)">
+                <Field label="Monthly Revenue (USD)">
                   <div className="sr-lf-money">
                     <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} placeholder="200" disabled={globalNotLive} style={inputStyle} />
                   </div>
                 </Field>
-                <Field label="Monthly Expenses ($)">
+                <Field label="Monthly Expenses (USD)">
                   <div className="sr-lf-money">
                     <input type="number" min="0" value={expenses} onChange={(e) => setExpenses(e.target.value)} placeholder="20" disabled={globalNotLive} style={inputStyle} />
                   </div>
@@ -1176,10 +1176,10 @@ export default function AppListingForm() {
               </Field>
               {monetization === "Subscription" && !globalNotLive && (
                 <div className="sr-lf-row-2" style={{ marginTop: 12 }}>
-                  <Field label="Sub. Price — Monthly ($)">
+                  <Field label="Sub. Price — Monthly (USD)">
                     <input type="number" min="0" value={subMonthly} onChange={(e) => setSubMonthly(e.target.value)} placeholder="9.99" style={inputStyle} />
                   </Field>
-                  <Field label="Sub. Price — Annual ($)">
+                  <Field label="Sub. Price — Annual (USD)">
                     <input type="number" min="0" value={subAnnual} onChange={(e) => setSubAnnual(e.target.value)} placeholder="99" style={inputStyle} />
                   </Field>
                 </div>
@@ -1194,7 +1194,7 @@ export default function AppListingForm() {
 
             {!globalNotLive && (
               <div style={{ padding: 16, background: "rgba(255,255,255,0.03)", borderRadius: 12, marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", fontWeight: 600 }}>Monthly Profit</span>
+                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", fontWeight: 600 }}>Monthly Profit (USD)</span>
                 <span style={{ fontSize: 20, fontWeight: 800, color: profit >= 0 ? ACCENT : "#f87171" }}>
                   {profit >= 0 ? "+" : ""}${profit.toFixed(2)}
                 </span>
