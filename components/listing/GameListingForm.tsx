@@ -984,17 +984,17 @@ export default function GameListingForm() {
             {errors.fin && <ErrorBox>{errors.fin}</ErrorBox>}
             <div className="sr-lf-fin-card">
               <div className="sr-lf-row-3">
-                <Field label="Asking Price ($)">
+                <Field label="Asking Price (USD)">
                   <div className="sr-lf-money">
                     <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="1000" style={inputStyle} />
                   </div>
                 </Field>
-                <Field label="Monthly Revenue ($)">
+                <Field label="Monthly Revenue (USD)">
                   <div className="sr-lf-money">
                     <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} placeholder="200" style={inputStyle} />
                   </div>
                 </Field>
-                <Field label="Monthly Expenses ($)">
+                <Field label="Monthly Expenses (USD)">
                   <div className="sr-lf-money">
                     <input type="number" min="0" value={expenses} onChange={(e) => setExpenses(e.target.value)} placeholder="20" style={inputStyle} />
                   </div>
@@ -1002,7 +1002,7 @@ export default function GameListingForm() {
               </div>
 
               <div style={{ padding: 14, background: "rgba(255,255,255,0.03)", borderRadius: 10, marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", fontWeight: 600 }}>Monthly Profit</span>
+                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", fontWeight: 600 }}>Monthly Profit (USD)</span>
                 <span style={{ fontSize: 20, fontWeight: 800, color: profit >= 0 ? ACCENT : "#f87171" }}>
                   {profit >= 0 ? "+" : ""}${profit.toFixed(2)}
                 </span>
