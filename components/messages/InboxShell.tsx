@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import SignInRequired from "@/components/auth/SignInRequired";
 import { useAiSupportChatModal } from "@/components/support/AiSupportChatModalProvider";
+import { useCurrency } from "@/lib/CurrencyContext";
 import {
   useInbox,
   relTime,
@@ -362,6 +363,7 @@ function DealRow({
   onOpenDealChat: (chatRoomId: string) => void;
 }) {
   const uid = useAuth().user?.uid || "";
+  const { currency, formatPriceShort } = useCurrency();
   const [open, setOpenState] = useState(false);
   const [busy, setBusy] = useState<"" | "accepting" | "rejecting" | "cancelling">("");
   const [err, setErr] = useState("");
@@ -380,7 +382,7 @@ function DealRow({
       : "pending";
   const badgeLabel =
     badge === "successful" ? "Deal Successful" : badge === "closed" ? "Deal Closed" : badge.charAt(0).toUpperCase() + badge.slice(1);
-  const listedPriceStr = deal.listingPrice != null ? "$" + Number(deal.listingPrice).toLocaleString() : "—";
+  const listedPriceStr = deal.listingPrice != null ? formatPriceShort(deal.listingPrice) : "—";
 
   async function toggleOpen() {
     const willOpen = !open;
@@ -462,10 +464,10 @@ function DealRow({
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 8v8M8 12h8" />
               </svg>
-              Buyer&apos;s offer: ${Number(deal.offerPrice).toLocaleString()}
+              Buyer&apos;s offer: {formatPriceShort(deal.offerPrice)}
               {deal.listingPrice != null ? (
                 <span style={{ color: "rgba(255,255,255,0.35)", fontSize: "0.72rem", fontWeight: 400 }}>
-                  vs listed ${Number(deal.listingPrice).toLocaleString()}
+                  vs listed {formatPriceShort(deal.listingPrice)}
                 </span>
               ) : null}
             </div>
@@ -477,11 +479,16 @@ function DealRow({
           <div className="ibx-deal-detail-val">{deal.message || "—"}</div>
           <div className="ibx-deal-detail-label">Listed price</div>
           <div className="ibx-deal-detail-val">{listedPriceStr}</div>
+          {currency !== "USD" && (deal.offerPrice != null || deal.listingPrice != null || deal.counterOffer != null) && (
+            <div style={{ fontSize: "0.68rem", color: "#555", marginTop: -4, marginBottom: 4 }}>
+              Amounts shown converted to {currency} — deals settle in USD
+            </div>
+          )}
           {deal.counterOffer != null ? (
             <>
               <div className="ibx-deal-detail-label">Counter-offer sent</div>
               <div className="ibx-deal-detail-val" style={{ color: "#fbbf24", fontWeight: 700 }}>
-                ${Number(deal.counterOffer).toLocaleString()}
+                {formatPriceShort(deal.counterOffer)}
               </div>
             </>
           ) : null}
