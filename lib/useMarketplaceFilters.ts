@@ -179,9 +179,9 @@ export function useMarketplaceFilters(initial?: MarketplaceFiltersInitial, syncU
       const hMin = priceMin > 0;
       const hMax = priceMax !== null;
       let label: string;
-      if (hMin && hMax) label = `Price: $${fmt(priceMin)} – $${fmt(priceMax as number)}`;
-      else if (hMin) label = `Price: $${fmt(priceMin)}+`;
-      else label = `Price: up to $${fmt(priceMax as number)}`;
+      if (hMin && hMax) label = `Price: $${fmt(priceMin)} – $${fmt(priceMax as number)} USD`;
+      else if (hMin) label = `Price: $${fmt(priceMin)}+ USD`;
+      else label = `Price: up to $${fmt(priceMax as number)} USD`;
       tags.push({ label, clear: clearPrice });
     }
     return tags;
