@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
-import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the Autopilot Agent modal from Js/plans-boost.js (openAgentModal /
 // window.__openAgentModal, lines 336-776) + the #agentModal markup in
@@ -87,9 +86,9 @@ const DOT_COLOR: Record<string, string> = {
 
 const PLAN_META: Record<string, { name: string; color: string; rgb: string; price: string }> = {
   free: { name: "Free", color: "#71717a", rgb: "113,113,122", price: "Free" },
-  starter: { name: "Starter", color: "#60a5fa", rgb: "96,165,250", price: "$15/mo" },
-  growth: { name: "Growth", color: "#a3e635", rgb: "163,230,53", price: "$30/mo" },
-  pro: { name: "Pro", color: "#d8b4fe", rgb: "216,180,254", price: "$60/mo" },
+  starter: { name: "Starter", color: "#60a5fa", rgb: "96,165,250", price: "$10/mo" },
+  growth: { name: "Growth", color: "#a3e635", rgb: "163,230,53", price: "$20/mo" },
+  pro: { name: "Pro", color: "#d8b4fe", rgb: "216,180,254", price: "$30/mo" },
 };
 
 function tsAgo(date: Date): string {
@@ -101,7 +100,6 @@ function tsAgo(date: Date): string {
 }
 
 export default function AgentModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  useScrollLock(open);
   const { user } = useAuth();
   const router = useRouter();
 
