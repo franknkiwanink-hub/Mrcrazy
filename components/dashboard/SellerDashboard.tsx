@@ -13,6 +13,7 @@ import DashboardChart from "@/components/dashboard/DashboardChart";
 import DashboardWebhooksModal from "@/components/dashboard/DashboardWebhooksModal";
 import { useBoostModal } from "@/components/boost/BoostModalProvider";
 import SignInRequired from "@/components/auth/SignInRequired";
+import { useCurrency } from "@/lib/CurrencyContext";
 import type { ChartConfiguration } from "chart.js";
 
 // Ports Js/dashboard.js — the Seller Dashboard. Every number here comes
@@ -33,7 +34,15 @@ const RANGE_LABELS: Record<DashboardRange, { label: string; sub: string }> = {
 
 const RANGE_ORDER: DashboardRange[] = ["today", "yesterday", "this-week", "this-month", "last-90", "lifetime"];
 
-function formatCurrency(v: number) {
+// Both take a `fmt` param (SellerDashboard passes CurrencyContext's
+// formatFinFull) instead of hardcoding "$" — every number here comes from
+// a real Firestore-backed endpoint (see header comment), so it converts
+// to the seller's selected display currency exactly like the KPI cards
+// and listing prices elsewhere in the app. fmt is optional so any other
+// caller that doesn't have currency context handy still gets a sane USD
+// fallback.
+function formatCurrency(v: number, fmt?: (n: number) => string) {
+  if (fmt) return fmt(v);
   return "$" + (Number(v) || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 function formatNumber(v: number) {
@@ -56,7 +65,7 @@ const STATUS_LABELS: Record<string, string> = {
   complete: "Completed",
 };
 
-function chartOptions(isCurrency?: boolean): ChartConfiguration["options"] {
+function chartOptions(isCurrency?: boolean, fmt?: (n: number) => string): ChartConfiguration["options"] {
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -71,7 +80,7 @@ function chartOptions(isCurrency?: boolean): ChartConfiguration["options"] {
         cornerRadius: 8,
         padding: 10,
         callbacks: isCurrency
-          ? { label: (ctx: any) => `${ctx.dataset.label}: $${Number(ctx.parsed.y).toFixed(2)}` }
+          ? { label: (ctx: any) => `${ctx.dataset.label}: ${formatCurrency(Number(ctx.parsed.y), fmt)}` }
           : undefined,
       },
     },
@@ -133,6 +142,7 @@ export default function SellerDashboard() {
   const router = useRouter();
   const { listings, dealsData, loading, error, load, reset, getAggregateDailyStats } = useSellerDashboard();
   const { openBoost } = useBoostModal();
+  const { formatFinFull } = useCurrency();
 
   const [range, setRange] = useState<DashboardRange>("today");
   const [dateModalOpen, setDateModalOpen] = useState(false);
@@ -182,7 +192,7 @@ export default function SellerDashboard() {
         config: {
           type: "line",
           data: { labels, datasets: [{ label: "Revenue", data: zeros, borderColor: "#fbbf24", backgroundColor: "rgba(251,191,36,0.08)", fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 }] },
-          options: chartOptions(true),
+          options: chartOptions(true, formatFinFull),
         },
         pill: "Loading…",
       });
@@ -239,7 +249,7 @@ export default function SellerDashboard() {
         config: {
           type: "line",
           data: { labels: revLabels, datasets: [{ label: "Revenue", data: revenueByDay, borderColor: "#fbbf24", backgroundColor: "rgba(251,191,36,0.08)", fill: true, tension: 0.3, pointRadius: 2, pointBackgroundColor: "#fbbf24", borderWidth: 2 }] },
-          options: chartOptions(true),
+          options: chartOptions(true, formatFinFull),
         },
         pill: `${days} days`,
       });
@@ -263,10 +273,10 @@ export default function SellerDashboard() {
       { label: "Impressions", value: formatNumber(totalImpressions), accent: "sd-kpi-accent-blue", icon: iconEye },
       { label: "Views", value: formatNumber(totalViews), accent: "sd-kpi-accent-purple", icon: iconTarget },
       { label: "Deals (range)", value: formatNumber(dd.deals.length), accent: "sd-kpi-accent-amber", icon: iconUsers },
-      { label: "Revenue", value: formatCurrency(dd.revenue || 0), accent: "sd-kpi-accent-green", icon: iconDollar },
+      { label: "Revenue", value: formatCurrency(dd.revenue || 0, formatFinFull), accent: "sd-kpi-accent-green", icon: iconDollar },
       { label: "Conversion Rate", value: conversionRate.toFixed(1) + "%", accent: "sd-kpi-accent-rose", icon: iconTrend },
     ];
-  }, [listings, dealsData]);
+  }, [listings, dealsData, formatFinFull]);
 
   const quickStats = useMemo(() => {
     const ls = listings || [];
@@ -275,12 +285,12 @@ export default function SellerDashboard() {
     const avgOrderValue = completed.length ? dd.revenue / completed.length : 0;
     const topListing = ls.slice().sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))[0];
     return {
-      avgOrderValue: formatCurrency(avgOrderValue),
+      avgOrderValue: formatCurrency(avgOrderValue, formatFinFull),
       completedDeals: dd.dealsCompleted || 0,
       topListingTitle: topListing ? topListing.title || "Untitled" : "—",
       totalDeals: formatNumber(dd.deals.length),
     };
-  }, [listings, dealsData]);
+  }, [listings, dealsData, formatFinFull]);
 
   function openDateModal() {
     setPendingRange(range);
@@ -481,7 +491,7 @@ export default function SellerDashboard() {
                           <tr key={d.dealId}>
                             <td>{d.listingTitle}</td>
                             <td>{d.buyerName ? `@${d.buyerName}` : "—"}</td>
-                            <td>{formatCurrency(d.amount)}</td>
+                            <td>{formatCurrency(d.amount, formatFinFull)}</td>
                             <td>
                               <span className={`td-status ${d.status}`}>{STATUS_LABELS[d.status] || d.status}</span>
                             </td>
