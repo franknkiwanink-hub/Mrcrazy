@@ -117,9 +117,9 @@ export default function MarketplaceFilterBar({
   const priceLabel = (() => {
     const hMin = priceMin > 0;
     const hMax = priceMax !== null;
-    if (hMin && hMax) return `$${fmt(priceMin)} – $${fmt(priceMax as number)}`;
-    if (hMin) return `$${fmt(priceMin)}+`;
-    if (hMax) return `Up to $${fmt(priceMax as number)}`;
+    if (hMin && hMax) return `$${fmt(priceMin)} – $${fmt(priceMax as number)} USD`;
+    if (hMin) return `$${fmt(priceMin)}+ USD`;
+    if (hMax) return `Up to $${fmt(priceMax as number)} USD`;
     return "Any price";
   })();
   const priceActive = priceMin > 0 || priceMax !== null;
@@ -250,7 +250,7 @@ export default function MarketplaceFilterBar({
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="mp-pp-header">
-                  <span>Price range</span>
+                  <span>Price range (USD)</span>
                   <button
                     className="mp-pp-close"
                     id="mpPopClose"
