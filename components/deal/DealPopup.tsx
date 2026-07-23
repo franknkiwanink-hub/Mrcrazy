@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/AuthContext";
 import type { Listing } from "@/lib/listings";
 import { aiStudioCall } from "@/lib/aiStudio";
 import { useLimits } from "@/lib/useLimits";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 // Ports the Send Deal popup + Deal Outcome popup from Js/marketplace.js
 // (mpOpenDeal/mpCloseDeal/mpShowDealOutcome/_mpRenderOutcome/the
@@ -47,9 +48,11 @@ interface LeafStyle {
   style: React.CSSProperties;
 }
 
-function fmtPrice(n: number | null | undefined): string {
-  return typeof n === "number" ? "$" + n.toLocaleString() : "—";
-}
+// Note: the offer amount input further down stays in raw USD — it's
+// submitted straight to POST /api/deal as offerPrice with no conversion
+// (see handleSubmit below), and app/api/paypal/_handler.js settles every
+// real charge in USD regardless of display currency. Only the read-only
+// "Listed price" figures (lPrice/listedPriceBox) convert for display.
 
 // Same 2h:00:00 countdown format as _mpOutcomeStartCountdown — in-memory
 // only, resets if the popup is closed and reopened, exactly like the
@@ -86,6 +89,7 @@ export default function DealPopup({
   const router = useRouter();
   const { user, profile } = useAuth();
   const { limits } = useLimits();
+  const { formatPrice } = useCurrency();
   const DEAL_MSG_MIN_LENGTH = limits.deals.messageMinLength ?? FALLBACK_DEAL_MSG_MIN_LENGTH;
 
   const [msg, setMsg] = useState("");
@@ -153,9 +157,9 @@ export default function DealPopup({
       setAiAssisting(false);
     }
   }
-  const lPrice = fmtPrice(listing?.financials?.price);
+  const lPrice = formatPrice(listing?.financials?.price);
   const lId = listing?.id ? listing.id.slice(0, 8).toUpperCase() : "—";
-  const listedPriceBox = fmtPrice(listing?.financials?.price);
+  const listedPriceBox = formatPrice(listing?.financials?.price);
 
   function closeDeal() {
     if (sendTimeoutRef.current) clearTimeout(sendTimeoutRef.current);
@@ -345,7 +349,7 @@ export default function DealPopup({
                 <label className="mp-deal-label">
                   Your offer{" "}
                   <span style={{ color: "rgba(255,255,255,0.25)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-                    (optional)
+                    (optional, in USD)
                   </span>
                 </label>
                 <div className="mp-deal-offer-wrap">
