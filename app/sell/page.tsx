@@ -26,7 +26,7 @@ import TemplateListingForm from "@/components/listing/TemplateListingForm";
 import { useAuth } from "@/lib/AuthContext";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
 
-type ListingKind = "website" | "app" | "game" | "template" | null;
+type ListingKind = "website" | "app" | "game" | "template" | "assets" | null;
 
 interface CapStatus {
   allowed: boolean;
@@ -118,7 +118,7 @@ export default function SellPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#000", color: "#fff", paddingTop: 92, paddingBottom: 80 }}>
-      <div style={{ maxWidth: 720, margin: "0 auto", padding: "0 20px" }}>
+      <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 20px", textAlign: "center" }}>
         <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 8 }}>
           What are you listing?
         </h1>
@@ -126,14 +126,17 @@ export default function SellPage() {
           Choose a type to get started.
         </p>
 
-        <WeeklyLimitBar />
+        <div style={{ textAlign: "left" }}>
+          <WeeklyLimitBar />
+        </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           <TypeCard
             label="Website"
             desc="A live site, SaaS, or online business."
             accent="#a3e635"
             icon={<GlobeIcon />}
+            bannerSrc={null}
             onClick={() => setKind("website")}
           />
           <TypeCard
@@ -141,6 +144,7 @@ export default function SellPage() {
             desc="A mobile or web app."
             accent="#fbbf24"
             icon={<AppIcon />}
+            bannerSrc={null}
             onClick={() => setKind("app")}
           />
           <TypeCard
@@ -148,6 +152,7 @@ export default function SellPage() {
             desc="A browser game or downloadable build."
             accent="#f59e0b"
             icon={<GameIcon />}
+            bannerSrc={null}
             onClick={() => setKind("game")}
           />
           <TypeCard
@@ -155,7 +160,16 @@ export default function SellPage() {
             desc="A design or code template, not a live site."
             accent="#c084fc"
             icon={<TemplateIcon />}
+            bannerSrc={null}
             onClick={() => setKind("template")}
+          />
+          <TypeCard
+            label="Assets"
+            desc="Digital assets — graphics, code snippets, plugins, and more."
+            accent="#2dd4bf"
+            icon={<AssetsIcon />}
+            bannerSrc={null}
+            comingSoon
           />
         </div>
       </div>
@@ -170,6 +184,7 @@ function TypeCard({
   icon,
   onClick,
   comingSoon,
+  bannerSrc,
 }: {
   label: string;
   desc: string;
@@ -177,6 +192,7 @@ function TypeCard({
   icon: React.ReactNode;
   onClick?: () => void;
   comingSoon?: boolean;
+  bannerSrc?: string | null;
 }) {
   return (
     <button
@@ -186,41 +202,67 @@ function TypeCard({
         position: "relative",
         display: "flex",
         flexDirection: "column",
-        alignItems: "flex-start",
-        gap: 10,
-        padding: 20,
+        width: "100%",
         background: "rgba(255,255,255,0.03)",
         border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: 16,
+        borderRadius: 20,
         cursor: comingSoon ? "not-allowed" : "pointer",
         textAlign: "left",
         fontFamily: "inherit",
-        opacity: comingSoon ? 0.5 : 1,
-        transition: "border-color 0.2s",
+        opacity: comingSoon ? 0.55 : 1,
+        overflow: "hidden",
+        transition: "border-color 0.2s, transform 0.2s",
       }}
     >
-      <span style={{ width: 36, height: 36, color: accent, display: "flex" }}>{icon}</span>
-      <span style={{ fontSize: 17, fontWeight: 700 }}>{label}</span>
-      <span style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>{desc}</span>
-      {comingSoon && (
-        <span
-          style={{
-            position: "absolute",
-            top: 14,
-            right: 14,
-            fontSize: 10,
-            fontWeight: 800,
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            color: "rgba(255,255,255,0.4)",
-            background: "rgba(255,255,255,0.08)",
-            padding: "3px 8px",
-            borderRadius: 20,
-          }}
-        >
-          Coming soon
-        </span>
-      )}
+      {/* 16:9 promo banner — placeholder for now, drop a real image into
+          bannerSrc later and this swaps in automatically. */}
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          aspectRatio: "16 / 9",
+          background: bannerSrc
+            ? `#000 center / cover no-repeat url(${bannerSrc})`
+            : `linear-gradient(135deg, ${accent}33, rgba(255,255,255,0.02) 60%)`,
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {!bannerSrc && (
+          <span style={{ width: 56, height: 56, color: accent, opacity: 0.5, display: "flex" }}>{icon}</span>
+        )}
+        {comingSoon && (
+          <span
+            style={{
+              position: "absolute",
+              top: 14,
+              right: 14,
+              fontSize: 10,
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              color: "rgba(255,255,255,0.7)",
+              background: "rgba(0,0,0,0.55)",
+              padding: "4px 10px",
+              borderRadius: 20,
+              backdropFilter: "blur(6px)",
+            }}
+          >
+            Coming soon
+          </span>
+        )}
+      </div>
+
+      {/* Label + description */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 20px" }}>
+        <span style={{ width: 30, height: 30, flexShrink: 0, color: accent, display: "flex" }}>{icon}</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <span style={{ fontSize: 17, fontWeight: 700, color: "#fff" }}>{label}</span>
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.4)" }}>{desc}</span>
+        </div>
+      </div>
     </button>
   );
 }
@@ -258,6 +300,15 @@ function TemplateIcon() {
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <line x1="3" y1="9" x2="21" y2="9" />
       <line x1="9" y1="9" x2="9" y2="21" />
+    </svg>
+  );
+}
+function AssetsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" style={{ width: "100%", height: "100%" }}>
+      <path d="M12 2 21 7 12 12 3 7z" />
+      <path d="M3 12l9 5 9-5" />
+      <path d="M3 17l9 5 9-5" />
     </svg>
   );
 }
