@@ -78,9 +78,9 @@ import crypto from 'crypto';
 // ── Plan IDs hardcoded here (private repo) — not in frontend HTML ────────────
 // Replace these with your real PayPal plan IDs from developer.paypal.com
 const PLAN_IDS = {
-  starter: 'P-1S5390670L652634ANJFOMLQ',
-  growth:  'P-5J061894BU889364SNJFONDQ',
-  pro:     'P-22G69097CR105705ANJFONSA',
+  starter: 'P-1PS58089939783309NJRHMJQ',
+  growth:  'P-5DY44028H9297735ENJRHNNA',
+  pro:     'P-3W326687TA376614CNJRHOJQ',
 };
 
 // ── Boost Listing pricing — single source of truth is LIMITS.boost.plans in
