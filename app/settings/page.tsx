@@ -58,6 +58,17 @@ function SettingsPageInner() {
   const { state, setState, loading } = useSettingsState();
   const { openDisputePicker } = useDisputePicker();
 
+  // Each panel renders its own header (icon + title + description, see
+  // e.g. AccountPanel's .detail-panel-header) at the very top of
+  // .detail-panel. Without this, switching panels while scrolled down
+  // keeps #detailPanel's old scrollTop, so the newly-selected panel's own
+  // header/title never appears — it's just sitting off-screen above
+  // whatever the scroll position happened to land on, making the panel
+  // look header-less instead of merely scrolled.
+  useEffect(() => {
+    document.getElementById("detailPanel")?.scrollTo({ top: 0 });
+  }, [activePanel]);
+
   // <main> has min-height:100vh globally, so with this page's own 92px
   // top margin the document is always taller than the viewport — meaning
   // the page itself scrolls no matter what overflow rules the inner
