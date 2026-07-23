@@ -23,6 +23,7 @@ import { createPortal } from "react-dom";
 import type { Listing } from "@/lib/listings";
 import { isBoosted, fetchSearchResults } from "@/lib/listings";
 import { useRecentSearches } from "@/lib/useRecentSearches";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 interface Suggestion {
   listing: Listing;
@@ -111,6 +112,7 @@ export default function SearchOverlay({
   onSearchChange: (q: string) => void;
   onOpenListing: (listing: Listing) => void;
 }) {
+  const { formatPriceShort } = useCurrency();
   const [value, setValue] = useState(initialQuery);
   const [listening, setListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
@@ -394,7 +396,7 @@ export default function SearchOverlay({
                 <div className="mp-so-list">
                   {recs.map((listing) => {
                     const price = listing.financials?.price;
-                    const priceStr = typeof price === "number" ? `$${price.toLocaleString()}` : "—";
+                    const priceStr = typeof price === "number" ? formatPriceShort(price) : "—";
                     const type = listing.type || "website";
                     const tc = TYPE_COLOR[type] || "#34d399";
                     const thumb = resultThumb(listing);
@@ -445,7 +447,7 @@ export default function SearchOverlay({
           <div className="mp-so-list">
             {matches.map((m) => {
               const price = m.listing.financials?.price;
-              const priceStr = typeof price === "number" ? `$${price.toLocaleString()}` : "—";
+              const priceStr = typeof price === "number" ? formatPriceShort(price) : "—";
               const tc = TYPE_COLOR[m.type] || "#34d399";
               const thumb = resultThumb(m.listing);
               return (
