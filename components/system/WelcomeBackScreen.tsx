@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { auth } from "@/lib/firebase";
-import { useToast } from "@/lib/useToast";
+import { useSrToast } from "@/components/system/SrToastProvider";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 // Ports the "WELCOME BACK" full-screen daily-objectives takeover from
 // Js/sellers-transfer.js (index.html lines 26401-26599) + the
@@ -54,13 +55,19 @@ interface Objective {
   unavailable?: boolean;
 }
 
-function money(n: number): string {
+// Takes an optional `fmt` (WelcomeBackScreen passes CurrencyContext's
+// formatBalance) so reward amounts — real wallet credits — convert to
+// the seller's selected display currency like every other balance figure
+// in the app. Falls back to raw USD if no converter is passed.
+function money(n: number, fmt?: (n: number) => string): string {
+  if (fmt) return fmt(n);
   return "$" + n.toFixed(3).replace(/0+$/, "").replace(/\.$/, ".00");
 }
 
 export default function WelcomeBackScreen() {
   const { user, profile, loading } = useAuth();
-  const { toast, ToastHost } = useToast();
+  const { show: toast } = useSrToast();
+  const { formatBalance } = useCurrency();
 
   const [active, setActive] = useState(false);
   const [objectives, setObjectives] = useState<Objective[]>([]);
@@ -146,7 +153,7 @@ export default function WelcomeBackScreen() {
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "Could not claim reward");
-      if (d.reward) toast(`+${money(d.reward)} added to your wallet!`);
+      if (d.reward) toast(`+${money(d.reward, formatBalance)} added to your wallet!`, "success");
       // Wallet balance itself refreshes via AuthContext's Firestore
       // listener once the API writes walletBalance/withdrawableBalance —
       // just re-pull today's objectives to reflect the now-claimed state.
@@ -193,7 +200,7 @@ export default function WelcomeBackScreen() {
             <div className="wb-earn-card">
               <div className="wb-earn-label">Earned Today</div>
               <div className="wb-earn-amt" id="wbEarnedToday">
-                {money(totalEarnedToday)}
+                {money(totalEarnedToday, formatBalance)}
               </div>
               <div className="wb-date" id="wbDate">
                 {dateText}
@@ -256,7 +263,7 @@ export default function WelcomeBackScreen() {
                     : o.completed
                       ? "is-complete"
                       : "";
-                  const rewardStr = "+" + money(o.reward);
+                  const rewardStr = "+" + money(o.reward, formatBalance);
 
                   return (
                     <div
@@ -353,7 +360,6 @@ export default function WelcomeBackScreen() {
           </div>
         </div>
       </div>
-      <ToastHost />
     </>
   );
 }
