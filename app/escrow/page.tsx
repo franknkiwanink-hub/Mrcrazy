@@ -70,8 +70,8 @@ export default function EscrowPage() {
           </thead>
           <tbody>
             {[
-              ["Free", "30%"],
-              ["Starter", "20%"],
+              ["Free", "20%"],
+              ["Starter", "15%"],
               ["Growth", "10%"],
               ["Pro", "5%"],
             ].map(([plan, fee]) => (
