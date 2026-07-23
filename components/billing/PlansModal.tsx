@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { loadPaypalSdk } from "@/lib/paypalSdk";
 import { useLimits } from "@/lib/useLimits";
 import { useScrollLock } from "@/lib/useScrollLock";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 // Ports the PLANS MODAL from plans-boost.js (index.html lines
 // 22915-23678). PLAN_DATA below is a mix of two kinds of content:
@@ -108,6 +109,7 @@ export default function PlansModal({
   const { profile } = useAuth();
   const currentPlan = (profile?.plan || "free") as string;
   const { limits } = useLimits();
+  const { currency, formatBalance } = useCurrency();
 
   // Merges live price/fee/color/tagline from useLimits() onto the static
   // PLAN_DATA fallback (pills/features have no live equivalent — see the
@@ -298,9 +300,14 @@ export default function PlansModal({
             {activePlan === "growth" ? <span className="srf-plan-chip">popular</span> : null}
           </div>
           <div className="srf-plan-price">
-            ${p.price}
+            {formatBalance(p.price).replace(/\.00$/, "")}
             <small>/month</small>
           </div>
+          {currency !== "USD" && (
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: -8, marginBottom: 4 }}>
+              Billed in USD via PayPal — shown converted to {currency}
+            </div>
+          )}
           <p className="srf-plan-desc">{p.tagline}</p>
           <div className="srf-plan-pills">
             {p.pills.map((text) => (
