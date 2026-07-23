@@ -5,7 +5,7 @@ import { auth } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { useWalletModal } from "@/components/wallet/WalletModalProvider";
 import { useLimits } from "@/lib/useLimits";
-import { useScrollLock } from "@/lib/useScrollLock";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 // Ports the Boost purchase modal from Js/sellers-transfer.js (index.html
 // lines 25383-25548 + #boostOverlay markup) — window.__openBoostModal.
@@ -61,10 +61,10 @@ export default function BoostModal({
   listingId: string | null;
   listing?: BoostListingData | null;
 }) {
-  useScrollLock(open);
   const { profile } = useAuth();
   const { openWallet } = useWalletModal();
   const { limits } = useLimits();
+  const { currency, formatBalance } = useCurrency();
 
   const livePlans = limits.boost.plans?.length ? limits.boost.plans : FALLBACK_BOOST_PLANS;
   const BOOST_PLANS = livePlans.map((p) => ({
@@ -104,7 +104,7 @@ export default function BoostModal({
     }
     if (walletBalance < selected.price) {
       setErrMsg(
-        `This boost costs $${selected.price.toFixed(2)} but your wallet has $${walletBalance.toFixed(2)}. Add funds to continue.`
+        `This boost costs $${selected.price.toFixed(2)} USD but your wallet has $${walletBalance.toFixed(2)} USD. Add funds to continue.`
       );
       return;
     }
@@ -275,7 +275,6 @@ export default function BoostModal({
           <div style={{ display: "flex", flexDirection: "column", gap: 9.6, marginBottom: 20.8 }}>
             {BOOST_PLANS.map((p) => {
               const isSelected = selected?.days === p.days;
-              const perDay = (p.price / p.days).toFixed(2);
               return (
                 <div
                   key={p.days}
@@ -314,7 +313,7 @@ export default function BoostModal({
                     </div>
                     <div>
                       <div style={{ fontSize: 14.7, fontWeight: 800, color: "#fff", lineHeight: 1.1 }}>{p.label}</div>
-                      <div style={{ fontSize: 10.9, color: "#777", marginTop: 2 }}>${perDay}/day</div>
+                      <div style={{ fontSize: 10.9, color: "#777", marginTop: 2 }}>{formatBalance(p.price / p.days)}/day</div>
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
@@ -328,7 +327,7 @@ export default function BoostModal({
                         POPULAR
                       </span>
                     )}
-                    <div style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>${p.price.toFixed(2)}</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#fff" }} title={`$${p.price.toFixed(2)} USD`}>{formatBalance(p.price)}</div>
                   </div>
                 </div>
               );
@@ -421,7 +420,7 @@ export default function BoostModal({
               <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
             </svg>
             <span>
-              {submitting ? "Processing…" : selected ? `Boost for $${selected.price.toFixed(2)}` : "Select a plan"}
+              {submitting ? "Processing…" : selected ? `Boost for $${selected.price.toFixed(2)} USD` : "Select a plan"}
             </span>
           </button>
 
@@ -430,7 +429,8 @@ export default function BoostModal({
               <rect x={1} y={4} width={22} height={16} rx={2} />
               <line x1={1} y1={10} x2={23} y2={10} />
             </svg>
-            Charged from your wallet balance: <b style={{ color: "#a3e635", fontWeight: 700 }}>${walletBalance.toFixed(2)}</b>
+            Charged from your wallet balance: <b style={{ color: "#a3e635", fontWeight: 700 }}>{formatBalance(walletBalance)}</b>
+            {currency !== "USD" && <span style={{ color: "#555" }}>&nbsp;(${walletBalance.toFixed(2)} USD)</span>}
           </div>
           <div style={{ textAlign: "center", fontSize: 10.9, color: "#555", marginTop: 12.8, lineHeight: 1.4 }}>
             Boosted listings are prioritized in feed ordering while active. No refunds once a boost starts.
