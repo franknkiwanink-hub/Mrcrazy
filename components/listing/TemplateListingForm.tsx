@@ -159,7 +159,7 @@ async function uploadTextToStorage(filename: string, content: string, idToken: s
   return json.url;
 }
 
-export default function TemplateListingForm() {
+export default function TemplateListingForm({ onBack }: { onBack?: () => void } = {}) {
   const router = useRouter();
   const { user, profile } = useAuth();
   const { limits } = useLimits();
@@ -327,7 +327,8 @@ export default function TemplateListingForm() {
       else clearDraft();
     }
     if (tplPreviewBlobUrl) URL.revokeObjectURL(tplPreviewBlobUrl);
-    router.push("/marketplace");
+    if (onBack) onBack();
+    else router.push("/marketplace");
   }
 
   // ── Image handling — simple add-a-few-screenshots flow, no fixed
