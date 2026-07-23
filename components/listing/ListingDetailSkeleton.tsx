@@ -1,6 +1,6 @@
 export default function ListingDetailSkeleton() {
   return (
-    <div style={{ marginTop: 92, padding: "0 24px 80px", maxWidth: 760, margin: "92px auto 0" }}>
+    <div style={{ padding: "24px 24px 80px", maxWidth: 760, margin: "92px auto 0" }}>
       <div className="skel-block" style={{ height: 320, borderRadius: 16, marginBottom: 16 }} />
       <div className="skel-fins-row" style={{ marginBottom: 16 }}>
         <div className="skel-block" />
