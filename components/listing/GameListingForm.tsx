@@ -151,7 +151,7 @@ async function uploadTextToStorage(filename: string, content: string, idToken: s
   return json.url;
 }
 
-export default function GameListingForm() {
+export default function GameListingForm({ onBack }: { onBack?: () => void } = {}) {
   const router = useRouter();
   const { user, profile } = useAuth();
   const { limits } = useLimits();
@@ -340,7 +340,8 @@ export default function GameListingForm() {
       else clearDraft();
     }
     if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
-    router.push("/marketplace");
+    if (onBack) onBack();
+    else router.push("/marketplace");
   }
 
   // ── Screenshot slots (no aspect-ratio enforcement, unlike website form) ──
