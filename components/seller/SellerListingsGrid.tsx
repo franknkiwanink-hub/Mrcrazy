@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import type { SellerListing } from "@/lib/useSeller";
 import { buildListingSlug } from "@/lib/slug";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 type FilterType = "all" | "website" | "game" | "app";
 
@@ -68,6 +69,7 @@ const TABS: { type: FilterType; label: string; icon: ReactElement }[] = [
 export default function SellerListingsGrid({ listings }: { listings: SellerListing[] }) {
   const [active, setActive] = useState<FilterType>("all");
   const router = useRouter();
+  const { formatPriceShort } = useCurrency();
 
   const filtered = useMemo(
     () => (active === "all" ? listings : listings.filter((l) => (l.type || "website") === active)),
@@ -124,7 +126,7 @@ export default function SellerListingsGrid({ listings }: { listings: SellerListi
             const type = l.type || "website";
             const tc = type === "app" ? "#a78bfa" : type === "game" ? "#f59e0b" : "#60a5fa";
             const thumb = l.images?.[2] || l.imageCover || l.images?.[0] || "https://placehold.co/400x225/111/444?text=Listing";
-            const priceTxt = typeof l.financials?.price === "number" ? `$${l.financials.price.toLocaleString()}` : "Make offer";
+            const priceTxt = formatPriceShort(l.financials?.price);
             return (
               <div className="sp-listing-card" key={l.id} onClick={() => router.push(`/listing/${buildListingSlug(l.title, l.id)}`)}>
                 <div className="sp-listing-thumb">
