@@ -1,0 +1,38 @@
+HOW TO APPLY THIS ZIP
+======================
+
+Extract this zip directly into the ROOT of your project (the folder
+that contains your `app/` and `components/` folders). The paths inside
+this zip mirror your project structure, so files will land in the
+correct place automatically:
+
+  app/checkout-css-fix.css
+      -> This is NOT a full globals.css. It only contains the
+         `.checkout-*` rules that fix the checkout overflow issue.
+         Open your real app/globals.css, find the existing
+         `.checkout-*` block, and REPLACE it with the contents of
+         this file. Then delete checkout-css-fix.css — it's a
+         reference snippet, not a file your app imports.
+
+  components/messages/CheckoutRoute.tsx
+      -> Replaces your existing file at this exact path.
+
+  components/listing/ListingDetailSkeleton.tsx
+      -> Replaces your existing file at this exact path.
+         (Fix here is the inline `margin: "92px auto 0"` — no CSS
+         file needed for this one.)
+
+WHAT EACH FIX DOES
+-------------------
+1. Checkout horizontal overflow on long titles:
+   - .checkout-summary / .checkout-payment / .checkout-item get
+     min-width: 0 (grid/flex items default to min-width:auto, which
+     let a long unbreakable title stretch the whole layout wider
+     than the viewport).
+   - .checkout-item-name gets white-space: nowrap; overflow: hidden;
+     text-overflow: ellipsis so long titles truncate instead.
+
+2. Listing skeleton touching the header:
+   - ListingDetailSkeleton.tsx now has margin: "92px auto 0" so it
+     clears the fixed 52px header + sub-header row, matching the
+     92px offset used elsewhere in the app (.svm-sticky-header).
