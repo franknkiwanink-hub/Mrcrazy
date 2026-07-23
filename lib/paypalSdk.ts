@@ -18,7 +18,7 @@
 // browser-global side effect by nature — same shape as the original.
 
 export const PAYPAL_CLIENT_ID =
-  "BAAoZEPCDlmTMTfqw5lMkMc32BF8ZGu8rQtKSK12FqodN2TiTKOxoGJSbkk5KBMk16hbr_BFc4kiXn12Pc";
+  "BAA7e7yB7T4iXJXNnBYSZk2soa7xnchIK1HVrBZE04tvmrM-gtDHXjGz4QMB3eN1CP9Dt4382aDBAf_hPo";
 
 declare global {
   interface Window {
