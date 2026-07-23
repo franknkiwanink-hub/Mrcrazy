@@ -440,20 +440,20 @@ export default function EditListingModal({
 
               <div className="el-grid-3">
                 <div className="el-field">
-                  <label>Price ($)</label>
+                  <label>Price (USD)</label>
                   <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} />
                 </div>
                 <div className="el-field">
-                  <label>Monthly Revenue ($)</label>
+                  <label>Monthly Revenue (USD)</label>
                   <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} />
                 </div>
                 <div className="el-field">
-                  <label>Monthly Expenses ($)</label>
+                  <label>Monthly Expenses (USD)</label>
                   <input type="number" min="0" value={expenses} onChange={(e) => setExpenses(e.target.value)} />
                 </div>
               </div>
               <div className="el-profit-box">
-                <span className="el-profit-label">Monthly Profit</span>
+                <span className="el-profit-label">Monthly Profit (USD)</span>
                 <span className={`el-profit-value${profit < 0 ? " loss" : ""}`}>
                   {profit < 0 ? "-" : ""}${Math.abs(profit).toLocaleString()}
                 </span>
