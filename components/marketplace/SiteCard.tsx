@@ -22,13 +22,13 @@ export default function SiteCard({
   const fin = listing.financials || {};
   const title = listing.title || "Untitled";
   const desc = listing.description || "";
-  // Asking price is the one figure a buyer actually pays, so it's the
-  // only one shown in the selected display currency — revenue/expenses/
-  // profit below stay in USD (they're performance metrics being reported
-  // on, not an amount anyone is being charged). Short form (no "(≈ $X
-  // USD)" suffix) to fit the card's fixed-width price slot; the full USD
-  // figure is still available via the title tooltip.
-  const { formatPriceShort } = useCurrency();
+  // Asking price is the one figure a buyer actually pays, so it was
+  // originally the only one shown in the selected display currency —
+  // now revenue/expenses/profit convert too, consistently with every
+  // other price display in the app. Short form (no "(≈ $X USD)" suffix)
+  // to fit the card's fixed-width slots; the full USD figure is still
+  // available via the title tooltip on the price.
+  const { formatPriceShort, formatFinFull } = useCurrency();
   const price = formatPriceShort(fin.price);
   const priceTooltip = typeof fin.price === "number" ? `$${fin.price.toLocaleString()} USD` : undefined;
   const sellerHandle = listing.ownerEmail?.split("@")[0] || "Anonymous";
@@ -36,10 +36,10 @@ export default function SiteCard({
   const mainImg = listing.images?.[2] || listing.imageCover || listing.images?.[0] || PLACEHOLDER_MAIN;
   const subImg1 = listing.images?.[0] || "";
   const subImg2 = listing.images?.[1] || "";
-  const revenue = typeof fin.revenue === "number" ? `$${fin.revenue.toLocaleString()}` : "—";
-  const expenses = typeof fin.expenses === "number" ? `$${fin.expenses.toLocaleString()}` : "—";
+  const revenue = formatFinFull(fin.revenue);
+  const expenses = formatFinFull(fin.expenses);
   const profit = typeof fin.profit === "number" ? fin.profit : null;
-  const profitStr = profit !== null ? `$${Math.abs(profit).toLocaleString()}` : "—";
+  const profitStr = profit !== null ? formatFinFull(Math.abs(profit)) : "—";
   const profitCls = profit !== null ? (profit >= 0 ? "sr-pos" : "sr-neg") : "";
   const tech = listing.tech || {};
   const techStr = [tech.frontend, tech.backend, tech.database, tech.monetization].filter(Boolean).slice(0, 3).join(" · ");
