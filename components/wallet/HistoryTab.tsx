@@ -2,6 +2,7 @@
 
 import { useWalletHistory } from "@/lib/useWalletHistory";
 import { walletTxIconKind, walletFeeSub, fmtWalletDate } from "@/lib/walletHistoryHelpers";
+import { useCurrency } from "@/lib/CurrencyContext";
 
 // Ports _walletRenderHistory from wallet.js — same icon/fee-sub/date
 // formatting, backed by useWalletHistory's live Firestore onSnapshot
@@ -40,6 +41,7 @@ function TxIcon({ type }: { type?: string }) {
 
 export default function HistoryTab({ active }: { active: boolean }) {
   const { transactions, loading } = useWalletHistory(active);
+  const { currency, formatBalance } = useCurrency();
 
   if (loading || transactions === null) {
     return (
@@ -84,10 +86,16 @@ export default function HistoryTab({ active }: { active: boolean }) {
                 {tx.status === "pending" ? " · Pending" : ""}
                 {scheduled ? ` · Scheduled ${scheduled}` : ""}
               </div>
-              {feeStr ? <div className="wallet-tx-fee">{feeStr}</div> : null}
+              {feeStr ? (
+                <div className="wallet-tx-fee">
+                  {feeStr}
+                  {currency !== "USD" ? " (USD)" : ""}
+                </div>
+              ) : null}
             </div>
             <div className={`wallet-tx-amt ${isPos ? "pos" : "neg"}`}>
-              {isPos ? "+" : ""}${Math.abs(amt).toFixed(2)}
+              {isPos ? "+" : "-"}
+              {formatBalance(Math.abs(amt))}
             </div>
           </div>
         );
