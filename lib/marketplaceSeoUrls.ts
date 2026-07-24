@@ -25,6 +25,7 @@ export const TYPE_SLUGS: Record<ListingType, string> = {
   website: "websites",
   app: "apps",
   game: "games",
+  "3d": "3d",
 };
 export const SLUG_TO_TYPE: Record<string, ListingType> = {
   websites: "website",
