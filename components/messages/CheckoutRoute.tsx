@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/AuthContext";
 import { useDealChat } from "@/lib/useDealChat";
+import { useCurrency } from "@/lib/CurrencyContext";
 import SignInRequired from "@/components/auth/SignInRequired";
 import { buildListingSlug } from "@/lib/slug";
 
@@ -34,10 +35,64 @@ function usd(amount: number): string {
   return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// Loading placeholder for CheckoutRoute — same two-column shape
+// (checkout-summary / checkout-payment) as the real content, built from
+// the shared .skel-block shimmer class already used by
+// ListingDetailSkeleton and the marketplace card skeletons, so it reads
+// as "this page is arriving" rather than a dead blank screen.
+export function CheckoutRouteSkeleton({ onBack }: { onBack?: () => void }) {
+  return (
+    <div className="checkout-route">
+      <div className="checkout-shell">
+        <button onClick={onBack} disabled={!onBack} className="checkout-close" aria-label="Back to chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+            <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Back to chat
+        </button>
+
+        <div className="checkout-summary">
+          <div className="skel-block" style={{ width: 140, height: 22, borderRadius: 20, marginBottom: 14 }} />
+          <div className="skel-block skel-text lg" style={{ width: "50%", marginBottom: 8 }} />
+          <div className="skel-block skel-text" style={{ width: "75%", marginBottom: 20 }} />
+
+          <div className="checkout-item">
+            <div className="checkout-item-thumb">
+              <div className="skel-block" style={{ width: "100%", height: "100%" }} />
+            </div>
+            <div className="checkout-item-info">
+              <div className="skel-block skel-text" style={{ width: "70%" }} />
+            </div>
+            <div className="skel-block skel-text" style={{ width: 50 }} />
+          </div>
+
+          <div className="checkout-breakdown">
+            <div className="skel-block skel-text" style={{ width: "100%", marginBottom: 10 }} />
+            <div className="skel-block skel-text" style={{ width: "100%", marginBottom: 10 }} />
+            <div className="skel-block skel-text" style={{ width: "100%" }} />
+          </div>
+        </div>
+
+        <div className="checkout-payment">
+          <div className="skel-block skel-text" style={{ width: "60%", marginBottom: 16 }} />
+          <div className="skel-block" style={{ width: "100%", height: 46, borderRadius: 12 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CheckoutRoute({ chatRoomId }: { chatRoomId: string }) {
   const router = useRouter();
   const { user, profile, loading: authLoading } = useAuth();
   const chat = useDealChat(chatRoomId);
+  // Display-only conversion — same as every other price in the app
+  // (marketplace cards, listing page, donate overlay). The actual charge
+  // is always USD (see PAY_LIVE's comment below), so `usd()` stays
+  // available for anywhere we need to be explicit about the real amount
+  // billed, while formatBalance drives what the buyer sees as the
+  // headline figures in their own local currency.
+  const { formatBalance, currency } = useCurrency();
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -64,11 +119,14 @@ export default function CheckoutRoute({ chatRoomId }: { chatRoomId: string }) {
   }
 
   if (!chat.room) {
-    // Still loading the room doc, or it doesn't exist — TransferDealRoute
-    // follows the same "render nothing while unresolved" convention
-    // rather than a spinner, since this is typically instant (room is
-    // fetched directly, not paginated).
-    return null;
+    // Room doc is still loading (or doesn't exist). Previously this
+    // rendered nothing, which — combined with no route-level loading.tsx
+    // for this segment — meant clicking "Pay Now" produced a blank page
+    // (footer briefly visible with nothing above it) until the room doc
+    // resolved. This skeleton mirrors the real checkout-summary /
+    // checkout-payment two-block shape so the transition feels instant
+    // and nothing ever "pops in" on top of empty space.
+    return <CheckoutRouteSkeleton onBack={goBackToChat} />;
   }
 
   const { room } = chat;
@@ -169,23 +227,28 @@ export default function CheckoutRoute({ chatRoomId }: { chatRoomId: string }) {
                 </Link>
               ) : null}
             </div>
-            <div className="checkout-item-price">{usd(listingPrice)}</div>
+            <div className="checkout-item-price">{formatBalance(listingPrice)}</div>
           </div>
 
           <div className="checkout-breakdown">
             <div className="checkout-row">
               <span>Listing price</span>
-              <span>{usd(listingPrice)}</span>
+              <span>{formatBalance(listingPrice)}</span>
             </div>
             <div className="checkout-row">
               <span>Buyer service fee (15%)</span>
-              <span>{usd(buyerFee)}</span>
+              <span>{formatBalance(buyerFee)}</span>
             </div>
             <div className="checkout-fee-note">Covers secure escrow processing and platform protection.</div>
             <div className="checkout-row checkout-row-total">
               <span>Total due today</span>
-              <span>{usd(total)}</span>
+              <span>{formatBalance(total)}</span>
             </div>
+            {currency !== "USD" && (
+              <div className="checkout-fee-note">
+                Charged as {usd(total)} USD — your card/bank converts this to {currency} at checkout.
+              </div>
+            )}
           </div>
 
           <div className="checkout-trust">
@@ -228,7 +291,7 @@ export default function CheckoutRoute({ chatRoomId }: { chatRoomId: string }) {
               "Processing…"
             ) : (
               <>
-                Pay <span className="checkout-pay-amount">{usd(total)}</span>
+                Pay <span className="checkout-pay-amount">{formatBalance(total)}</span>
               </>
             )}
           </button>
