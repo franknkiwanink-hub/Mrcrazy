@@ -33,6 +33,7 @@ export default function robots(): MetadataRoute.Robots {
         "/sell/app",
         "/sell/game",
         "/sell/template",
+        "/sell/3d-assets",
       ],
       // Auth-gated app sections — a crawler can't sign in, so these just
       // hit a login wall. No SEO value in indexing them, and disallowing
