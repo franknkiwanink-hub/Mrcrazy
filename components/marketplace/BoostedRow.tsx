@@ -27,11 +27,12 @@ const FLAME_SVG = (
   </svg>
 );
 
-const FEED_TYPE_ORDER: ListingType[] = ["website", "app", "game"];
+const FEED_TYPE_ORDER: ListingType[] = ["website", "app", "game", "3d"];
 const TYPE_LABELS: Record<ListingType, string> = {
   website: "Boosted sites",
   app: "Boosted apps",
   game: "Boosted games",
+  "3d": "Boosted 3D",
 };
 
 export default function BoostedRow({
@@ -60,7 +61,7 @@ export default function BoostedRow({
     };
   }, []);
 
-  const groups: Record<ListingType, Listing[]> = { website: [], app: [], game: [] };
+  const groups: Record<ListingType, Listing[]> = { website: [], app: [], game: [], "3d": [] };
   for (const listing of listings) {
     const t = (listing.type || "website") as ListingType;
     if (groups[t]) groups[t].push(listing);
