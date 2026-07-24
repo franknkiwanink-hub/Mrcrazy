@@ -27,9 +27,6 @@ interface DonationsSummary {
 
 const donateCache = new Map<string, DonationsSummary>();
 
-function fmtMoney2(n: number) {
-  return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 function DonationRowView({ don }: { don: DonationRow }) {
   const { formatBalance } = useCurrency();
@@ -123,6 +120,12 @@ export default function DonateOverlay({
   const showFee = amtNum > 0;
   const fee = showFee ? amtNum * DONATION_FEE_RATE_CLIENT : 0;
   const receive = showFee ? amtNum - fee : 0;
+  // The donation itself is always charged in USD (it's drawn straight
+  // from the donor's USD wallet balance — see handleSubmit/the /api/paypal
+  // "donate" action), so `amt`/`fee`/`receive` above stay real USD numbers
+  // no matter what display currency is selected. formatBalance below only
+  // converts those same real figures for display, exactly like every
+  // other price in the app — it doesn't change what's actually charged.
 
   async function handleSubmit() {
     setMsg(null);
@@ -137,7 +140,7 @@ export default function DonateOverlay({
     }
     const bal = Number(profile?.walletBalance || 0);
     if (amtNum > bal) {
-      setMsg({ text: `Insufficient balance — you have $${bal.toFixed(2)} USD.`, ok: false });
+      setMsg({ text: `Insufficient balance — you have ${formatBalance(bal)}.`, ok: false });
       return;
     }
     setSubmitting(true);
@@ -162,7 +165,7 @@ export default function DonateOverlay({
       // wallet-bridge sync is needed here (the original's window.__wallet*
       // bridge calls were working around not having that live listener).
 
-      setMsg({ text: `✓ Donated $${amtNum.toFixed(2)} USD to ${result.sellerName || sellerName}. Thank you!`, ok: true });
+      setMsg({ text: `✓ Donated ${formatBalance(amtNum)} to ${result.sellerName || sellerName}. Thank you!`, ok: true });
       setAmt("");
       setNote("");
 
@@ -281,13 +284,19 @@ export default function DonateOverlay({
         {showFee && (
           <div className="wallet-fee-breakdown" id="spDonateFeeRow">
             <div className="wallet-fee-line">
-              <span>Platform fee (15%, USD)</span>
-              <span id="spDonateFee">${fee.toFixed(2)}</span>
+              <span>Platform fee (15%)</span>
+              <span id="spDonateFee">{formatBalance(fee)}</span>
             </div>
             <div className="wallet-fee-line total">
-              <span>Seller receives (USD)</span>
-              <span id="spDonateReceive">${receive.toFixed(2)}</span>
+              <span>Seller receives</span>
+              <span id="spDonateReceive">{formatBalance(receive)}</span>
             </div>
+            {currency !== "USD" && (
+              <div className="wallet-fee-line" style={{ opacity: 0.6, fontSize: "0.78em" }}>
+                <span>Charged from your wallet as</span>
+                <span>${amtNum.toFixed(2)} USD</span>
+              </div>
+            )}
           </div>
         )}
 
