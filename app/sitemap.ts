@@ -46,6 +46,7 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
         { url: `${baseUrl}/sell/app`, changeFrequency: "monthly", priority: 0.5 },
         { url: `${baseUrl}/sell/game`, changeFrequency: "monthly", priority: 0.5 },
         { url: `${baseUrl}/sell/template`, changeFrequency: "monthly", priority: 0.5 },
+        { url: `${baseUrl}/sell/3d-assets`, changeFrequency: "monthly", priority: 0.5 },
         { url: `${baseUrl}/leaderboard`, changeFrequency: "daily", priority: 0.4 },
         { url: `${baseUrl}/gallery`, changeFrequency: "monthly", priority: 0.4 },
       ];
@@ -68,6 +69,7 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
       { url: `${baseUrl}/sell/app`, changeFrequency: "monthly", priority: 0.5 },
       { url: `${baseUrl}/sell/game`, changeFrequency: "monthly", priority: 0.5 },
       { url: `${baseUrl}/sell/template`, changeFrequency: "monthly", priority: 0.5 },
+      { url: `${baseUrl}/sell/3d-assets`, changeFrequency: "monthly", priority: 0.5 },
       { url: `${baseUrl}/leaderboard`, changeFrequency: "daily", priority: 0.4 },
       { url: `${baseUrl}/gallery`, changeFrequency: "monthly", priority: 0.4 },
     ];
