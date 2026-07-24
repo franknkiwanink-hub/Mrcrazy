@@ -90,6 +90,41 @@ function Skeleton({ n = 3 }: { n?: number }) {
   );
 }
 
+// Route-level loading UI for /messages (see app/messages/loading.tsx).
+// Mirrors the real ibx-box shell — header, tabs, skeleton rows — instead
+// of the generic marketplace-grid-shaped SiteriftyLoader that used to
+// show here via Suspense's fallback, which didn't match this page's
+// layout at all (that fallback only covers the initial JS chunk anyway;
+// InboxShell's real data fetch is client-side via useInbox and already
+// shows this same Skeleton once mounted — this just extends the same
+// look back to cover the route-transition gap before InboxShell mounts).
+export function InboxShellSkeleton() {
+  return (
+    <div style={{ marginTop: 92, minHeight: "calc(100dvh - 92px)", background: "#080808", display: "flex", justifyContent: "center" }}>
+      <div className="ibx-box" style={{ height: "calc(100dvh - 92px)" }}>
+        <div className="ibx-header">
+          <div className="ibx-header-left">
+            <button className="ibx-back-btn" aria-label="Back" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <span className="ibx-title">Messages &amp; Deals</span>
+          </div>
+        </div>
+        <div className="ibx-tabs">
+          <button className="ibx-tab active">Chats</button>
+          <button className="ibx-tab">Deals</button>
+          <button className="ibx-tab">Groups</button>
+        </div>
+        <div className="ibx-body">
+          <Skeleton />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function InboxShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
