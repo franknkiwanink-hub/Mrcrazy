@@ -38,6 +38,7 @@ const COLUMNS: { heading: string; links: { label: string; href: string }[] }[] =
       { label: "Escrow & Payments", href: "/escrow" },
       { label: "Buyer Protection", href: "/buyer-protection" },
       { label: "Terms & Privacy", href: "/terms" },
+      { label: "Privacy Policy", href: "/privacy" },
     ],
   },
 ];
