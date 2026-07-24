@@ -10,7 +10,7 @@
 // fields — most fields are optional because a given listing only has
 // the ones relevant to its `type`.
 
-export type ListingType = "website" | "app" | "game";
+export type ListingType = "website" | "app" | "game" | "3d";
 
 export interface ListingFinancials {
   price?: number;
@@ -36,6 +36,10 @@ export interface ListingSettings {
   location?: string; // website-type only, mirrors settings.location in mpOpenModal's website branch
   structure?: string;
   reason?: string;
+  // 3D Asset listings only — see AssetListingForm.tsx's own FORMAT_OPTIONS/
+  // LICENSE_OPTIONS (not shared with any other listing type's settings).
+  format?: string;
+  license?: string;
 }
 
 // Monthly traffic claim + its supporting analytics screenshots (GA4,
@@ -90,6 +94,12 @@ export interface Listing {
   gameType?: string;
   videoUrl?: string;
   previewUrl?: string;
+  // 3D Asset listings only — the resolved iframe src URL for the seller's
+  // live embed (Sketchfab or any other platform), stored server-side after
+  // extraction/validation (see lib/embedUrl.ts + _handler.js's
+  // extractEmbedSrc/isValidEmbedUrl). Always a bare validated URL, never
+  // raw HTML — see AssetIframe.tsx for the one place this gets rendered.
+  embedUrl?: string;
   // Platform selection + store links for app listings — mirrors
   // listing.platforms in the original (selected/iosUrl/androidUrl/webUrl/
   // previewUrl), plus the per-platform "Not Live" state + uploaded build
@@ -334,6 +344,12 @@ export interface CreateListingParams {
   gameType?: string;
   videoUrl?: string;
   previewUrl?: string;
+  // 3D Asset listings only. Raw client input as the seller typed/pasted it
+  // — either a bare embed URL or a full <iframe> snippet, whichever mode
+  // they picked in AssetListingForm. The server (not this client) is what
+  // extracts + validates the actual src url; see resolveEmbedUrl in
+  // _handler.js. Never rendered client-side before that round-trip.
+  embedCode?: string;
   platforms?: Listing["platforms"];
   additionalFiles?: ListingBuildFile[];
   // Global "app not published anywhere yet" flag + its build link — see
@@ -371,6 +387,8 @@ export interface UpdateListingParams {
   gameFile?: string;
   videoUrl?: string;
   previewUrl?: string;
+  // 3D Asset listings only — see the matching field on CreateListingParams.
+  embedCode?: string;
   platforms?: Listing["platforms"];
   transferMethods?: string[];
   apkUrl?: string;
