@@ -151,12 +151,12 @@ export default function SellPickerClient() {
             onClick={() => router.push("/sell/template")}
           />
           <TypeCard
-            label="Assets"
-            desc="Digital assets — graphics, code snippets, plugins, and more."
+            label="3D Assets"
+            desc="A 3D model with a live, embedded preview — no screenshots needed."
             accent="#2dd4bf"
             icon={<AssetsIcon />}
             bannerSrc="https://cdn.phototourl.com/member/2026-07-23-44fc3828-068f-4bfc-82e3-10e2be1c0df7.jpg"
-            comingSoon
+            onClick={() => router.push("/sell/3d-assets")}
           />
         </div>
       </div>
