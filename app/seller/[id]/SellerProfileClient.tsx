@@ -10,6 +10,37 @@ import SellerDetailsOverlay from "@/components/seller/SellerDetailsOverlay";
 import RateOverlay from "@/components/seller/RateOverlay";
 import DonateOverlay from "@/components/seller/DonateOverlay";
 
+// Matches the original's .sp-loading skeleton state — CSS-driven shimmer
+// already exists for #spModal.sp-loading in globals.css. Exported so
+// app/seller/[id]/loading.tsx (Next's route-level loading UI) can render
+// the exact same skeleton during server-side navigation, instead of the
+// generic marketplace-grid-shaped SiteriftyLoader that doesn't match this
+// page's layout at all.
+export function SellerProfileSkeleton() {
+  return (
+    <div id="spModal" className="active sp-loading" style={{ position: "static", marginTop: 92 }}>
+      <div id="spModalInner">
+        <div id="spModalCover" />
+        <div id="spModalMain">
+          <div id="spModalAvatarRow">
+            <div id="spModalAv">?</div>
+          </div>
+          <div id="spModalNameInfo">
+            <div id="spModalNameSkelRow">
+              <span className="sp-skel sp-skel-name" />
+              <span className="sp-skel sp-skel-handle" />
+            </div>
+            <div id="spModalBioSkelRow">
+              <span className="sp-skel sp-skel-bio" />
+              <span className="sp-skel sp-skel-bio short" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Unchanged from the old page.tsx's body — this is still the full
 // client-side interactive profile (auth-aware isOwnProfile check,
 // privacy gates for human visitors, overlays). What moved is only the
@@ -111,30 +142,7 @@ export default function SellerProfileClient({
   }
 
   if (!seller) {
-    // Matches the original's .sp-loading skeleton state — CSS-driven
-    // shimmer already exists for #spModal.sp-loading in globals.css.
-    return (
-      <div id="spModal" className="active sp-loading" style={{ position: "static", marginTop: 92 }}>
-        <div id="spModalInner">
-          <div id="spModalCover" />
-          <div id="spModalMain">
-            <div id="spModalAvatarRow">
-              <div id="spModalAv">?</div>
-            </div>
-            <div id="spModalNameInfo">
-              <div id="spModalNameSkelRow">
-                <span className="sp-skel sp-skel-name" />
-                <span className="sp-skel sp-skel-handle" />
-              </div>
-              <div id="spModalBioSkelRow">
-                <span className="sp-skel sp-skel-bio" />
-                <span className="sp-skel sp-skel-bio short" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <SellerProfileSkeleton />;
   }
 
   // ── Privacy gate ── mirrors mpOpenSellerModal exactly: a private
