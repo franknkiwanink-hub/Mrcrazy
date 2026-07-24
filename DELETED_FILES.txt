@@ -1,3 +1,9 @@
-Delete this file from your project (not included in this zip — zips can't carry deletions):
+The following files were deleted as dead code (confirmed unused, no working
+imports referenced them anywhere in the project):
 
-app/opengraph-image.tsx
+- components/onboarding/TourModal.tsx
+- lib/og/supportOgImage.tsx
+- lib/reports.ts
+
+Delete these manually from your project — they aren't included here since
+this zip only contains added/edited files.
