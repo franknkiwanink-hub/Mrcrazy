@@ -114,6 +114,13 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
 
   const [parentTab, setParentTab] = useState<ParentTab>(initialTab || "profile");
   const [subTab, setSubTab] = useState<SubTab>("account");
+  // Immediate visual feedback for the Messages & Deals button — on a slow
+  // connection the /messages route (server-rendered shell + client data)
+  // could take a moment to appear, and previously nothing on this button
+  // indicated the tap had registered in the meantime. app/messages/loading.tsx
+  // now also renders a matching skeleton during that gap; this spinner
+  // covers the instant between tap and that skeleton mounting.
+  const [navigatingToInbox, setNavigatingToInbox] = useState(false);
 
   const [usernameInput, setUsernameInput] = useState("");
   const [contactEmailInput, setContactEmailInput] = useState("");
@@ -358,11 +365,25 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
           </div>
 
           {/* Messages & Deals */}
-          <button className="pm-inbox-btn" style={{ position: "relative", zIndex: 1 }} onClick={() => router.push("/messages")}>
+          <button
+            className="pm-inbox-btn"
+            style={{ position: "relative", zIndex: 1 }}
+            disabled={navigatingToInbox}
+            onClick={() => {
+              setNavigatingToInbox(true);
+              router.push("/messages");
+            }}
+          >
             <span className="pm-inbox-btn-left">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
+              {navigatingToInbox ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="pm-inbox-spinner">
+                  <path d="M21 12a9 9 0 1 1-9-9" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+              )}
               <span className="pm-inbox-label">Messages &amp; Deals</span>
             </span>
             <span className="pm-inbox-badge-wrap">
