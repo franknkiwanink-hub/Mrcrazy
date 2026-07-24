@@ -185,6 +185,16 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
     // WalletModal.tsx). CheckoutRoute's own Pay button shows the same
     // honest "new provider coming" state this used to show inline here;
     // re-wire both once a licensed payment provider is integrated.
+    //
+    // setCtaBusy flips the button to its "Processing…" disabled state
+    // immediately on tap — previously this button gave zero feedback
+    // while router.push resolved and the checkout route's data loaded
+    // (worst on a slow connection), so a tap could look like it did
+    // nothing for a second or more. CheckoutRoute itself also now has a
+    // matching route-level skeleton (loading.tsx) plus an inline
+    // skeleton for the brief gap while the deal room doc loads, so the
+    // handoff from this button press to real content is never silent.
+    setCtaBusy(true);
     router.push(`/messages/deal/${chatRoomId}/checkout`);
   }
 
