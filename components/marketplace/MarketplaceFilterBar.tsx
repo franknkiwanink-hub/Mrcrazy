@@ -24,6 +24,7 @@ const TYPE_OPTIONS: { value: ListingType | "all"; label: string }[] = [
   { value: "website", label: "Websites" },
   { value: "app", label: "Apps" },
   { value: "game", label: "Games" },
+  { value: "3d", label: "3D Assets" },
 ];
 
 function fmt(n: number) {
