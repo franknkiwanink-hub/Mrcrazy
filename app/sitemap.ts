@@ -39,6 +39,13 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
         { url: `${baseUrl}/marketplace`, changeFrequency: "hourly", priority: 0.9 },
         { url: `${baseUrl}/blog`, changeFrequency: "daily", priority: 0.6 },
         { url: `${baseUrl}/sellers`, changeFrequency: "daily", priority: 0.6 },
+        // Each listing type's form is its own indexable route now (see
+        // robots.ts, which allows these explicitly) — belongs in the
+        // sitemap alongside the other static pages.
+        { url: `${baseUrl}/sell/website`, changeFrequency: "monthly", priority: 0.5 },
+        { url: `${baseUrl}/sell/app`, changeFrequency: "monthly", priority: 0.5 },
+        { url: `${baseUrl}/sell/game`, changeFrequency: "monthly", priority: 0.5 },
+        { url: `${baseUrl}/sell/template`, changeFrequency: "monthly", priority: 0.5 },
         { url: `${baseUrl}/leaderboard`, changeFrequency: "daily", priority: 0.4 },
         { url: `${baseUrl}/gallery`, changeFrequency: "monthly", priority: 0.4 },
       ];
@@ -54,6 +61,13 @@ export default async function sitemap({ id }: { id: number }): Promise<MetadataR
       { url: `${baseUrl}/marketplace`, changeFrequency: "hourly", priority: 0.9 },
       { url: `${baseUrl}/blog`, changeFrequency: "daily", priority: 0.6 },
       { url: `${baseUrl}/sellers`, changeFrequency: "daily", priority: 0.6 },
+      // Each listing type's form is its own indexable route now (see
+      // robots.ts, which allows these explicitly) — belongs in the
+      // sitemap alongside the other static pages.
+      { url: `${baseUrl}/sell/website`, changeFrequency: "monthly", priority: 0.5 },
+      { url: `${baseUrl}/sell/app`, changeFrequency: "monthly", priority: 0.5 },
+      { url: `${baseUrl}/sell/game`, changeFrequency: "monthly", priority: 0.5 },
+      { url: `${baseUrl}/sell/template`, changeFrequency: "monthly", priority: 0.5 },
       { url: `${baseUrl}/leaderboard`, changeFrequency: "daily", priority: 0.4 },
       { url: `${baseUrl}/gallery`, changeFrequency: "monthly", priority: 0.4 },
     ];
