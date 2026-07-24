@@ -95,7 +95,11 @@ export default function TermsPage() {
           Account data (email, username, avatar), listing and deal content, wallet transaction
           history, and basic usage data needed to operate the marketplace (session/device info for
           security, push notification subscriptions if you opt in). We don&apos;t sell your data
-          to third parties.
+          to third parties. See our full{" "}
+          <a href="/privacy" style={{ color: "var(--mp-accent)", fontWeight: 700 }}>
+            Privacy Policy
+          </a>{" "}
+          for details on data retention, your rights, and how to request access or deletion.
         </p>
       </StaticSection>
 
