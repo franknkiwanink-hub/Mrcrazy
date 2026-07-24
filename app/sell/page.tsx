@@ -1,32 +1,24 @@
 "use client";
 
-// Replaces the old modal-based #listModal type-picker + #listingFormModal /
-// #listingFormModalGame / #listingFormModalApp with real routes: this page
-// is the type picker, and each form lives in its own component. Website,
-// Game, and App are all wired up (App's actual source lives in
-// Js/onboarding.js despite the filename — see port-status.md).
+// Type picker for /sell. Each type now lives at its own route
+// (/sell/website, /sell/app, /sell/game, /sell/template) instead of being a
+// client-side state swap on this one page — that was the root cause of the
+// broken in-app "Back" button: with everything living under a single /sell
+// URL, there was only ever one browser history entry, so "Back" had nowhere
+// real to go and fell through to a hard-coded /marketplace redirect instead
+// of returning here. Real routes also mean each listing type gets its own
+// indexable URL for SEO instead of hiding behind one client-rendered screen.
 //
-// The old picker also showed a weekly-listing-limit bar + plan upgrade
-// prompt (#lmLimitRow/lmPlansRow in auth-modal.js) before letting you into
-// a form. The original computed used/max from a live listener over the
-// user's own listings plus window.__limits (the public GET /api/limits
-// payload) — this is a lighter-weight equivalent: one POST to the same
+// The weekly-listing-limit bar + plan upgrade prompt (#lmLimitRow/lmPlansRow
+// in the original auth-modal.js) is unchanged — a heads-up read of the same
 // check-listing-cap action /api/limits already exposes (see
-// app/api/_lib/limits.js's handleCheckListingCap), shown as a simple bar +
-// "Upgrade Plan" nudge when at the cap. The server still enforces the cap
-// independently on submit either way (handleCreate's _checkWeeklyCap) —
-// this is purely a heads-up so you don't fill out a whole form and hit the
-// wall at the end.
+// app/api/_lib/limits.js's handleCheckListingCap). The server still enforces
+// the real cap independently on submit either way.
 
 import { useEffect, useState } from "react";
-import WebsiteListingForm from "@/components/listing/WebsiteListingForm";
-import GameListingForm from "@/components/listing/GameListingForm";
-import AppListingForm from "@/components/listing/AppListingForm";
-import TemplateListingForm from "@/components/listing/TemplateListingForm";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
-
-type ListingKind = "website" | "app" | "game" | "template" | "assets" | null;
 
 interface CapStatus {
   allowed: boolean;
@@ -109,22 +101,7 @@ function WeeklyLimitBar() {
 }
 
 export default function SellPage() {
-  const [kind, setKind] = useState<ListingKind>(null);
-
-  // Scroll to the top whenever we switch between the picker and a form (or
-  // back again) — otherwise the new view inherits whatever scroll position
-  // was left over from the previous one, which is why the form used to open
-  // scrolled to the bottom instead of the top.
-  useEffect(() => {
-    window.scrollTo({ top: 0 });
-  }, [kind]);
-
-  const backToPicker = () => setKind(null);
-
-  if (kind === "website") return <WebsiteListingForm onBack={backToPicker} />;
-  if (kind === "game") return <GameListingForm onBack={backToPicker} />;
-  if (kind === "app") return <AppListingForm onBack={backToPicker} />;
-  if (kind === "template") return <TemplateListingForm onBack={backToPicker} />;
+  const router = useRouter();
 
   return (
     <div style={{ minHeight: "100vh", background: "#000", color: "#fff", paddingTop: 92, paddingBottom: 80 }}>
@@ -147,7 +124,7 @@ export default function SellPage() {
             accent="#a3e635"
             icon={<GlobeIcon />}
             bannerSrc="https://cdn.phototourl.com/member/2026-07-23-94028826-7b73-44cb-aa8e-784df56bc085.jpg"
-            onClick={() => setKind("website")}
+            onClick={() => router.push("/sell/website")}
           />
           <TypeCard
             label="App"
@@ -155,7 +132,7 @@ export default function SellPage() {
             accent="#fbbf24"
             icon={<AppIcon />}
             bannerSrc="https://cdn.phototourl.com/member/2026-07-23-a4b0ee23-15a4-44b5-8ea7-b86414ea3e1f.jpg"
-            onClick={() => setKind("app")}
+            onClick={() => router.push("/sell/app")}
           />
           <TypeCard
             label="Game"
@@ -163,7 +140,7 @@ export default function SellPage() {
             accent="#f59e0b"
             icon={<GameIcon />}
             bannerSrc="https://cdn.phototourl.com/member/2026-07-23-43f253a3-d3dd-411a-970e-066ae0e3b477.jpg"
-            onClick={() => setKind("game")}
+            onClick={() => router.push("/sell/game")}
           />
           <TypeCard
             label="Template"
@@ -171,7 +148,7 @@ export default function SellPage() {
             accent="#c084fc"
             icon={<TemplateIcon />}
             bannerSrc="https://cdn.phototourl.com/member/2026-07-23-510375af-9619-486a-b1cd-da57626b1755.jpg"
-            onClick={() => setKind("template")}
+            onClick={() => router.push("/sell/template")}
           />
           <TypeCard
             label="Assets"
