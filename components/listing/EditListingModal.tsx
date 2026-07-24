@@ -37,6 +37,8 @@ import React, { useEffect, useState } from "react";
 import { fetchListingById, updateListing, type Listing } from "@/lib/listings";
 import { useAuth } from "@/lib/AuthContext";
 import { useLimits } from "@/lib/useLimits";
+import { resolveEmbedUrl } from "@/lib/embedUrl";
+import AssetIframe from "./AssetIframe";
 
 const IMGUR_CLIENT_ID = "891e5bb4aa94282";
 
@@ -69,7 +71,13 @@ const TRANSFER_OPTIONS = [
   { value: "other", label: "Other (confirm details in chat)" },
 ];
 
-const TYPE_LABEL: Record<string, string> = { website: "Website", app: "App", game: "Game" };
+const TYPE_LABEL: Record<string, string> = { website: "Website", app: "App", game: "Game", "3d": "3D Asset" };
+
+// Mirrors AssetListingForm.tsx's own option sets exactly — 3D Assets don't
+// share Category/Format/License with any other listing type.
+const ASSET_CATEGORY_OPTIONS = ["Character", "Environment", "Prop / Object", "Vehicle", "Architecture", "Weapon", "Animal / Creature", "Rigged / Animated", "VFX Asset", "Other"];
+const ASSET_FORMAT_OPTIONS = [".fbx", ".obj", ".gltf / .glb", ".blend", ".max", ".c4d", ".usd / .usdz", ".stl", "Multiple formats", "Other"];
+const ASSET_LICENSE_OPTIONS = ["Personal use only", "Commercial use", "Royalty-free", "Extended / Resale rights", "Exclusive (one buyer only)", "Other"];
 
 interface ImageSlotState {
   url?: string;
@@ -129,6 +137,14 @@ export default function EditListingModal({
   const [transferMethods, setTransferMethods] = useState<string[]>([]);
   const [images, setImages] = useState<ImageSlotState[]>([]);
 
+  // 3D Asset listings only — separate from the website/app/game state above
+  // since this type has its own fields (no images, no URL, no transfer
+  // methods; embed preview + format/license instead).
+  const [assetEmbedMode, setAssetEmbedMode] = useState<"link" | "code">("link");
+  const [assetEmbedValue, setAssetEmbedValue] = useState("");
+  const [assetFormat, setAssetFormat] = useState("");
+  const [assetLicense, setAssetLicense] = useState("");
+
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [errMsg, setErrMsg] = useState("");
@@ -164,6 +180,11 @@ export default function EditListingModal({
       setRevenue(l.financials?.revenue != null ? String(l.financials.revenue) : "");
       setExpenses(l.financials?.expenses != null ? String(l.financials.expenses) : "");
       setTransferMethods(l.transferMethods || []);
+      // 3D Asset listings only.
+      setAssetEmbedMode("link");
+      setAssetEmbedValue(l.embedUrl || "");
+      setAssetFormat(l.settings?.format || "");
+      setAssetLicense(l.settings?.license || "");
       const existing = l.images || [];
       const slotCount = l.type === "app" ? Math.max(existing.length, 3) : 3;
       const slots: ImageSlotState[] = existing.slice(0, Math.max(slotCount, existing.length)).map((u) => ({ url: u }));
@@ -179,7 +200,9 @@ export default function EditListingModal({
   const isGame = type === "game";
   const isApp = type === "app";
   const isWebsite = type === "website";
+  const is3d = type === "3d";
   const profit = (parseFloat(revenue) || 0) - (parseFloat(expenses) || 0);
+  const resolvedAssetEmbed = assetEmbedValue.trim() ? resolveEmbedUrl(assetEmbedMode, assetEmbedValue) : null;
 
   function onPickImage(idx: number, file: File) {
     const reader = new FileReader();
@@ -266,6 +289,79 @@ export default function EditListingModal({
         title: t,
         description: d,
         images: finalImages,
+        category: category.trim() || listing.category,
+      });
+      setTimeout(() => onClose(), 900);
+    } catch (err: any) {
+      setErrMsg(err?.message || "Something went wrong. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // 3D Asset listings only — mirrors handleSave above but for this type's
+  // much smaller field set: no URL, no images, no transfer methods; embed
+  // preview + format/license instead. Kept as a fully separate function
+  // rather than branching handleSave itself, since the two save paths
+  // share almost nothing (different validation, different updateListing
+  // payload shape).
+  async function handleSave3d() {
+    if (!listingId || !listing) return;
+    setErrMsg("");
+    setSuccessMsg(false);
+
+    const t = title.trim();
+    const d = desc.trim();
+    if (t.length < TITLE_MIN || t.length > TITLE_MAX) {
+      setErrMsg(`Title must be between ${TITLE_MIN} and ${TITLE_MAX} characters (currently ${t.length}).`);
+      return;
+    }
+    if (d.length < DESC_MIN || d.length > DESC_MAX) {
+      setErrMsg(`Description must be between ${DESC_MIN} and ${DESC_MAX} characters (currently ${d.length}).`);
+      return;
+    }
+    if (!assetEmbedValue.trim() || !resolvedAssetEmbed) {
+      setErrMsg(
+        assetEmbedMode === "link"
+          ? "Please provide a valid preview link (starting with https://)."
+          : "Please paste a valid <iframe> embed snippet — we couldn't find a usable link in it."
+      );
+      return;
+    }
+    if (!user) {
+      setErrMsg("You must be logged in to edit this listing.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const idToken = await user.getIdToken();
+      const priceVal = parseFloat(price);
+
+      await updateListing({
+        idToken,
+        listingId,
+        title: t,
+        description: d,
+        category: category.trim() || undefined,
+        settings: {
+          category: category.trim() || listing.settings?.category || "",
+          format: assetFormat,
+          license: assetLicense,
+        },
+        embedCode: assetEmbedValue.trim(),
+        financials: {
+          price: Number.isFinite(priceVal) ? priceVal : null,
+          revenue: null,
+          expenses: null,
+        },
+      });
+
+      setSuccessMsg(true);
+      onSaved?.({
+        ...listing,
+        title: t,
+        description: d,
         category: category.trim() || listing.category,
       });
       setTimeout(() => onClose(), 900);
@@ -363,6 +459,99 @@ export default function EditListingModal({
                 <CharCount value={desc} min={DESC_MIN} max={DESC_MAX} />
               </div>
 
+              {is3d ? (
+                <>
+                  <div className="el-section">
+                    <div className="el-section-title">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                        <path d="M12 2l8 4.5v11L12 22l-8-4.5v-11L12 2z" />
+                        <path d="M12 22V12M20 6.5L12 12 4 6.5" />
+                      </svg>
+                      Live Preview
+                    </div>
+                    <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
+                      <button
+                        type="button"
+                        className="el-cancel-btn"
+                        style={assetEmbedMode === "link" ? { borderColor: "rgba(45,212,191,0.4)", color: "#2dd4bf" } : undefined}
+                        onClick={() => setAssetEmbedMode("link")}
+                      >
+                        I have a link
+                      </button>
+                      <button
+                        type="button"
+                        className="el-cancel-btn"
+                        style={assetEmbedMode === "code" ? { borderColor: "rgba(45,212,191,0.4)", color: "#2dd4bf" } : undefined}
+                        onClick={() => setAssetEmbedMode("code")}
+                      >
+                        I have embed code
+                      </button>
+                    </div>
+                    {assetEmbedMode === "link" ? (
+                      <input
+                        type="url"
+                        value={assetEmbedValue}
+                        onChange={(e) => setAssetEmbedValue(e.target.value)}
+                        placeholder="https://sketchfab.com/models/xxxxx/embed"
+                      />
+                    ) : (
+                      <textarea
+                        value={assetEmbedValue}
+                        onChange={(e) => setAssetEmbedValue(e.target.value)}
+                        placeholder='<iframe src="https://sketchfab.com/models/xxxxx/embed" ...></iframe>'
+                        rows={3}
+                        style={{ fontFamily: "monospace", fontSize: 12.5 }}
+                      />
+                    )}
+                    {resolvedAssetEmbed && (
+                      <div style={{ marginTop: 10, aspectRatio: "16/9", background: "#08080d", borderRadius: 10, overflow: "hidden", border: "1px solid rgba(45,212,191,0.25)" }}>
+                        <AssetIframe src={resolvedAssetEmbed} title={title || "3D asset preview"} interactive />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="el-field">
+                    <label>Category</label>
+                    <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} list="el-asset-category-options" />
+                    <datalist id="el-asset-category-options">
+                      {ASSET_CATEGORY_OPTIONS.map((o) => <option key={o} value={o} />)}
+                    </datalist>
+                  </div>
+
+                  <div className="el-grid-2">
+                    <div className="el-field">
+                      <label>File Format</label>
+                      <input type="text" value={assetFormat} onChange={(e) => setAssetFormat(e.target.value)} list="el-asset-format-options" />
+                      <datalist id="el-asset-format-options">
+                        {ASSET_FORMAT_OPTIONS.map((o) => <option key={o} value={o} />)}
+                      </datalist>
+                    </div>
+                    <div className="el-field">
+                      <label>License</label>
+                      <input type="text" value={assetLicense} onChange={(e) => setAssetLicense(e.target.value)} list="el-asset-license-options" />
+                      <datalist id="el-asset-license-options">
+                        {ASSET_LICENSE_OPTIONS.map((o) => <option key={o} value={o} />)}
+                      </datalist>
+                    </div>
+                  </div>
+
+                  <div className="el-field">
+                    <label>Price (USD)</label>
+                    <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} />
+                  </div>
+
+                  {errMsg && <div className="el-error" style={{ display: "block" }}>{errMsg}</div>}
+                  {successMsg && (
+                    <div className="el-success" style={{ display: "flex" }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                      Changes saved.
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
               {!isApp && (
                 <div className="el-field">
                   <label>{isGame ? "Game URL (external link)" : "URL"}</label>
@@ -485,6 +674,8 @@ export default function EditListingModal({
                   Changes saved.
                 </div>
               )}
+                </>
+              )}
             </>
           )}
         </div>
@@ -527,7 +718,7 @@ export default function EditListingModal({
                   <button type="button" className="el-cancel-btn" onClick={onClose} disabled={saving} style={{ marginLeft: "auto" }}>
                     Cancel
                   </button>
-                  <button type="button" className="el-save-btn" onClick={handleSave} disabled={saving || successMsg}>
+                  <button type="button" className="el-save-btn" onClick={is3d ? handleSave3d : handleSave} disabled={saving || successMsg}>
                     {saving ? "Saving…" : "Save Changes"}
                   </button>
                 </>
