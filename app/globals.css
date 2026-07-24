@@ -3493,6 +3493,7 @@
   --sr-site: #38bdf8;
   --sr-app: #b48bfa;
   --sr-game: #ffb14e;
+  --sr-3d: #2dd4bf;
 }
 /* When a theme image/color is active, cards become semi-transparent tinted
    glass panels (same 70%-dark treatment as the rest of the site) instead of
@@ -3502,10 +3503,12 @@
 body.theme-active .sr-site { background: rgba(15,23,30,0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
 body.theme-active .sr-app  { background: rgba(24,15,32,0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
 body.theme-active .sr-game { background: rgba(32,21,10,0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+body.theme-active .sr-3d   { background: rgba(10,30,28,0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
 body.theme-active .sr-site-media,
 body.theme-active .sr-site-media-main,
 body.theme-active .sr-site-media-thumb,
-body.theme-active .sr-game-media { background: rgba(8,8,13,0.55); }
+body.theme-active .sr-game-media,
+body.theme-active .sr-3d-media { background: rgba(8,8,13,0.55); }
 body.theme-active .sr-app-stats,
 body.theme-active .sr-app-icon,
 body.theme-active .sr-av,
@@ -3825,6 +3828,67 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
   .sr-game-foot { flex-wrap: wrap; }
   .sr-seller { width: 100%; }
   .sr-game-actions { width: 100%; justify-content: flex-end; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   3D ASSETS — same shape as GAME (full-bleed banner, solid block CTA),
+   but the "banner" is the seller's own iframe embed instead of a
+   screenshot: 3D assets have no upload-an-image step at all (see
+   AssetListingForm / AssetCard), just a preview URL that gets embedded
+   live. Teal accent (--sr-3d) matches the card already reserved for this
+   slot on /sell.
+   ══════════════════════════════════════════════════════════════ */
+.sr-3d {
+  background: linear-gradient(160deg, rgba(45,212,191,.06), var(--sr-surface) 45%);
+  border: 1px solid var(--sr-line);
+  border-radius: 14px;
+  overflow: hidden;
+  cursor: pointer;
+  position: relative;
+  transition: transform .16s ease, border-color .16s ease;
+}
+.sr-3d:hover { transform: translateY(-2px); border-color: rgba(45,212,191,.4); }
+.sr-3d.sr-boosted { border-color: #e5b84b; box-shadow: 0 0 0 1px rgba(229,184,75,.35), 0 0 18px rgba(229,184,75,.12); }
+.sr-3d-media { position: relative; aspect-ratio: 21/9; background: #08080d; overflow: hidden; }
+/* The iframe itself is non-interactive in the grid card — a full 3D
+   viewer wants drag-to-orbit, which would hijack scroll/click on a card
+   that's meant to just preview-and-open. pointer-events: none keeps the
+   embed purely visual here; the real interactive viewer lives on the
+   listing detail page. */
+.sr-3d-media iframe { width: 100%; height: 100%; border: 0; display: block; pointer-events: none; }
+.sr-3d-badge {
+  position: absolute; top: 10px; left: 10px; width: 28px; height: 28px; border-radius: 9px;
+  background: rgba(8,8,13,.78); border: 1px solid rgba(45,212,191,.4);
+  display: flex; align-items: center; justify-content: center;
+}
+.sr-3d-badge svg { width: 15px; height: 15px; color: var(--sr-3d); }
+.sr-3d-play {
+  position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(8,8,13,.7); border: 1px solid rgba(255,255,255,.3);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.sr-3d-play svg { fill: #fff; margin-left: 1px; }
+.sr-3d-category {
+  position: absolute; left: 10px; bottom: 10px;
+  background: rgba(8,8,13,.75); border: 1px solid rgba(45,212,191,.35); color: var(--sr-3d);
+  font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+  padding: 3px 9px; border-radius: 100px;
+}
+.sr-3d-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 0; }
+.sr-3d-title-group { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+.sr-3d-title { margin: 0; font-size: 14px; font-weight: 700; color: var(--sr-text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.sr-3d-price { font-size: 14px; font-weight: 800; color: var(--sr-3d); flex-shrink: 0; }
+.sr-3d-stats { display: flex; gap: 14px; padding: 8px 12px; margin: 8px 0 0; border-top: 1px solid var(--sr-line-soft); border-bottom: 1px solid var(--sr-line-soft); }
+.sr-3d-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: nowrap; padding: 10px 12px 12px; }
+.sr-3d-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.sr-btn-3d { background: var(--sr-3d); border-color: var(--sr-3d); color: #002420; }
+.sr-btn-3d:hover { background: #5eead4; }
+
+@media (max-width: 30em) {
+  .sr-3d-foot { flex-wrap: wrap; }
+  .sr-seller { width: 100%; }
+  .sr-3d-actions { width: 100%; justify-content: flex-end; }
 }
 
 /* ── Feed section layout: all three types stack full-width, one per row ── */
