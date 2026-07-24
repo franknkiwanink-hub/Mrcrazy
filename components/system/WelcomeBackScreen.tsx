@@ -29,6 +29,39 @@ import { useCurrency } from "@/lib/CurrencyContext";
 // call needed like the original required.
 const BOOT_HOLD_MS = 1500;
 
+// How long the takeover stays suppressed after it's been shown once,
+// before it's allowed to show again. Previously this screen re-opened on
+// every single page load/refresh for a returning user (the only guard
+// was an in-memory uidRef, which resets to null on every mount) — every
+// hard refresh re-triggered it, which got old fast for anyone refreshing
+// a few times in a row. Persisting a last-shown timestamp in localStorage
+// (keyed per-uid, so switching accounts on the same device doesn't
+// inherit someone else's cooldown) makes "already saw this recently"
+// survive refreshes, tab closes, and reopens, same as the currency/theme
+// preference pattern elsewhere in the app.
+const REOPEN_COOLDOWN_MS = 30 * 60 * 1000;
+const LAST_SHOWN_KEY_PREFIX = "srf_welcomeback_last_shown:";
+
+function getLastShownAt(uid: string): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(LAST_SHOWN_KEY_PREFIX + uid);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function setLastShownAt(uid: string, ms: number) {
+  try {
+    localStorage.setItem(LAST_SHOWN_KEY_PREFIX + uid, String(ms));
+  } catch {
+    // Silent — worst case it shows again next load, same as before this fix
+  }
+}
+
 const OBJ_ICONS: Record<string, string> = {
   list_3: '<path d="M12 5v14M5 12h14" stroke-linecap="round"/>',
   list_1: '<path d="M12 5v14M5 12h14" stroke-linecap="round"/>',
@@ -79,7 +112,10 @@ export default function WelcomeBackScreen() {
 
   // Decide whether to open, once per sign-in, after the same boot-splash
   // hold the original waited on __dismissBootOverlay before firing
-  // __openWelcomeBack.
+  // __openWelcomeBack. Additionally gated by REOPEN_COOLDOWN_MS so a
+  // refresh (or ten in a row) within the cooldown window doesn't
+  // re-trigger it — only reopens once enough real time has passed since
+  // it was last actually shown.
   useEffect(() => {
     if (loading) return;
     if (!user) {
@@ -96,8 +132,14 @@ export default function WelcomeBackScreen() {
     todayStart.setUTCHours(0, 0, 0, 0);
     const isReturning = createdMs !== null && createdMs < todayStart.getTime();
 
+    const lastShown = getLastShownAt(user.uid);
+    const cooldownElapsed = lastShown === null || Date.now() - lastShown >= REOPEN_COOLDOWN_MS;
+
     const t = setTimeout(() => {
-      if (isReturning) setActive(true);
+      if (isReturning && cooldownElapsed) {
+        setActive(true);
+        setLastShownAt(user.uid, Date.now());
+      }
     }, BOOT_HOLD_MS);
     return () => clearTimeout(t);
   }, [user, loading]);
