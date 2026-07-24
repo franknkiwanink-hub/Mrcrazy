@@ -283,7 +283,7 @@ function fail(res, err) {
 }
 
 // ── Allowed listing types ────────────────────────────────────────────────────
-const LISTING_TYPES = ['website', 'app', 'game'];
+const LISTING_TYPES = ['website', 'app', 'game', '3d'];
 
 // ── Report abuse limits ──────────────────────────────────────────────────────
 const REPORT_LIMITS = {
@@ -372,6 +372,53 @@ function validateUrlIfWebsite(type, isTemplate, url) {
   }
 }
 
+// 3D Asset listings have no uploaded screenshots — the "preview" IS a live
+// embedded iframe (Sketchfab or any other platform's embed), so a valid
+// embed URL is required in its place. Mirrors lib/embedUrl.ts's
+// extractIframeSrc/isValidEmbedUrl exactly — duplicated rather than shared
+// because this file is plain CommonJS with no import from the Next.js
+// app's lib/ tree (see every other helper below, which is likewise
+// self-contained). Re-validated here regardless of what the client already
+// checked, same principle as every other field in this handler: the
+// client-side check is a UX nicety, this one is the actual gate.
+function extractEmbedSrc(snippet) {
+  const match = String(snippet).match(/\bsrc\s*=\s*["']([^"']+)["']/i);
+  return match ? match[1].trim() : null;
+}
+function isValidEmbedUrl(value) {
+  const v = String(value).trim();
+  if (!v) return false;
+  try {
+    const u = new URL(v);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+// `raw` may be a bare URL or a full <iframe> snippet — try direct URL
+// validation first, then fall back to extracting src= from it, so this one
+// function covers both input modes the form offers without the client
+// having to tell the server which mode was used.
+function resolveEmbedUrl(raw) {
+  if (!raw) return null;
+  const direct = String(raw).trim();
+  if (isValidEmbedUrl(direct)) return direct;
+  const extracted = extractEmbedSrc(direct);
+  if (extracted && isValidEmbedUrl(extracted)) return extracted;
+  return null;
+}
+function validateEmbedIf3d(type, embedCode) {
+  if (type !== '3d') return null;
+  const resolved = resolveEmbedUrl(embedCode);
+  if (!resolved) {
+    throw new ApiError(
+      'Please provide a valid embed link or iframe code for your 3D asset preview.',
+      'INVALID_EMBED_URL', 400
+    );
+  }
+  return resolved;
+}
+
 // Builds the nested sub-objects (financials/tech/settings/platforms) shared
 // between create and update, from whatever subset of fields was sent.
 function buildFinancials(financials) {
@@ -408,6 +455,11 @@ function buildSettings(settings, fallbackCategory) {
     location:  settings.location  ? String(settings.location).slice(0, 120) : '',
     structure: settings.structure ? String(settings.structure).slice(0, 40) : '',
     reason:    settings.reason    ? String(settings.reason).slice(0, 500)   : '',
+    // 3D Asset listings only — see AssetListingForm.tsx's own FORMAT_OPTIONS/
+    // LICENSE_OPTIONS. Harmless no-op field for every other listing type,
+    // same as age/location/structure already are for types that don't use them.
+    format:    settings.format    ? String(settings.format).slice(0, 40)    : '',
+    license:   settings.license   ? String(settings.license).slice(0, 60)   : '',
   };
 }
 
@@ -580,6 +632,7 @@ async function handleCreate(body, idToken) {
     settings, transferMethods, gameType, videoUrl, previewUrl,
     platforms, apkUrl, apkStorageUrl, apkIpaFileName,
     additionalFiles, notLive, notLiveBuildFiles, globalBuildUrl,
+    embedCode,
   } = body;
 
   if (!LISTING_TYPES.includes(type)) {
@@ -588,6 +641,7 @@ async function handleCreate(body, idToken) {
 
   const { cleanTitle, cleanDesc } = validateTitleDesc(title, description);
   validateUrlIfWebsite(type, isTemplate, url);
+  const resolvedEmbedUrl = validateEmbedIf3d(type, embedCode);
 
   const fbUser = await verifyFirebaseToken(idToken);
   const uid = fbUser.localId;
@@ -632,6 +686,7 @@ async function handleCreate(body, idToken) {
     if (gameType)       listingDoc.gameType         = String(gameType).slice(0, 20);
     if (videoUrl)       listingDoc.videoUrl         = String(videoUrl).slice(0, 500);
     if (previewUrl)     listingDoc.previewUrl       = String(previewUrl).slice(0, 500);
+    if (resolvedEmbedUrl) listingDoc.embedUrl        = resolvedEmbedUrl;
     if (apkUrl)         listingDoc.apkUrl           = String(apkUrl);
     if (apkStorageUrl)  listingDoc.apkStorageUrl    = String(apkStorageUrl);
     if (apkIpaFileName) listingDoc.apkIpaFileName   = String(apkIpaFileName);
@@ -740,6 +795,7 @@ async function handleUpdate(body, idToken) {
     gameFile, videoUrl, previewUrl, platforms, transferMethods,
     apkUrl, apkStorageUrl, apkIpaFileName,
     additionalFiles, notLive, notLiveBuildFiles, globalBuildUrl,
+    embedCode,
   } = body;
 
   if (!listingId) throw new ApiError('Missing listingId', 'MISSING_LISTING_ID', 400);
@@ -761,6 +817,14 @@ async function handleUpdate(body, idToken) {
 
   const { cleanTitle, cleanDesc } = validateTitleDesc(title, description);
   validateUrlIfWebsite(existing.type, existing.isTemplate, url);
+  // Only re-validate/overwrite embedUrl when the caller actually sent
+  // embedCode — omitting it on an edit (e.g. editing just the price) must
+  // leave the existing embed untouched, not wipe it or force re-validation
+  // of a field the seller isn't touching.
+  let resolvedEmbedUrlUpdate = null;
+  if (embedCode !== undefined) {
+    resolvedEmbedUrlUpdate = validateEmbedIf3d(existing.type, embedCode);
+  }
 
   const update = {
     title:       cleanTitle,
@@ -772,6 +836,7 @@ async function handleUpdate(body, idToken) {
   if (category)                  update.category   = String(category).slice(0, 60);
   if (videoUrl !== undefined)    update.videoUrl   = videoUrl ? String(videoUrl).slice(0, 500) : null;
   if (previewUrl !== undefined)  update.previewUrl = previewUrl ? String(previewUrl).slice(0, 500) : null;
+  if (resolvedEmbedUrlUpdate)    update.embedUrl    = resolvedEmbedUrlUpdate;
   if (gameFile)                  update.gameFile   = String(gameFile);
   if (appIcon !== undefined)     update.appIcon    = appIcon ? String(appIcon) : null;
   if (apkUrl !== undefined)          update.apkUrl          = apkUrl ? String(apkUrl) : null;
@@ -1311,8 +1376,8 @@ function _seededSortKey(seed, id) {
   return (h >>> 0) / 4294967296;
 }
 
-const FEED_TYPES = ['website', 'app', 'game'];
-const FEED_DEFAULT_PAGE_SIZE = 21; // 7 of each type per page, 1-1-1 interleaved
+const FEED_TYPES = ['website', 'app', 'game', '3d'];
+const FEED_DEFAULT_PAGE_SIZE = 24; // 6 of each of the 4 types per page, 1-1-1-1 interleaved (24/4=6, still 24/3=8 if 3d has no active listings yet — see activeTypes below)
 const FEED_MAX_PAGE_SIZE = 60;
 // Sized for the catalog's realistic scale (~500 active listings total across
 // all three types, per owner). 200/type comfortably covers an even split
@@ -1481,10 +1546,11 @@ async function handleFeed(body, idToken) {
     exhaustedByType[t] = (start + slice.length) >= items.length;
   }));
 
-  // Interleave 1-1-1 (website, app, game, website, app, game, ...) so no long
-  // run of a single type ever appears on screen, even though each bucket's
-  // internal order is independently shuffled. When filtered to a single
-  // type, this just yields that bucket's shuffled order directly.
+  // Interleave one-of-each-type in a round-robin (website, app, game, 3d,
+  // website, app, game, 3d, ...) so no long run of a single type ever
+  // appears on screen, even though each bucket's internal order is
+  // independently shuffled. When filtered to a single type, this just
+  // yields that bucket's shuffled order directly.
   const page = [];
   const maxLen = Math.max(...activeTypes.map(t => buckets[t].length));
   for (let i = 0; i < maxLen && page.length < size; i++) {
