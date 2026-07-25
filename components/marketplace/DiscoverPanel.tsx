@@ -20,16 +20,6 @@ import ListingCard from "@/components/marketplace/ListingCard";
 import SellerBadges from "@/components/seller/SellerBadges";
 import Stars from "@/components/marketplace/Stars";
 
-function liteToListing(lite: DiscoverListing): Listing {
-  return {
-    id: lite.id,
-    title: lite.title,
-    type: (lite.type as Listing["type"]) || "website",
-    financials: { price: lite.price ?? undefined },
-    status: "active",
-  };
-}
-
 function BlogCard({ post }: { post: DiscoverBlog }) {
   const router = useRouter();
   return (
@@ -216,10 +206,10 @@ export default function DiscoverPanel({
               <section className="disc-section">
                 <h2 className="disc-section-title">Listings you might like</h2>
                 <div className="disc-listing-grid">
-                  {listings.map((lite) => (
+                  {listings.map((listing) => (
                     <ListingCard
-                      key={lite.id}
-                      listing={liteToListing(lite)}
+                      key={listing.id}
+                      listing={listing}
                       onOpen={onOpen}
                       onOpenSeller={onOpenSeller}
                     />
