@@ -302,7 +302,15 @@ export default function DonateOverlay({
 
         {msg && <div id="spDonateMsg" className={`wallet-msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</div>}
 
-        <button id="spDonateSubmitBtn" disabled={submitting} onClick={handleSubmit}>
+        {/* Donate CTA — disabled pending PayPal split payments. Donating
+            used to debit the donor's wallet balance directly; wallet
+            balance is licensed-safe only for boosting listings, so this
+            button is gated (server also 410s the `donate` action) rather
+            than removed. Nothing else on this overlay changes. */}
+        <div id="spDonateComingSoon" className="wallet-msg" style={{ marginBottom: 10 }}>
+          Donations are moving to PayPal — check back soon.
+        </div>
+        <button id="spDonateSubmitBtn" disabled title="Coming soon — donations are moving to PayPal">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
             <path
               d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"
@@ -310,7 +318,7 @@ export default function DonateOverlay({
               stroke="none"
             />
           </svg>
-          <span>{submitting ? "Donating…" : "Donate"}</span>
+          <span>Coming soon</span>
         </button>
 
         <div id="spDonateRecentHdr">Recent donations</div>
