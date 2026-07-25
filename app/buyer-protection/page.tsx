@@ -39,9 +39,11 @@ export default function BuyerProtectionPage() {
     >
       <StaticSection heading="Your payment is never released blind">
         <p>
-          Funds stay in escrow until you confirm you received what was promised, or the 72-hour
-          verification window passes. If a seller marks a deal delivered and you don&apos;t agree,
-          you don&apos;t have to confirm — raise a dispute instead and the payment stays frozen.
+          Funds stay held by PayPal — authorized at checkout but not released — until you confirm
+          you received what was promised, or the 72-hour verification window passes. If a seller
+          marks a deal delivered and you don&apos;t agree, you don&apos;t have to confirm — raise a
+          dispute instead and the payment stays frozen. You check out normally; you never need to
+          link or share anything with the seller&apos;s own PayPal account.
         </p>
       </StaticSection>
 
