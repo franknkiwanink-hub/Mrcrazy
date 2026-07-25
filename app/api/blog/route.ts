@@ -8,14 +8,9 @@
 //
 // SECURITY: this is the actual access-control boundary for "who can
 // publish to the blog" — not the "+" button's visibility in the UI.
-// The client only ever *shows or hides* the add-post button (see
-// components/blog/AddBlogButton.tsx); a hidden button is not a security
-// control, since any client-side check can be bypassed by whoever's
-// driving the browser. Every write request's Firebase ID token is
-// independently re-verified here against ADMIN_EMAIL, exactly mirroring
-// actionAmIAdmin in app/api/account/_handler.js — same trust model,
-// same env var, so there's exactly one definition of "who is admin"
-// across the app.
+// Any signed-in user may publish (no admin restriction). Every write
+// request's Firebase ID token is independently verified here — this is
+// a login check, not an admin check.
 import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getAdminDb } from "@/lib/server/adminDb";
@@ -33,15 +28,13 @@ function ensureFirebaseApp() {
   }
 }
 
-async function verifyAdmin(authHeader: string | null): Promise<string | null> {
-  const adminEmail = process.env.ADMIN_EMAIL;
-  if (!adminEmail || !authHeader?.startsWith("Bearer ")) return null;
+async function verifyUser(authHeader: string | null): Promise<string | null> {
+  if (!authHeader?.startsWith("Bearer ")) return null;
   const idToken = authHeader.slice(7);
   try {
     ensureFirebaseApp();
     const decoded = await getAuth().verifyIdToken(idToken);
-    const email = (decoded.email || "").trim().toLowerCase();
-    if (email && email === adminEmail.trim().toLowerCase() && decoded.email_verified !== false) {
+    if (decoded.uid && decoded.email_verified !== false) {
       return decoded.uid;
     }
     return null;
@@ -51,9 +44,9 @@ async function verifyAdmin(authHeader: string | null): Promise<string | null> {
 }
 
 export async function POST(request: Request) {
-  const uid = await verifyAdmin(request.headers.get("authorization"));
+  const uid = await verifyUser(request.headers.get("authorization"));
   if (!uid) {
-    return Response.json({ error: "Admin sign-in required" }, { status: 403 });
+    return Response.json({ error: "Sign-in required" }, { status: 403 });
   }
 
   const body = await request.json().catch(() => ({}));
