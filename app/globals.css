@@ -3207,7 +3207,6 @@
                  .disc-listing-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
                  .disc-seller-grid { grid-template-columns: repeat(2, 1fr); }
                }
-
                /* Filter chips row — horizontal scroll, no wrap */
                #mpChipsRow {
                display: flex; align-items: center; gap: 8px;
@@ -6813,7 +6812,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
   .pm-modal {
     width: 100%;
     height: 100%;
-    background: #0a0a0b;
+    background: #050506;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -6997,6 +6996,13 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
   .pm-inbox-btn:hover {
     border-color: var(--mp-border-hover);
     background: #141419;
+  }
+  .pm-inbox-btn:disabled {
+    cursor: default;
+    opacity: 0.85;
+  }
+  .pm-inbox-spinner {
+    animation: dcpSpin 0.7s linear infinite;
   }
   .pm-inbox-btn-left {
     display: flex;
@@ -11770,7 +11776,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
 /* ── extracted style block 25 (originally around char offset 2204185) ── */
 .fnav {
       position: fixed; left: 0; right: 0; bottom: 0;
-      z-index: 25;
+      z-index: 60;
       display: none;
       align-items: center; justify-content: center;
       gap: 10px;
