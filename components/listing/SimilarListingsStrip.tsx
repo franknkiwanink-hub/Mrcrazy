@@ -68,6 +68,7 @@ export default function SimilarListingsStrip({ listingId }: { listingId: string 
       <div
         style={{
           display: "flex",
+          alignItems: "stretch",
           gap: 16,
           overflowX: "auto",
           paddingBottom: 4,
@@ -90,7 +91,7 @@ export default function SimilarListingsStrip({ listingId }: { listingId: string 
             />
           ))}
         {listings?.map((listing) => (
-          <div key={listing.id} style={{ flex: "0 0 260px", scrollSnapAlign: "start" }}>
+          <div key={listing.id} style={{ flex: "0 0 260px", scrollSnapAlign: "start", display: "flex" }}>
             <ListingCard listing={listing} onOpen={onOpen} onOpenSeller={onOpenSeller} />
           </div>
         ))}
