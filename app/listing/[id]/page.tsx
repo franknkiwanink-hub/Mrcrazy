@@ -10,6 +10,7 @@ import SimilarListingsStrip from "@/components/listing/SimilarListingsStrip";
 import AppListingBody from "@/components/listing/AppListingBody";
 import WebsiteListingBody from "@/components/listing/WebsiteListingBody";
 import GameListingBody from "@/components/listing/GameListingBody";
+import AssetListingBody from "@/components/listing/AssetListingBody";
 
 // Only ACTIVE listings get real per-listing metadata / are servable at
 // all here — mirrors the `status === 'active'` gate used everywhere else
@@ -145,13 +146,19 @@ export default async function ListingDetailPage({
         </div>
       )}
 
-      {(type === "app" || type === "website" || type === "game") && (
+      {type === "3d" && (
+        <div style={{ marginTop: 92, maxWidth: 760, margin: "92px auto 0", padding: "0 0 80px" }}>
+          <AssetListingBody listing={listing} />
+        </div>
+      )}
+
+      {(type === "app" || type === "website" || type === "game" || type === "3d") && (
         <SimilarListingsStrip listingId={listing.id} />
       )}
 
-      {/* Every known listing type (website/app/game) now has a real body —
+      {/* Every known listing type (website/app/game/3d) now has a real body —
           this only catches an unexpected/corrupt `type` value on the doc. */}
-      {type !== "app" && type !== "website" && type !== "game" && (
+      {type !== "app" && type !== "website" && type !== "game" && type !== "3d" && (
         <div style={{ marginTop: 92, padding: "40px 24px 80px", textAlign: "center", color: "#fff" }}>
           <h1>{listing.title || "Listing"}</h1>
           <p style={{ opacity: 0.7 }}>
