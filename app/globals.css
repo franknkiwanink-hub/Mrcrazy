@@ -1406,14 +1406,24 @@
          max-width: 460px;
          width: 100%;
          max-height: 92vh;
-         overflow-y: auto;
+         overflow: hidden;
          box-shadow: 0 32px 80px rgba(0,0,0,0.9);
-         padding: 28px 24px 24px;
          margin: auto;
          box-sizing: border-box;
+         display: flex;
+         flex-direction: column;
          }
-         .theme-card::-webkit-scrollbar { width: 6px; }
-         .theme-card::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+         .theme-card-sticky-header {
+         display: flex; align-items: center; justify-content: space-between;
+         flex-shrink: 0;
+         padding: 28px 24px 6px;
+         }
+         .theme-card-scroll {
+         overflow-y: auto;
+         padding: 0 24px 24px;
+         }
+         .theme-card-scroll::-webkit-scrollbar { width: 6px; }
+         .theme-card-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
          .theme-heading {
          font-size: clamp(20px, 4vw, 26px);
          font-weight: 800; letter-spacing: -0.03em; color: #fff;
@@ -1534,7 +1544,8 @@
          @media (max-width: 380px) {
          .theme-grid { gap: 7px; }
          .theme-opt-label { font-size: 8px; }
-         .theme-card { padding: 22px 16px 18px; }
+         .theme-card-sticky-header { padding: 22px 16px 6px; }
+         .theme-card-scroll { padding: 0 16px 18px; }
          .theme-divider { margin: 0 -16px 16px; }
          }
 
@@ -6311,10 +6322,18 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
                #spDonateOverlay.active { display: flex; }
                #spDonateBox {
                background: #0c0c14; border: 1px solid rgba(255,255,255,.09);
-               border-radius: 22px; width: min(400px, 92vw); max-height: 88vh; overflow-y: auto;
-               padding: 24px 22px 22px; position: relative;
+               border-radius: 22px; width: min(400px, 92vw); max-height: 88vh; overflow: hidden;
+               position: relative;
                display: flex; flex-direction: column;
                box-shadow: 0 32px 80px rgba(0,0,0,.8);
+               }
+               #spDonateStickyHeader {
+               position: relative; flex-shrink: 0;
+               padding: 24px 22px 0;
+               }
+               #spDonateScroll {
+               overflow-y: auto;
+               padding: 0 22px 22px;
                }
                #spDonateClose {
                position: absolute; top: .85rem; right: .85rem; z-index: 1;
