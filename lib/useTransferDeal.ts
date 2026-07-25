@@ -109,9 +109,9 @@ export const TDM_CATEGORIES: Record<TdmListingType, { left: TdmChecklistItem[]; 
   },
 };
 
-export function tdmGetTabItems(tab: TdmListingType): TdmChecklistItem[] {
+export function tdmGetTabItems(tab: TdmListingType, customItems?: TdmChecklistItem[]): TdmChecklistItem[] {
   const d = TDM_CATEGORIES[tab];
-  return [...d.left, ...d.right];
+  return customItems && customItems.length ? [...d.left, ...d.right, ...customItems] : [...d.left, ...d.right];
 }
 
 export const TDM_TYPE_THEME: Record<TdmItemType, { accent: string; heading: string; blurb: string }> = {
@@ -208,6 +208,7 @@ export function useTransferDeal(args: UseTransferDealArgs) {
   const { chatRoomId, sellerUid, buyerUid, listingId, dealId, paymentStatus, isSeller, syncThreads } = args;
 
   const [tab, setTab] = useState<TdmListingType>("website");
+  const [customItems, setCustomItems] = useState<Record<TdmListingType, TdmChecklistItem[]>>({ website: [], game: [], app: [] });
   const [completed, setCompleted] = useState<Record<string, boolean>>({});
   const [finalized, setFinalized] = useState<Record<TdmListingType, boolean>>({ website: false, game: false, app: false });
   const [payloads, setPayloads] = useState<Record<string, TdmPayload>>({});
@@ -269,12 +270,28 @@ export function useTransferDeal(args: UseTransferDealArgs) {
     setFinalized({ website: false, game: false, app: false });
     setPayloads({});
     setBuyerEmail("");
+    setCustomItems({ website: [], game: [], app: [] });
     load();
   }, [load]);
 
-  const items = tdmGetTabItems(tab);
+  const items = tdmGetTabItems(tab, customItems[tab]);
   const isTabFinalized = finalized[tab];
   const anyCompletedInTab = items.some((_, idx) => completed[`${tab}-${idx}`]);
+
+  // Adds a seller-defined "Other" item to the current tab's checklist.
+  // Custom items live only in this session's state (reset whenever the
+  // modal reopens) — they are not persisted to Firestore. The new item's
+  // index (and therefore its `${tab}-${idx}` key) is always the built-ins
+  // count plus however many custom items already exist for this tab,
+  // since customItems are always appended at the end.
+  function addCustomItem(label: string, type: "file_upload" | "secure_secret"): { key: string; item: TdmChecklistItem } {
+    const trimmed = label.trim() || "Other";
+    const newItem: TdmChecklistItem = { label: trimmed, icon: "other", type };
+    const idx = tdmGetTabItems(tab, customItems[tab]).length;
+    const key = `${tab}-${idx}`;
+    setCustomItems((prev) => ({ ...prev, [tab]: [...prev[tab], newItem] }));
+    return { key, item: newItem };
+  }
 
   function markCompleted(key: string, payload: TdmPayload) {
     setPayloads((p) => ({ ...p, [key]: payload }));
@@ -299,8 +316,8 @@ export function useTransferDeal(args: UseTransferDealArgs) {
   }
 
   const completedKeysForTab = useCallback(
-    (t: TdmListingType) => tdmGetTabItems(t).map((_, idx) => `${t}-${idx}`).filter((k) => completed[k]),
-    [completed]
+    (t: TdmListingType) => tdmGetTabItems(t, customItems[t]).map((_, idx) => `${t}-${idx}`).filter((k) => completed[k]),
+    [completed, customItems]
   );
 
   // ---------- Finalize: bundle into zip, upload, write chat message, flip escrow status ----------
@@ -320,7 +337,7 @@ export function useTransferDeal(args: UseTransferDealArgs) {
       const imageLinksOut: Record<string, { name: string; url: string }[]> = {};
       let zipFileCount = 0;
 
-      const tabItems = tdmGetTabItems(tab);
+      const tabItems = tdmGetTabItems(tab, customItems[tab]);
       for (const key of keys) {
         const idx = parseInt(key.split("-")[1], 10);
         const item = tabItems[idx];
@@ -516,6 +533,8 @@ export function useTransferDeal(args: UseTransferDealArgs) {
     tab,
     switchTab,
     items,
+    customItems: customItems[tab],
+    addCustomItem,
     completed,
     payloads,
     isTabFinalized,
