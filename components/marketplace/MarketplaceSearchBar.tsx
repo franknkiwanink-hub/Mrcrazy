@@ -5,8 +5,8 @@
 // SearchOverlay.tsx (full-screen, YouTube-style takeover with a
 // localStorage-backed recent-searches list) instead of rendering its own
 // dropdown — same scoring/highlight logic, just relocated into the
-// overlay. AI Search is untouched (matches the original's
-// mpAiSearchBtn/mpAiSearchPanel, unaffected by this change).
+// overlay. The Discover panel (sibling button, see MarketplaceFilterBar)
+// is unaffected by this change.
 import { useEffect, useState } from "react";
 import type { Listing } from "@/lib/listings";
 import SearchOverlay from "@/components/marketplace/SearchOverlay";
