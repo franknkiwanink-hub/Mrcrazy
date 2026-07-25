@@ -7039,6 +7039,19 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
   .pm-inbox-spinner {
     animation: dcpSpin 0.7s linear infinite;
   }
+  /* Shared spinner for any button navigating to a server route/modal-route
+     (see lib/useNavigating.ts + components/shared/NavSpinnerIcon.tsx).
+     Reuses the same dcpSpin keyframe as .pm-inbox-spinner so every "tap and
+     wait for a page/modal to load" button across the site spins the same
+     way instead of each screen inventing its own timing. */
+  .sr-nav-spinner {
+    animation: dcpSpin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  .sr-nav-btn-disabled {
+    cursor: default !important;
+    opacity: 0.85;
+  }
   .pm-inbox-btn-left {
     display: flex;
     align-items: center;
@@ -7105,6 +7118,14 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
     border-color: var(--mp-border-hover);
     color: var(--mp-text);
     background: var(--mp-surface-raised);
+  }
+  .pm-quick-btn:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+  .pm-quick-btn:disabled:hover {
+    border-color: var(--mp-border);
+    background: var(--mp-surface);
   }
   .pm-quick-btn svg { width: 17px; height: 17px; flex-shrink: 0; stroke: currentColor; }
 
@@ -7663,6 +7684,70 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
   .pm-favorite-remove-btn svg { width: 12px; height: 12px; flex: none; }
   .pm-favorite-remove-btn:hover { background: rgba(239,68,68,0.24); border-color: rgba(239,68,68,0.55); color: #fca5a5; }
   .pm-favorite-remove-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  /* Following tab — list of sellers the signed-in user follows, each row
+     opens that seller's profile; the Unfollow button stops propagation so
+     tapping it doesn't also navigate away before the write completes. */
+  .pm-following-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    width: 100%;
+  }
+  .pm-following-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: var(--mp-surface-raised);
+    border: 1px solid var(--mp-border);
+    border-radius: var(--mp-radius);
+    padding: 0.65rem 0.85rem;
+    transition: border-color var(--mp-transition);
+  }
+  .pm-following-row:hover { border-color: var(--mp-border-hover); }
+  .pm-following-av {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--mp-surface);
+  }
+  .pm-following-av-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--mp-text-sec);
+  }
+  .pm-following-name {
+    flex: 1;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--mp-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pm-following-unfollow-btn {
+    flex-shrink: 0;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 15px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--mp-border);
+    color: var(--mp-text-sec);
+    font-size: 12px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  }
+  .pm-following-unfollow-btn:hover {
+    background: rgba(239,68,68,0.14);
+    border-color: rgba(239,68,68,0.35);
+    color: #f87171;
+  }
   .pm-listing-image {
     width: 100%;
     height: 96px;
@@ -7741,6 +7826,8 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
     transition: border-color var(--mp-transition), color var(--mp-transition);
   }
   .pm-add-listing-btn:hover { border-color: var(--mp-accent-border); color: var(--mp-accent); }
+  .pm-add-listing-btn:disabled { cursor: default; opacity: 0.7; }
+  .pm-add-listing-btn:disabled:hover { border-color: var(--mp-border); color: var(--mp-text-sec); }
 
   /* ── Bottom action row: always visible, holds Settings + Sign out
        (Settings is a direct action, not a tab — see note above) ── */
@@ -7762,6 +7849,8 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
     transition: background var(--mp-transition), border-color var(--mp-transition), color var(--mp-transition);
   }
   .pm-bottom-btn:hover { border-color: var(--mp-border-hover); color: var(--mp-text); background: var(--mp-surface-raised); }
+  .pm-bottom-btn:disabled { cursor: default; opacity: 0.7; }
+  .pm-bottom-btn:disabled:hover { border-color: var(--mp-border); background: var(--mp-surface); }
   .pm-bottom-btn svg { width: 16px; height: 16px; flex-shrink: 0; stroke: currentColor; fill: none; }
   .pm-bottom-dispute { color: #fbbf24; }
   .pm-bottom-dispute:hover { background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.3); }
@@ -9731,6 +9820,8 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
             }
             .dcp-attach-pill:hover { background: rgba(255,255,255,0.09); color: #fff; }
             .dcp-attach-pill svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+            .dcp-attach-pill:disabled { opacity: 0.6; cursor: default; }
+            .dcp-attach-pill:disabled:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.5); }
             #dcpInputInner {
             width: 90%; display: flex; align-items: flex-end; position: relative;
             }
