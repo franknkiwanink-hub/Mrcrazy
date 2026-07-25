@@ -1318,8 +1318,28 @@ async function handleLookupRecipient(req, res) {
 // Now the sender's balance, the recipient's existence, and the fee math are
 // all re-verified here with the Admin SDK inside a single transaction, the
 // same pattern as handleWithdraw above.
+//
+// ── DISABLED (2026-07-25) ────────────────────────────────────────────────────
+// User-to-user wallet transfers move real ledger balance between two
+// ordinary users with no PayPal (or other licensed) rail in the middle —
+// that's custodial money transmission, which Siterifty is not currently
+// licensed for. Wallet balance is licensed-safe ONLY as a spend-only credit
+// for boosting listings; it must never be sendable to another user or
+// cashed out until Siterifty holds (or partners for) a money transmitter
+// license. Gated at the top of the handler, not removed — all validation,
+// fee-split, and ledgering logic below is untouched and ready to re-enable
+// by deleting this early return once licensed. See TransferMethodPicker/
+// SendTab.tsx for the matching frontend placeholder.
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleTransfer(req, res) {
+  return res.status(410).json({
+    error: 'Sending money to other users isn\'t available yet — Siterifty wallet balance is currently limited to boosting your own listings. This feature will return once Siterifty completes money-transmission licensing. PayPal handles the full escrow-protected marketplace transaction.',
+  });
+}
+
+// Original implementation kept below, unreachable — see the disabled-notice
+// comment above for why, and for exactly what to delete to restore it.
+async function _handleTransfer_DISABLED_pendingLicense(req, res) {
   const { idToken, recipientUid, amount, note } = req.body;
   if (!idToken)      return res.status(401).json({ error: 'Missing auth token' });
   if (!recipientUid) return res.status(400).json({ error: 'Missing recipient' });
@@ -1533,7 +1553,28 @@ const DONATION_FEE_RATE = 0.15;
 const DONATION_MIN = 1;
 const DONATION_MAX = 2500;
 
+// ── DISABLED (2026-07-25) ─────────────────────────────────────────────────
+// Only the money-moving action is gated here — the donate overlay itself
+// (summary stats, recent donations list, get-donations) stays fully live.
+// Donating drew from the donor's wallet balance and credited the seller's
+// wallet balance directly, same as P2P transfer: custodial wallet-to-wallet
+// money movement with no PayPal (or other licensed) rail involved, which
+// Siterifty isn't currently licensed for. Once licensed, donations will
+// move to PayPal split payments (like escrow) instead of wallet balance —
+// so this returns a 410 rather than being restored to wallet debits when
+// re-enabled. Frontend: DonateOverlay.tsx's submit button is disabled with
+// a "coming soon" state; everything else on that overlay is untouched.
+// ─────────────────────────────────────────────────────────────────────────
 async function handleDonate(req, res) {
+  return res.status(410).json({
+    error: 'Donations aren\'t available right now — we\'re moving this to PayPal split payments. Check back soon.',
+  });
+}
+
+// Original implementation kept below, unreachable — see the disabled-notice
+// comment above for why, and what replaces it (PayPal split payments, not a
+// wallet-debit restore) when this comes back.
+async function _handleDonate_DISABLED_pendingPaypalSplit(req, res) {
   const { idToken, sellerUid, amount, note } = req.body;
   if (!idToken)   return res.status(401).json({ error: 'Missing auth token' });
   if (!sellerUid) return res.status(400).json({ error: 'Missing seller' });
