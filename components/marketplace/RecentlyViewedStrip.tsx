@@ -81,6 +81,7 @@ export default function RecentlyViewedStrip() {
       <div
         style={{
           display: "flex",
+          alignItems: "stretch",
           gap: 16,
           overflowX: "auto",
           paddingBottom: 4,
@@ -88,7 +89,7 @@ export default function RecentlyViewedStrip() {
         }}
       >
         {entries.map((entry) => (
-          <div key={entry.id} style={{ flex: "0 0 260px", scrollSnapAlign: "start" }}>
+          <div key={entry.id} style={{ flex: "0 0 260px", scrollSnapAlign: "start", display: "flex" }}>
             <ListingCard listing={entryToListing(entry)} onOpen={onOpen} onOpenSeller={onOpenSeller} />
           </div>
         ))}
