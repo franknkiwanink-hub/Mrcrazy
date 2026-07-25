@@ -2,11 +2,11 @@
 
 // Recently-viewed listings — purely client-side (localStorage), no
 // Firestore reads/writes, no auth requirement. Records a lightweight
-// snapshot of exactly the fields ListingCard's three variants (Site/App/
-// Game) actually render — same subset SaveButton already snapshots for
-// its own favorites doc — rather than a full Listing, so re-rendering a
-// recently-viewed card never needs a second network fetch just to draw
-// the strip.
+// snapshot of exactly the fields ListingCard's four variants (Site/App/
+// Game/3D Asset) actually render — same subset SaveButton already
+// snapshots for its own favorites doc — rather than a full Listing, so
+// re-rendering a recently-viewed card never needs a second network fetch
+// just to draw the strip.
 //
 // Deliberately NOT synced to Firestore / cross-device: this is meant to
 // be an instant, always-available "what did I just look at" trail, not
@@ -28,6 +28,17 @@ export interface RecentlyViewedEntry {
   ownerId: string | null;
   ownerEmail: string | null;
   viewedAt: number;
+  // 3D-asset-only fields — undefined/omitted for every other type. Added
+  // because AssetCard doesn't read images[]/financials at all for its
+  // preview and stats; it reads listing.embedUrl (the live model embed)
+  // and listing.settings.format/license/category. Without these, a 3D
+  // asset reconstructed from a recently-viewed snapshot always showed
+  // "No preview available" and "—" for Format/License even though the
+  // real listing document had all three set.
+  embedUrl?: string;
+  category?: string;
+  format?: string;
+  license?: string;
 }
 
 function readAll(): RecentlyViewedEntry[] {
@@ -63,6 +74,12 @@ function writeAll(entries: RecentlyViewedEntry[]) {
 // earlier version only stored price, which meant every recently-viewed
 // card showed blank financials and its seller strip's "View seller"
 // silently did nothing (onOpenSeller received undefined).
+//
+// Also snapshots embedUrl/category/format/license for type==='3d' —
+// AssetCard reads these instead of images[]/financials for its preview
+// and stats grid, so without them a recently-viewed 3D asset could never
+// render its model preview or Format/License, regardless of what the
+// real listing document had.
 export function recordRecentlyViewed(listing: Listing) {
   if (typeof window === "undefined" || !listing.id) return;
   const snapshot: RecentlyViewedEntry = {
@@ -77,6 +94,14 @@ export function recordRecentlyViewed(listing: Listing) {
     ownerId: listing.ownerId || null,
     ownerEmail: listing.ownerEmail || null,
     viewedAt: Date.now(),
+    ...(listing.type === "3d"
+      ? {
+          embedUrl: listing.embedUrl || undefined,
+          category: listing.category || listing.settings?.category || undefined,
+          format: listing.settings?.format || undefined,
+          license: listing.settings?.license || undefined,
+        }
+      : {}),
   };
   const existing = readAll().filter((e) => e.id !== listing.id);
   writeAll([snapshot, ...existing]);
@@ -96,13 +121,16 @@ export function clearRecentlyViewed() {
 }
 
 // Reconstructs a minimal Listing-shaped object from a stored snapshot —
-// enough for ListingCard's Site/App/Game variants to render correctly
-// (title, image, full financials, owner), same posture as SaveButton's
-// favorites-tab comment about rendering "a full card instantly without
-// an extra per-item listing fetch". Includes ownerId/ownerEmail so
-// SellerStrip's useSeller(ownerId) can resolve a real seller (name,
-// avatar, badges) and so "View seller" has an id to navigate to —
-// without ownerId there, onOpenSeller(undefined) was a no-op.
+// enough for ListingCard's Site/App/Game/3D Asset variants to render
+// correctly (title, image, full financials, owner), same posture as
+// SaveButton's favorites-tab comment about rendering "a full card
+// instantly without an extra per-item listing fetch". Includes ownerId/
+// ownerEmail so SellerStrip's useSeller(ownerId) can resolve a real
+// seller (name, avatar, badges) and so "View seller" has an id to
+// navigate to — without ownerId there, onOpenSeller(undefined) was a
+// no-op. For type==='3d', also restores embedUrl/settings.format/
+// settings.license/category so AssetCard's model preview and stats
+// grid render instead of falling back to "No preview available"/"—".
 export function entryToListing(entry: RecentlyViewedEntry): Listing {
   return {
     id: entry.id,
@@ -117,5 +145,16 @@ export function entryToListing(entry: RecentlyViewedEntry): Listing {
     },
     ownerId: entry.ownerId || undefined,
     ownerEmail: entry.ownerEmail || undefined,
+    ...(entry.type === "3d"
+      ? {
+          embedUrl: entry.embedUrl,
+          category: entry.category,
+          settings: {
+            ...(entry.format ? { format: entry.format } : {}),
+            ...(entry.license ? { license: entry.license } : {}),
+            ...(entry.category ? { category: entry.category } : {}),
+          },
+        }
+      : {}),
   };
 }
