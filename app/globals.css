@@ -3752,6 +3752,8 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
 .sr-site {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
   background: linear-gradient(160deg, rgba(56,189,248,.05), var(--sr-surface) 45%);
   border: 1px solid var(--sr-line);
   border-radius: 14px;
@@ -3813,6 +3815,10 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
    APP — stacked card, icon header, pill CTA
    ══════════════════════════════════════════════════════════════ */
 .sr-app {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
   background: linear-gradient(160deg, rgba(180,139,250,.06), var(--sr-surface) 45%);
   border: 1px solid var(--sr-line);
   border-radius: 14px;
@@ -3883,7 +3889,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
 }
 .sr-app-shots { display: flex; gap: 6px; margin-top: 10px; }
 .sr-app-shots img { flex: 1; width: 0; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; border: 1px solid var(--sr-line); background: var(--sr-surface-2); display: block; }
-.sr-app-foot { margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--sr-line-soft);
+.sr-app-foot { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--sr-line-soft);
   display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: nowrap; }
 .sr-app-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .sr-pill-btn {
@@ -3909,6 +3915,10 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
    GAME — full-bleed banner card, solid block CTA
    ══════════════════════════════════════════════════════════════ */
 .sr-game {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
   background: linear-gradient(160deg, rgba(255,177,78,.06), var(--sr-surface) 45%);
   border: 1px solid var(--sr-line);
   border-radius: 14px;
@@ -3945,7 +3955,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .sr-game-price { font-size: 14px; font-weight: 800; color: var(--sr-game); flex-shrink: 0; }
 .sr-game-stats { display: flex; gap: 14px; padding: 8px 12px; margin: 8px 0 0; border-top: 1px solid var(--sr-line-soft); border-bottom: 1px solid var(--sr-line-soft); }
-.sr-game-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: nowrap; padding: 10px 12px 12px; }
+.sr-game-foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: nowrap; padding: 10px 12px 12px; }
 .sr-game-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .sr-btn-game { background: var(--sr-game); border-color: var(--sr-game); color: #2a1500; }
 .sr-btn-game:hover { background: #ffc06e; }
@@ -3967,6 +3977,10 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
    slot on /sell.
    ══════════════════════════════════════════════════════════════ */
 .sr-3d {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
   background: linear-gradient(160deg, rgba(45,212,191,.06), var(--sr-surface) 45%);
   border: 1px solid var(--sr-line);
   border-radius: 14px;
@@ -4010,7 +4024,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 .sr-3d-price { font-size: 14px; font-weight: 800; color: var(--sr-3d); flex-shrink: 0; }
 .sr-3d-stats { display: flex; gap: 14px; padding: 8px 12px; margin: 8px 0 0; border-top: 1px solid var(--sr-line-soft); border-bottom: 1px solid var(--sr-line-soft); }
-.sr-3d-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: nowrap; padding: 10px 12px 12px; }
+.sr-3d-foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: nowrap; padding: 10px 12px 12px; }
 .sr-3d-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .sr-btn-3d { background: var(--sr-3d); border-color: var(--sr-3d); color: #002420; }
 .sr-btn-3d:hover { background: #5eead4; }
