@@ -11,21 +11,21 @@
 // Any signed-in user may publish (no admin restriction). Every write
 // request's Firebase ID token is independently verified here — this is
 // a login check, not an admin check.
-import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getAdminDb } from "@/lib/server/adminDb";
 import { FieldValue } from "firebase-admin/firestore";
 
+// getAdminDb() (lib/server/adminDb.ts) already guards initializeApp() with
+// its own getApps().length check and is the single shared entry point for
+// admin-app init in this file. verifyUser used to carry a second, separate
+// ensureFirebaseApp()/initializeApp() of its own — two independent init
+// blocks racing to register the same default app is exactly what produced
+// "the default Firebase app already exists". Calling getAdminDb() here
+// (even though we only need its side effect of having initialized the
+// app, not the Firestore instance it returns) guarantees there is only
+// ever one init path.
 function ensureFirebaseApp() {
-  if (!getApps().length) {
-    initializeApp({
-      credential: cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
-      }),
-    });
-  }
+  getAdminDb();
 }
 
 async function verifyUser(authHeader: string | null): Promise<string | null> {
