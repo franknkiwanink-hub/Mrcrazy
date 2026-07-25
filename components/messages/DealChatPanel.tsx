@@ -34,6 +34,18 @@ import NavSpinnerIcon from "@/components/shared/NavSpinnerIcon";
 
 const IMGUR_CLIENT_ID = "546c25a59c58ad7";
 
+// Staged, not-yet-sent pick from the image or file input. `previewUrl` is
+// an object URL for images (revoked on removal/unmount) so the preview
+// strip can show the actual picked photo rather than a generic icon —
+// the most useful part of a preview is confirming it's the right image.
+type PendingAttachment = {
+  id: string;
+  file: File;
+  kind: "image" | "file";
+  previewUrl: string | null;
+};
+
+
 function fmtTime(ms: number): string {
   if (!ms) return "";
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -68,11 +80,40 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   // bar's button when this pill is the one that was actually tapped).
   const [transferPillBusy, setTransferPillBusy] = useState(false);
 
+  // Files/images picked from the device weren't staged anywhere — the
+  // file input's onChange went straight into uploadOneFile/handleImagePick,
+  // which uploads AND posts the chat message in the same call. That meant
+  // picking a photo sent it immediately, with no chance to see what was
+  // picked, swap it, or back out — the opposite of every other chat app's
+  // pick-then-preview-then-send flow, and easy to trigger by mistake on a
+  // native file/photo picker's own confirm tap.
+  //
+  // pendingAttachments holds what's been picked but not yet sent. Sending
+  // is now a separate, explicit step (dcpSendBtn / Enter), same gesture
+  // that already sends typed text — so attaching a file behaves like
+  // typing a message: it sits in the composer until the user chooses to
+  // send it, and can be removed before that with no side effects, since
+  // nothing has touched the network yet.
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
+
   const messagesRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isSeller = !!(user && chat.room && user.uid === chat.room.sellerUid);
+
+  // Revoke any staged-but-never-sent image preview URLs when the panel
+  // unmounts (user navigated away/closed chat with a photo still staged),
+  // otherwise those object URLs leak for the life of the tab.
+  useEffect(() => {
+    return () => {
+      pendingAttachments.forEach((a) => {
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Lock the page behind this panel for as long as it's mounted — same
   // hardened pattern as WalletModal/SiteriftyLoader (lock both html and
@@ -117,7 +158,40 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
     };
   }, []);
 
+  // Scroll to the most recent messages the moment the chat has content to
+  // show, rather than relying on the "stay near bottom" effect below to
+  // happen to fire correctly on the very first render. That effect reads
+  // el.scrollHeight/clientHeight, which can be 0 or stale before the
+  // message list has actually laid out — on some devices that meant the
+  // panel opened showing the oldest messages at the top instead of
+  // jumping straight to the latest ones like every other chat app.
+  // hasAutoScrolledRef ensures this only forces a jump once per chat
+  // room open — after that, the effect below (which respects whether the
+  // user has scrolled up to read history) takes over.
+  const hasAutoScrolledRef = useRef(false);
   useEffect(() => {
+    hasAutoScrolledRef.current = false;
+  }, [chatRoomId]);
+  useEffect(() => {
+    if (hasAutoScrolledRef.current) return;
+    if (!chat.messages.length) return;
+    const el = messagesRef.current;
+    if (!el) return;
+    // Two rAFs: one to let this render commit, one more to let the
+    // browser finish layout of the just-rendered message bubbles, so
+    // scrollHeight reflects the real content height instead of a
+    // mid-layout value.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!messagesRef.current) return;
+        messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+        hasAutoScrolledRef.current = true;
+      });
+    });
+  }, [chat.messages, chatRoomId]);
+
+  useEffect(() => {
+    if (!hasAutoScrolledRef.current) return;
     const el = messagesRef.current;
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
@@ -168,17 +242,29 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
 
   async function handleSend() {
     const text = input;
-    if (!text.trim()) return;
+    const hasText = !!text.trim();
+    const hasAttachments = pendingAttachments.length > 0;
+    if (!hasText && !hasAttachments) return;
     if (chat.locked.locked) return;
-    setInput("");
-    const result = await chat.sendMessage(text);
-    if (result?.blocked) {
-      setInput(text);
-      await alert({
-        theme: "danger",
-        title: "Message not sent",
-        msg: "This looks like it may be a scam attempt: " + result.blocked + " Never pay or share credentials outside Siterifty's escrow flow.",
-      });
+
+    if (hasText) {
+      setInput("");
+      const result = await chat.sendMessage(text);
+      if (result?.blocked) {
+        setInput(text);
+        await alert({
+          theme: "danger",
+          title: "Message not sent",
+          msg: "This looks like it may be a scam attempt: " + result.blocked + " Never pay or share credentials outside Siterifty's escrow flow.",
+        });
+        // Don't also send attachments if the text portion was blocked —
+        // matches the intent of the block (stop the interaction here)
+        // rather than letting a file slip through on the same tap.
+        return;
+      }
+    }
+    if (hasAttachments) {
+      await sendPendingAttachments();
     }
   }
 
@@ -312,30 +398,28 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
     await alert({ theme: "report", title: "Report Submitted", msg: "Our team will review this within 24 hours. Thank you for keeping Siterifty safe." });
   }
 
-  async function handleImagePick(file: File) {
+  // Actually uploads + posts the chat message for one image. Upload logic
+  // unchanged from before — the only change in this whole fix is *when*
+  // this runs: previously called the instant a file was picked, now only
+  // called from sendPendingAttachments once the user taps Send.
+  async function uploadImage_upload(file: File) {
     if (!chat.room || !user) return;
-    try {
-      const fd = new FormData();
-      fd.append("image", file);
-      const res = await fetch("https://api.imgur.com/3/image", { method: "POST", headers: { Authorization: "Client-ID " + IMGUR_CLIENT_ID }, body: fd });
-      const json = await res.json();
-      if (!json.success) {
-        await alert({ theme: "warning", title: "Upload Failed", msg: "The image could not be uploaded. Please try a different file." });
-        return;
-      }
-      const now = Date.now();
-      await addDoc(collection(db, "dealChats", chatRoomId, "messages"), { uid: user.uid, type: "image", imageUrl: json.data.link, createdAt: now });
-      await chat.syncThreads("📷 Image", chat.room.sellerUid, chat.room.buyerUid);
-    } catch (e) {
-      console.error("DCP image upload error:", e);
-      await alert({ theme: "warning", title: "Upload Failed", msg: "Something went wrong uploading your image. Please try again." });
-    }
+    const fd = new FormData();
+    fd.append("image", file);
+    const res = await fetch("https://api.imgur.com/3/image", { method: "POST", headers: { Authorization: "Client-ID " + IMGUR_CLIENT_ID }, body: fd });
+    const json = await res.json();
+    if (!json.success) throw new Error("The image could not be uploaded. Please try a different file.");
+    const now = Date.now();
+    await addDoc(collection(db, "dealChats", chatRoomId, "messages"), { uid: user.uid, type: "image", imageUrl: json.data.link, createdAt: now });
+    await chat.syncThreads("📷 Image", chat.room.sellerUid, chat.room.buyerUid);
   }
 
-  async function uploadOneFile(file: File) {
+  // Same as above for non-image files — upload logic unchanged, only the
+  // call site (and timing) moved to sendPendingAttachments.
+  async function uploadFile_upload(file: File) {
     if (!user || !chat.room) return;
     if (file.type.startsWith("image/")) {
-      await handleImagePick(file);
+      await uploadImage_upload(file);
       return;
     }
     const ext = (file.name.match(/\.([a-zA-Z0-9]+)$/) || ["", ""])[1].toLowerCase();
@@ -375,30 +459,89 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
     await chat.syncThreads("📎 " + file.name, chat.room.sellerUid, chat.room.buyerUid);
   }
 
-  async function handleFilesPick(files: File[]) {
+  // Picking from the photo pill now only stages the image for preview —
+  // see pendingAttachments above. Accepts multiple since the native
+  // picker can return more than one even though the input isn't
+  // `multiple` in every case; each becomes its own staged card.
+  function stageImages(files: File[]) {
+    const staged: PendingAttachment[] = files.map((file) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      file,
+      kind: "image",
+      previewUrl: URL.createObjectURL(file),
+    }));
+    setPendingAttachments((prev) => [...prev, ...staged]);
+  }
+
+  // Picking from the file pill stages instead of uploading immediately.
+  // Non-image files don't get an object-URL preview (nothing useful to
+  // show for a .zip or .html file) — the preview card falls back to a
+  // filename + extension icon instead.
+  function stageFiles(files: File[]) {
     const isCodeHandoff = chat.room?.transferMethods.includes("html_css_js");
-    const toUpload = isCodeHandoff ? files.filter((f) => /\.(html|htm|css|js)$/i.test(f.name)) : files;
-    if (!toUpload.length) {
-      await alert({ theme: "warning", title: "Unsupported File", msg: "This deal only accepts .html, .css, and .js files." });
+    const toStage = isCodeHandoff ? files.filter((f) => /\.(html|htm|css|js)$/i.test(f.name)) : files;
+    if (!toStage.length) {
+      alert({ theme: "warning", title: "Unsupported File", msg: "This deal only accepts .html, .css, and .js files." });
       return;
     }
-    let failCount = 0;
-    for (const file of toUpload) {
+    const staged: PendingAttachment[] = toStage.map((file) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      file,
+      kind: file.type.startsWith("image/") ? "image" : "file",
+      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+    }));
+    setPendingAttachments((prev) => [...prev, ...staged]);
+  }
+
+  function removePendingAttachment(id: string) {
+    setPendingAttachments((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  }
+
+  // Runs at actual send time (Send button / Enter) — this is the only
+  // place upload network calls happen now. Uploads staged attachments
+  // one at a time so failures are attributable to a specific file rather
+  // than an opaque "something failed" across a batch.
+  async function sendPendingAttachments() {
+    if (!pendingAttachments.length) return;
+    setAttachmentBusy(true);
+    const toSend = pendingAttachments;
+    const failedIds = new Set<string>();
+    for (const att of toSend) {
       try {
-        await uploadOneFile(file);
+        if (att.kind === "image") {
+          await uploadImage_upload(att.file);
+        } else {
+          await uploadFile_upload(att.file);
+        }
+        if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
       } catch (e) {
-        console.error("DCP file upload error:", e);
-        failCount++;
+        console.error("DCP attachment send error:", e);
+        failedIds.add(att.id);
       }
     }
-    if (failCount > 0) {
+    // Only clear attachments that succeeded — keep failed ones staged so
+    // the user can retry without re-picking the file, same principle as
+    // handleSend restoring `input` on a blocked text message below.
+    setPendingAttachments((prev) => prev.filter((a) => failedIds.has(a.id)));
+    setAttachmentBusy(false);
+    if (failedIds.size > 0) {
       await alert({
         theme: "warning",
-        title: "Upload Failed",
-        msg: failCount === toUpload.length ? "Something went wrong uploading your file(s). Please try again." : `${failCount} of ${toUpload.length} file(s) failed to upload. Please try again for those.`,
+        title: "Send Failed",
+        msg: failedIds.size === toSend.length ? "Something went wrong sending your file(s). Please try again." : `${failedIds.size} of ${toSend.length} file(s) failed to send. Please try again for those.`,
       });
     }
   }
+
+  // handleFilesPick removed — picking files now goes through stageFiles
+  // (see above), which stages instead of uploading immediately. Upload
+  // logic itself moved into uploadFile_upload/uploadImage_upload, called
+  // only from sendPendingAttachments at actual send time.
+
 
   if (!user) {
     return (
@@ -560,10 +703,38 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
               ) : null}
             </div>
             <div id="dcpInputInner">
+              {pendingAttachments.length > 0 ? (
+                <div className="dcp-attach-preview-strip" role="list" aria-label="Attachments to send">
+                  {pendingAttachments.map((att) => (
+                    <div className="dcp-attach-preview-card" role="listitem" key={att.id}>
+                      {att.previewUrl ? (
+                        <img src={att.previewUrl} alt={att.file.name} className="dcp-attach-preview-thumb" />
+                      ) : (
+                        <div className="dcp-attach-preview-thumb dcp-attach-preview-file">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <path d="M14 2v6h6" />
+                          </svg>
+                        </div>
+                      )}
+                      <div className="dcp-attach-preview-name">{att.file.name}</div>
+                      <button
+                        type="button"
+                        className="dcp-attach-preview-remove"
+                        aria-label={`Remove ${att.file.name}`}
+                        disabled={attachmentBusy}
+                        onClick={() => removePendingAttachment(att.id)}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <div className="dcp-textarea-wrap">
                 <textarea
                   id="dcpInput"
-                  placeholder="Message…"
+                  placeholder={pendingAttachments.length ? "Add a caption (optional)…" : "Message…"}
                   value={input}
                   disabled={chat.sending}
                   onChange={(e) => setInput(e.target.value)}
@@ -575,8 +746,17 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
                   }}
                   rows={1}
                 />
-                <button id="dcpSendBtn" onClick={handleSend} aria-label="Send">
-                  <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                <button
+                  id="dcpSendBtn"
+                  onClick={handleSend}
+                  disabled={chat.sending || attachmentBusy || (!input.trim() && !pendingAttachments.length)}
+                  aria-label={pendingAttachments.length ? "Send attachment" : "Send"}
+                >
+                  {attachmentBusy ? (
+                    <NavSpinnerIcon size={14} />
+                  ) : (
+                    <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                  )}
                 </button>
               </div>
             </div>
@@ -589,9 +769,9 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
           accept="image/*"
           hidden
           onChange={(e) => {
-            const f = e.target.files?.[0];
+            const files = Array.from(e.target.files || []);
             e.target.value = "";
-            if (f) handleImagePick(f);
+            if (files.length) stageImages(files);
           }}
         />
         <input
@@ -603,7 +783,7 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
           onChange={(e) => {
             const files = Array.from(e.target.files || []);
             e.target.value = "";
-            if (files.length) handleFilesPick(files);
+            if (files.length) stageFiles(files);
           }}
         />
       </div>
