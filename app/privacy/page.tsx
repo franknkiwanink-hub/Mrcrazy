@@ -45,18 +45,18 @@ export default function PrivacyPage() {
         <ul style={{ margin: "10px 0 0", paddingLeft: 20, display: "flex", flexDirection: "column", gap: 6 }}>
           <li><strong style={{ color: "var(--mp-text)" }}>Account data</strong> — email, username, avatar, and authentication identifiers from Firebase Auth.</li>
           <li><strong style={{ color: "var(--mp-text)" }}>Listing &amp; deal content</strong> — anything you post, plus messages exchanged with buyers/sellers in a deal.</li>
-          <li><strong style={{ color: "var(--mp-text)" }}>Wallet &amp; transaction history</strong> — balances, transfers, and payout records tied to your account.</li>
-          <li><strong style={{ color: "var(--mp-text)" }}>Payment data</strong> — handled directly by PayPal; Siterifty receives transaction confirmations and identifiers, never your full card or bank details.</li>
+          <li><strong style={{ color: "var(--mp-text)" }}>Wallet &amp; transaction history</strong> — your boost-only wallet balance, marketplace sale/fee records, and payout requests tied to your account.</li>
+          <li><strong style={{ color: "var(--mp-text)" }}>Payment data</strong> — handled directly by PayPal at checkout and for payouts; Siterifty receives transaction confirmations, authorization/capture identifiers, and (for payouts) the PayPal email, bank, or Bitcoin address you provide — never your full card number or bank login credentials.</li>
           <li><strong style={{ color: "var(--mp-text)" }}>Device &amp; usage data</strong> — session info, rough location (for currency/geo defaults), and push notification subscriptions if you opt in.</li>
         </ul>
       </StaticSection>
 
       <StaticSection heading="2. How we use it">
         <p>
-          To operate your account, process deals and escrow, prevent fraud and abuse, send
-          transactional notifications (deal updates, disputes, payouts), and — only if you've opted
-          in — push notifications. We don't use your data to build advertising profiles, and we
-          don't sell it.
+          To operate your account, process deals and PayPal-held payments, prevent fraud and abuse,
+          send transactional notifications (deal updates, disputes, payouts), and — only if you've
+          opted in — push notifications. We don't use your data to build advertising profiles, and
+          we don't sell it.
         </p>
       </StaticSection>
 
@@ -64,7 +64,7 @@ export default function PrivacyPage() {
         <p>We share data with the vendors that make the platform work, and no one else:</p>
         <ul style={{ margin: "10px 0 0", paddingLeft: 20, display: "flex", flexDirection: "column", gap: 6 }}>
           <li><strong style={{ color: "var(--mp-text)" }}>Firebase</strong> (Google) — authentication, database, and storage.</li>
-          <li><strong style={{ color: "var(--mp-text)" }}>PayPal</strong> — payment processing, payouts, and wallet top-ups.</li>
+          <li><strong style={{ color: "var(--mp-text)" }}>PayPal</strong> — payment authorization and holding at checkout, capturing/releasing funds when a deal completes, seller payouts, and Pro subscription billing. PayPal may also independently use transaction data for its own fraud, risk, and compliance screening, under PayPal's own privacy policy.</li>
           <li><strong style={{ color: "var(--mp-text)" }}>Push notification services</strong> — only for accounts that enable push notifications.</li>
         </ul>
         <p style={{ marginTop: 10 }}>
@@ -74,10 +74,15 @@ export default function PrivacyPage() {
       </StaticSection>
 
       <StaticSection heading="4. Cookies &amp; similar technologies">
-        <p>
-          We use essential cookies/local storage to keep you signed in, remember currency and theme
-          preferences, and protect against fraud. We don't use third-party advertising or tracking
-          cookies.
+        <p>We use a small number of cookies and local-storage entries, grouped by purpose:</p>
+        <ul style={{ margin: "10px 0 0", paddingLeft: 20, display: "flex", flexDirection: "column", gap: 6 }}>
+          <li><strong style={{ color: "var(--mp-text)" }}>Essential</strong> — keeping you signed in, securing your session, and protecting against fraud. These can&apos;t be disabled without breaking core functionality.</li>
+          <li><strong style={{ color: "var(--mp-text)" }}>Preference</strong> — remembering your currency, theme, and similar display settings.</li>
+          <li><strong style={{ color: "var(--mp-text)" }}>Payment</strong> — cookies set by PayPal&apos;s checkout components while you're on a checkout or payout screen, governed by PayPal&apos;s own cookie policy, not ours.</li>
+        </ul>
+        <p style={{ marginTop: 10 }}>
+          We don't use third-party advertising or cross-site tracking cookies, and Siterifty itself
+          doesn't run any ad network on the platform.
         </p>
       </StaticSection>
 
@@ -110,14 +115,16 @@ export default function PrivacyPage() {
       <StaticSection heading="8. Children's privacy">
         <p>
           Siterifty isn't directed at children, and we don't knowingly collect data from anyone
-          under 16. If you believe a child has provided us data, contact us and we'll remove it.
+          under 16. Buying or selling on Siterifty requires being at least 18, or the age of
+          majority in your jurisdiction. If you believe a child has provided us data, contact us
+          and we'll remove it.
         </p>
       </StaticSection>
 
       <StaticSection heading="9. Changes to this policy">
         <p>
-          We may update this policy as the platform evolves. Material changes will be reflected
-          here with an updated date.
+          We may update this policy as the platform evolves — including as our payment model
+          changes. Material changes will be reflected here with an updated date.
         </p>
       </StaticSection>
 
