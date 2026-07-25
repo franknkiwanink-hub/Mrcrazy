@@ -77,7 +77,7 @@ export default function SiteCard({
               e.currentTarget.src = PLACEHOLDER_MAIN;
             }}
           />
-          <div className="sr-site-tag">Site{listing.isTemplate ? " · Template" : ""}</div>
+          <div className="sr-site-tag">Website{listing.isTemplate ? " · Template" : ""}</div>
         </div>
         <div className="sr-site-media-sub">
           <div className="sr-site-media-thumb">
