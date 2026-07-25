@@ -1,30 +1,31 @@
 "use client";
 
-// Ports the "── Search ──", "── AI Search ──", "── Type filter chips ──",
+// Ports the "── Search ──", "── Discover ──", "── Type filter chips ──",
 // "── Template filter ──", "── Price popover ──", and "── Active filter
 // tags ──" sections of marketplace.js, wrapped in #mpFilterBar >
-// #mpSearchRow / #mpAiSearchPanel / #mpChipsRow exactly as in the
+// #mpSearchRow / #discoverOverlay / #mpChipsRow exactly as in the
 // original, with #mpActiveTags as a sibling outside #mpFilterBar. Type
 // selection is forwarded to the parent (which passes it into useFeed's
 // server-side `type` param, same as the original passing mpTypeFilter
 // into /api/listings); template + price + search stay entirely
 // client-side, matching the original (handleFeed has no
-// template/price/search params). AI Search hits /api/aistudio
-// (action: 'recommendations') directly from AiSearchPanel.
+// template/price/search params). Discover hits /api/listings
+// (action: 'listing.discover') directly from DiscoverPanel — plain
+// random-slice browsing, no AI involved despite the old "AI Search" name
+// this replaced.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Listing, ListingType } from "@/lib/listings";
 import { FALLBACK_PRICE_CAP, type ActiveTag, type TemplateFilter } from "@/lib/useMarketplaceFilters";
 import { useLimits } from "@/lib/useLimits";
 import MarketplaceSearchBar from "@/components/marketplace/MarketplaceSearchBar";
-import AiSearchPanel, { AiSearchButton } from "@/components/marketplace/AiSearchPanel";
+import DiscoverPanel, { DiscoverButton } from "@/components/marketplace/DiscoverPanel";
 
 const TYPE_OPTIONS: { value: ListingType | "all"; label: string }[] = [
   { value: "all", label: "All" },
   { value: "website", label: "Websites" },
   { value: "app", label: "Apps" },
   { value: "game", label: "Games" },
-  { value: "3d", label: "3D Assets" },
 ];
 
 function fmt(n: number) {
@@ -65,7 +66,7 @@ export default function MarketplaceFilterBar({
   onExitTakeover?: () => void;
 }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const [aiSearchOpen, setAiSearchOpen] = useState(false);
+  const [discoverOpen, setDiscoverOpen] = useState(false);
   const { limits } = useLimits();
   const PRICE_CAP = limits.marketplace.priceCap ?? FALLBACK_PRICE_CAP;
   const [sliderMin, setSliderMin] = useState(priceMin);
@@ -165,14 +166,13 @@ export default function MarketplaceFilterBar({
             autoOpen={autoOpenSearch}
             onExitTakeover={onExitTakeover}
           />
-          <AiSearchButton onClick={() => setAiSearchOpen(true)} />
+          <DiscoverButton onClick={() => setDiscoverOpen(true)} />
         </div>
-        <AiSearchPanel
-          listings={searchListings}
+        <DiscoverPanel
           onOpen={onOpenListing}
           onOpenSeller={onOpenSeller}
-          open={aiSearchOpen}
-          onOpenChange={setAiSearchOpen}
+          open={discoverOpen}
+          onOpenChange={setDiscoverOpen}
         />
         <div id="mpChipsRow">
         {TYPE_OPTIONS.map((opt) => (
