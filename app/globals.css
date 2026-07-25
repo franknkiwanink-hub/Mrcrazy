@@ -3985,11 +3985,13 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
    listing detail page. */
 .sr-3d-media iframe { width: 100%; height: 100%; border: 0; display: block; pointer-events: none; }
 .sr-3d-badge {
-  position: absolute; top: 10px; left: 10px; width: 28px; height: 28px; border-radius: 9px;
+  position: absolute; top: 10px; left: 10px; height: 28px; border-radius: 9px;
   background: rgba(8,8,13,.78); border: 1px solid rgba(45,212,191,.4);
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 0 10px;
 }
-.sr-3d-badge svg { width: 15px; height: 15px; color: var(--sr-3d); }
+.sr-3d-badge svg { width: 15px; height: 15px; color: var(--sr-3d); flex-shrink: 0; }
+.sr-3d-badge span { font-size: 11px; font-weight: 800; color: var(--sr-3d); text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
 .sr-3d-play {
   position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border-radius: 50%;
   background: rgba(8,8,13,.7); border: 1px solid rgba(255,255,255,.3);
