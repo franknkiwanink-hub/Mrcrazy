@@ -61,7 +61,7 @@ export default function PaymentsPanel({
         </svg>
         <h3>Payment Methods</h3>
       </div>
-      <p className="detail-panel-desc">Connect a PayPal account to receive payouts and top up your wallet.</p>
+      <p className="detail-panel-desc">Add your PayPal email to receive withdrawal payouts. This isn&apos;t used to add funds to your wallet — wallet balance is only ever used to boost your own listings.</p>
       <hr className="detail-divider" />
 
       {state.paypalEmail ? (
@@ -82,7 +82,7 @@ export default function PaymentsPanel({
           onChange={(e) => setPaypalEmail(e.target.value)}
           placeholder="your@paypal.com"
         />
-        <span className="hint">Used for wallet top-ups and withdrawals.</span>
+        <span className="hint">Used for withdrawal payouts. Wallet balance can&apos;t be topped up with PayPal and can&apos;t be sent to other users.</span>
       </div>
 
       <button className="save-btn" onClick={handleSave} disabled={saving}>
