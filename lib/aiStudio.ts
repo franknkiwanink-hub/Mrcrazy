@@ -3,7 +3,7 @@
 // assist, and anywhere else on the page that needs an AI Studio action."
 //
 // This app already has several inline `fetch('/api/aistudio', ...)` call
-// sites (AiSearchPanel, AiSupportChatPanel, FeedbackWidget, DealChatPanel,
+// sites (AiSupportChatPanel, FeedbackWidget, DealChatPanel,
 // SellerProfileHeader) that predate this file and were each ported
 // independently before this shared helper existed here — left as-is rather
 // than churned, since none of them were broken. This helper exists so the
