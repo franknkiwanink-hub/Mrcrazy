@@ -56,6 +56,12 @@ export interface FavoriteListing {
   price?: number;
 }
 
+export interface FollowedSeller {
+  uid: string; // seller's uid — also the users/{me}/following/{uid} doc id
+  username: string;
+  pic: string;
+}
+
 const EMPTY_PROFILE: ProfileData = {
   username: "",
   contactEmail: "",
@@ -82,6 +88,10 @@ export function useProfileData() {
   const [favorites, setFavorites] = useState<FavoriteListing[]>([]);
   const [favoritesLoading, setFavoritesLoading] = useState(true);
   const [favoritesError, setFavoritesError] = useState<string | null>(null);
+
+  const [following, setFollowing] = useState<FollowedSeller[]>([]);
+  const [followingLoading, setFollowingLoading] = useState(true);
+  const [followingError, setFollowingError] = useState<string | null>(null);
 
   const [unreadDeals, setUnreadDeals] = useState(0);
 
@@ -177,6 +187,34 @@ export function useProfileData() {
     }
   }, []);
 
+  const loadFollowing = useCallback(async (userId: string) => {
+    setFollowingLoading(true);
+    setFollowingError(null);
+    try {
+      // users/{uid}/following/{sellerUid} — written by SellerProfileHeader's
+      // follow toggle (see handleFollowToggle), same doc shape read back
+      // here: { uid, username, pic, followedAt }.
+      const q = query(collection(db, "users", userId, "following"), orderBy("followedAt", "desc"));
+      const qs = await getDocs(q);
+      if (!mountedRef.current) return;
+      setFollowing(
+        qs.docs.map((d) => {
+          const f: any = d.data();
+          return {
+            uid: f.uid || d.id,
+            username: f.username || "Unknown seller",
+            pic: f.pic || "",
+          };
+        })
+      );
+    } catch (err) {
+      console.error("[useProfileData] loadFollowing failed", err);
+      setFollowingError("Could not load who you're following.");
+    } finally {
+      if (mountedRef.current) setFollowingLoading(false);
+    }
+  }, []);
+
   // Kick off all three loads once we know who's signed in.
   useEffect(() => {
     if (!uid) {
@@ -186,7 +224,8 @@ export function useProfileData() {
     loadProfile(uid);
     loadListings(uid);
     loadFavorites(uid);
-  }, [uid, loadProfile, loadListings, loadFavorites]);
+    loadFollowing(uid);
+  }, [uid, loadProfile, loadListings, loadFavorites, loadFollowing]);
 
   // Live unread-deals badge — ports ibxStartUnreadListener.
   useEffect(() => {
@@ -347,6 +386,25 @@ export function useProfileData() {
     setFavorites((prev) => prev.filter((f) => f.listingId !== listingId));
   }
 
+  async function unfollow(sellerUid: string) {
+    const user = auth.currentUser;
+    if (!user) return;
+    // Mirrors the unfollow half of SellerProfileHeader's handleFollowToggle:
+    // both sides of the relationship live in separate subcollections
+    // (users/{me}/following/{them} and users/{them}/followers/{me}), so
+    // both need deleting or the seller's follower count / follow-state
+    // check on their profile page would drift out of sync with this list.
+    await deleteDoc(doc(db, "users", user.uid, "following", sellerUid));
+    try {
+      await deleteDoc(doc(db, "users", sellerUid, "followers", user.uid));
+    } catch {
+      // Target user doc/subcollection may already be gone — fine to
+      // swallow, same tolerance removeFavorite gives its own best-effort
+      // side write.
+    }
+    setFollowing((prev) => prev.filter((f) => f.uid !== sellerUid));
+  }
+
   async function cancelPlan() {
     const user = auth.currentUser;
     if (!user) throw new Error("Not signed in.");
@@ -372,12 +430,16 @@ export function useProfileData() {
     favorites,
     favoritesLoading,
     favoritesError,
+    following,
+    followingLoading,
+    followingError,
     unreadDeals,
     saveAccount,
     savePublicProfile,
     uploadAvatar,
     deleteListing,
     removeFavorite,
+    unfollow,
     cancelPlan,
     refreshListings: () => uid && loadListings(uid),
   };
