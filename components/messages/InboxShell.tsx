@@ -158,15 +158,40 @@ export default function InboxShell() {
     if (inbox.tab === "deals" && !inbox.dealsLoadingMore && !inbox.dealsExhausted) inbox.loadMoreDeals(inbox.dealSubTab);
   }
 
+  // Which row (chat/deal/group id) was just tapped and is currently
+  // navigating. Previously tapping any row here — a deal chat, a plain
+  // chat, a group — did nothing visible at all until DealChatPanel/
+  // GroupChatPanel's data finished loading on the new route, so a tap on
+  // a slow connection looked exactly like a tap that missed or a site
+  // that's frozen. This flags the specific row that was tapped (not the
+  // whole list) so the rest of the inbox stays interactive-looking while
+  // that one row shows it registered.
+  const [openingRowId, setOpeningRowId] = useState<string | null>(null);
+
   function openChatRow(t: ChatThread) {
+    if (openingRowId) return;
     if (t.isDealChat) {
+      setOpeningRowId(t.chatRoomId);
       router.push(`/messages/deal/${t.chatRoomId}`);
     } else if (t.partnerUid) {
       // 1:1 DM chat panel isn't ported yet (belongs to the same later pass
       // as the deal-chat panel) — route to the deal-chat page's shell
       // won't apply here, so fall back to the partner's profile for now.
+      setOpeningRowId(t.chatRoomId);
       router.push(`/seller/${t.partnerUid}`);
     }
+  }
+
+  function openDealRow(chatRoomId: string) {
+    if (openingRowId) return;
+    setOpeningRowId(chatRoomId);
+    router.push(`/messages/deal/${chatRoomId}`);
+  }
+
+  function openGroupRow(id: string) {
+    if (openingRowId) return;
+    setOpeningRowId(id);
+    router.push(`/messages/group/${id}`);
   }
 
   const totalUnread = inbox.chatsUnread + inbox.dealsUnread;
@@ -212,11 +237,11 @@ export default function InboxShell() {
               description="Your chats, deal conversations, and group threads are only visible once you're signed in."
             />
           ) : inbox.tab === "chats" ? (
-            <ChatsTab inbox={inbox} onOpenChat={openChatRow} onOpenAiSupport={openAiSupportChat} />
+            <ChatsTab inbox={inbox} onOpenChat={openChatRow} onOpenAiSupport={openAiSupportChat} openingRowId={openingRowId} />
           ) : inbox.tab === "deals" ? (
-            <DealsTab inbox={inbox} onOpenDealChat={(id) => router.push(`/messages/deal/${id}`)} />
+            <DealsTab inbox={inbox} onOpenDealChat={openDealRow} openingRowId={openingRowId} />
           ) : (
-            <GroupsTab onOpenGroup={(id) => router.push(`/messages/group/${id}`)} />
+            <GroupsTab onOpenGroup={openGroupRow} openingRowId={openingRowId} />
           )}
         </div>
       </div>
@@ -229,10 +254,12 @@ function ChatsTab({
   inbox,
   onOpenChat,
   onOpenAiSupport,
+  openingRowId,
 }: {
   inbox: ReturnType<typeof useInbox>;
   onOpenChat: (t: ChatThread) => void;
   onOpenAiSupport: () => void;
+  openingRowId: string | null;
 }) {
   if (inbox.chatsLoading) return <Skeleton />;
 
@@ -284,7 +311,11 @@ function ChatsTab({
               <div className="ibx-row-sub">{t.lastMsg || "No messages yet"}</div>
             </div>
             <div className="ibx-row-meta">
-              <div className="ibx-row-time">{relTime(t.ts)}</div>
+              {openingRowId === t.chatRoomId ? (
+                <div className="ibx-load-more-spinner" style={{ width: 14, height: 14 }} />
+              ) : (
+                <div className="ibx-row-time">{relTime(t.ts)}</div>
+              )}
             </div>
           </div>
         ))
@@ -303,9 +334,11 @@ function ChatsTab({
 function DealsTab({
   inbox,
   onOpenDealChat,
+  openingRowId,
 }: {
   inbox: ReturnType<typeof useInbox>;
   onOpenDealChat: (chatRoomId: string) => void;
+  openingRowId: string | null;
 }) {
   return (
     <>
@@ -375,7 +408,7 @@ function DealsTab({
         </div>
       ) : (
         inbox.deals.map((d) => (
-          <DealRow key={d.id} deal={d} inbox={inbox} onOpenDealChat={onOpenDealChat} />
+          <DealRow key={d.id} deal={d} inbox={inbox} onOpenDealChat={onOpenDealChat} openingRowId={openingRowId} />
         ))
       )}
 
@@ -392,10 +425,12 @@ function DealRow({
   deal,
   inbox,
   onOpenDealChat,
+  openingRowId,
 }: {
   deal: Deal;
   inbox: ReturnType<typeof useInbox>;
   onOpenDealChat: (chatRoomId: string) => void;
+  openingRowId: string | null;
 }) {
   const uid = useAuth().user?.uid || "";
   const { currency, formatPriceShort } = useCurrency();
@@ -554,12 +589,20 @@ function DealRow({
           {badge === "accepted" && deal.chatRoomId ? (
             <button
               className="ibx-open-chat-btn"
+              disabled={openingRowId === deal.chatRoomId}
               onClick={(e) => {
                 e.stopPropagation();
                 onOpenDealChat(deal.chatRoomId!);
               }}
             >
-              💬 Open Deal Chat
+              {openingRowId === deal.chatRoomId ? (
+                <>
+                  <span className="ibx-load-more-spinner" style={{ width: 13, height: 13, display: "inline-block", verticalAlign: -2, marginRight: 6 }} />
+                  Opening…
+                </>
+              ) : (
+                <>💬 Open Deal Chat</>
+              )}
             </button>
           ) : null}
         </div>
@@ -659,7 +702,7 @@ function GroupIcon({ id }: { id: string }) {
   }
 }
 
-function GroupsTab({ onOpenGroup }: { onOpenGroup: (id: string) => void }) {
+function GroupsTab({ onOpenGroup, openingRowId }: { onOpenGroup: (id: string) => void; openingRowId: string | null }) {
   const { user } = useAuth();
   const { openAuthModal } = useAuthModal();
   return (
@@ -684,9 +727,13 @@ function GroupsTab({ onOpenGroup }: { onOpenGroup: (id: string) => void }) {
             <div className="ibx-group-desc">{g.desc}</div>
           </div>
           <div className="ibx-group-meta">
-            <svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
-              <path d="M9 18l6-6-6-6" />
-            </svg>
+            {openingRowId === g.id ? (
+              <div className="ibx-load-more-spinner" style={{ width: 14, height: 14 }} />
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            )}
           </div>
         </div>
       ))}
