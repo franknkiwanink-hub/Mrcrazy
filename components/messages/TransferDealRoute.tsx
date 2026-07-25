@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
 import { useDealChat } from "@/lib/useDealChat";
 import TransferDealModal from "./TransferDealModal";
+import { TransferDealModalSkeleton } from "./TransferDealModal";
 import SignInRequired from "@/components/auth/SignInRequired";
 
 // Gives the Transfer Deals flow its own URL (/messages/deal/[id]/transfer)
@@ -36,8 +37,14 @@ export default function TransferDealRoute({ chatRoomId }: { chatRoomId: string }
 
   if (loading) {
     // Still resolving auth — avoid flashing SignInRequired for a
-    // signed-in user whose session hasn't finished loading yet.
-    return null;
+    // signed-in user whose session hasn't finished loading yet. This used
+    // to return null, which is exactly the silent gap the Transfer Deal
+    // button was reported for: tap the button, get nothing back, no way
+    // to tell if the tap even registered. The skeleton renders the same
+    // header/nav/checklist shape the real modal will use, so the tap
+    // gets an immediate, honest "this is loading" response instead of a
+    // blank screen.
+    return <TransferDealModalSkeleton onBack={goBackToChat} />;
   }
 
   if (!user) {
@@ -53,7 +60,9 @@ export default function TransferDealRoute({ chatRoomId }: { chatRoomId: string }
   }
 
   if (!chat.room) {
-    return null;
+    // Auth resolved but the deal room doc itself hasn't loaded yet —
+    // same reasoning as above, show the shape instead of nothing.
+    return <TransferDealModalSkeleton onBack={goBackToChat} />;
   }
 
   return (
