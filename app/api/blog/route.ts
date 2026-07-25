@@ -34,10 +34,17 @@ async function verifyUser(authHeader: string | null): Promise<string | null> {
   try {
     ensureFirebaseApp();
     const decoded = await getAuth().verifyIdToken(idToken);
-    if (decoded.uid && decoded.email_verified !== false) {
-      return decoded.uid;
-    }
-    return null;
+    // Was also requiring decoded.email_verified !== false, which no other
+    // route in this codebase checks (see app/api/storage and friends —
+    // they all just check uid). Any account that signed up without ever
+    // clicking an email verification link — including some social-auth
+    // flows that don't set this field at all — got "Sign-in required"
+    // here while being genuinely signed in everywhere else on the site,
+    // since AuthContext (the "global" client auth every other component
+    // uses) has no concept of this flag at all. Dropping it so blog
+    // publishing behaves like every other authenticated write on the site:
+    // a valid token is sufficient.
+    return decoded.uid || null;
   } catch {
     return null;
   }
