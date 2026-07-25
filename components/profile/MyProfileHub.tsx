@@ -79,7 +79,7 @@ function pmPlanClass(plan: string) {
   return "pm-plan-" + (["starter", "growth", "pro"].includes(plan) ? plan : "free");
 }
 
-type ParentTab = "profile" | "listings" | "favorites";
+type ParentTab = "profile" | "listings" | "favorites" | "following";
 type SubTab = "account" | "public";
 
 export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab }) {
@@ -104,12 +104,15 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
     listingsError,
     favorites,
     favoritesLoading,
+    following,
+    followingLoading,
     unreadDeals,
     saveAccount,
     savePublicProfile,
     uploadAvatar,
     deleteListing,
     removeFavorite,
+    unfollow,
     cancelPlan,
     refreshListings,
   } = useProfileData();
@@ -494,6 +497,15 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
               </svg>
               <span>Favorites</span>
             </button>
+            <button className={`pm-parent-tab${parentTab === "following" ? " active" : ""}`} onClick={() => setParentTab("following")}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+              <span>Following</span>
+            </button>
           </div>
 
           {/* My Profile tab */}
@@ -822,7 +834,52 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
             </div>
           )}
 
-          {/* Always-visible bottom actions */}
+          {/* Following tab */}
+          {parentTab === "following" && (
+            <div className="pm-parent-content active" style={{ position: "relative", zIndex: 1 }}>
+              <div style={{ width: "100%" }}>
+                {followingLoading ? (
+                  <div style={{ textAlign: "center", padding: "2rem", color: "var(--mp-text-muted)", fontSize: "0.9rem" }}>Loading who you follow…</div>
+                ) : following.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "2.5rem 1rem", color: "#555", fontSize: "0.88rem" }}>
+                    You are not following anyone yet. Follow a seller from their profile to see them here.
+                  </div>
+                ) : (
+                  <div className="pm-following-list">
+                    {following.map((f) => (
+                      <div
+                        className="pm-following-row"
+                        key={f.uid}
+                        style={{ cursor: "pointer" }}
+                        onClick={() => router.push(`/seller/${f.uid}`)}
+                      >
+                        {f.pic ? (
+                          <img className="pm-following-av" src={f.pic} alt={f.username} loading="lazy" />
+                        ) : (
+                          <div className="pm-following-av pm-following-av-fallback">{(f.username || "?").charAt(0).toUpperCase()}</div>
+                        )}
+                        <div className="pm-following-name">{f.username}</div>
+                        <button
+                          className="pm-following-unfollow-btn"
+                          type="button"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              await unfollow(f.uid);
+                            } catch {
+                              toast("Could not unfollow. Please try again.", "error");
+                            }
+                          }}
+                        >
+                          Unfollow
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <div className="pm-bottom-actions" style={{ position: "relative", zIndex: 1 }}>
             <div className="pm-bottom-row">
               <button className="pm-bottom-btn" disabled={settingsNav.isNavigating} onClick={() => settingsNav.navigate("/settings")}>
