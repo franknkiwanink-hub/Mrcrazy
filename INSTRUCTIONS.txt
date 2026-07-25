@@ -1,38 +1,79 @@
 HOW TO APPLY THIS ZIP
 ======================
+Extract directly into the ROOT of your project — paths mirror your
+project structure, so every file replaces its existing counterpart at
+the exact same path. Nothing here is a snippet; every file is a full,
+ready-to-use replacement.
 
-Extract this zip directly into the ROOT of your project (the folder
-that contains your `app/` and `components/` folders). The paths inside
-this zip mirror your project structure, so files will land in the
-correct place automatically:
+WHAT'S IN THIS UPDATE
+-----------------------
 
-  app/checkout-css-fix.css
-      -> This is NOT a full globals.css. It only contains the
-         `.checkout-*` rules that fix the checkout overflow issue.
-         Open your real app/globals.css, find the existing
-         `.checkout-*` block, and REPLACE it with the contents of
-         this file. Then delete checkout-css-fix.css — it's a
-         reference snippet, not a file your app imports.
+1. Backend — money-movement licensing gate
+   app/api/paypal/_handler.js
+     - handleTransfer (P2P wallet-to-wallet send) now returns HTTP 410
+       with a clear message. Original logic is fully preserved just
+       below it as _handleTransfer_DISABLED_pendingLicense — re-enable
+       by deleting the early-return stub once licensed.
+     - handleDonate (wallet-to-wallet donation) now returns HTTP 410.
+       Original logic preserved as
+       _handleDonate_DISABLED_pendingPaypalSplit — when donations come
+       back, they're meant to move to PayPal split payments, not a
+       restored wallet debit.
+     - handleGetDonations (stats/recent list) is untouched and still
+       live — only the money-moving donate action is disabled.
 
-  components/messages/CheckoutRoute.tsx
-      -> Replaces your existing file at this exact path.
+2. Frontend — matching UI states
+   components/wallet/SendTab.tsx
+     - Replaced the live P2P transfer form with a coming-soon
+       placeholder (same visual pattern as the existing Add Funds tab).
+       Auto Send goes with it since it's the same transfer mechanism.
+   components/wallet/WalletModal.tsx
+     - Updated SendTab call site (no longer needs balance/onSuccess
+       props).
+     - Updated wallet hint copy + Add Funds placeholder copy to clearly
+       state: wallet balance is boost-only, can't be withdrawn or sent,
+       and PayPal holds the actual escrow money.
+   components/seller/DonateOverlay.tsx
+     - Only the Donate submit button/CTA was touched — disabled, with a
+       "coming soon" note. Everything else (summary stats, quick
+       amounts, message field, recent donations list) is untouched.
+   components/settings/panels/PaymentsPanel.tsx
+     - Fixed copy that claimed PayPal is used for wallet top-ups — it's
+       the withdrawal payout destination only.
+   components/home/CreditsTicker.tsx
+     - Replaced homepage ticker lines that advertised "wallet-based
+       payments," "deposit once, pay anyone," and "wallet to wallet"
+       (all contradicted the disabled features) with accurate
+       PayPal-escrow / boost-only messaging.
 
-  components/listing/ListingDetailSkeleton.tsx
-      -> Replaces your existing file at this exact path.
-         (Fix here is the inline `margin: "92px auto 0"` — no CSS
-         file needed for this one.)
+3. Legal & support pages — all rewritten to match the real model
+   app/terms/page.tsx
+     - Full rewrite: PayPal-holds-the-money model, wallet boost-only
+       disclosure, added prohibited-listings section, chargeback/
+       dispute interplay, licensing disclaimer.
+   app/privacy/page.tsx
+     - Full rewrite: accurate PayPal role (authorization/capture, not
+       deposits), expanded cookies section (essential/preference/
+       payment), PayPal's own fraud/risk data use disclosed, age
+       requirement added to children's privacy section.
+   app/escrow/page.tsx
+     - Rewrote the section that described wallet-funded deals; now
+       explains PayPal authorization/hold/capture, added a "Getting
+       paid as a seller" section for the payout flow.
+   app/buyer-protection/page.tsx
+     - Clarified funds are held by PayPal and buyers never need to
+       link/share anything with a seller's PayPal account.
+   app/help/HelpContent.tsx
+     - Rewrote FAQ answers describing the old wallet-deposit model;
+       added new FAQs: "Does Siterifty hold my money?", "What is the
+       wallet actually used for?", "Can I send money / donate?" (says
+       plainly these are paused pending licensing).
 
-WHAT EACH FIX DOES
--------------------
-1. Checkout horizontal overflow on long titles:
-   - .checkout-summary / .checkout-payment / .checkout-item get
-     min-width: 0 (grid/flex items default to min-width:auto, which
-     let a long unbreakable title stretch the whole layout wider
-     than the viewport).
-   - .checkout-item-name gets white-space: nowrap; overflow: hidden;
-     text-overflow: ellipsis so long titles truncate instead.
-
-2. Listing skeleton touching the header:
-   - ListingDetailSkeleton.tsx now has margin: "92px auto 0" so it
-     clears the fixed 52px header + sub-header row, matching the
-     92px offset used elsewhere in the app (.svm-sticky-header).
+NOTHING WAS DELETED
+--------------------
+Every disabled feature's original implementation is still in the
+codebase, just gated behind a stub/placeholder, with a comment
+explaining exactly what to remove to bring it back. Withdraw (payout
+of money already earned) and Boost (spending wallet balance on your
+own listing) were left completely alone — neither is a licensing
+concern.
