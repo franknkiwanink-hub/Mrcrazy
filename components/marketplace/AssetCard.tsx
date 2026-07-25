@@ -67,6 +67,7 @@ export default function AssetCard({
             <path d="M12 2l8 4.5v11L12 22l-8-4.5v-11L12 2z" />
             <path d="M12 22V12M20 6.5L12 12 4 6.5" />
           </svg>
+          <span>3D Asset</span>
         </div>
         <button
           type="button"
