@@ -18,6 +18,8 @@ import SellerBadges from "@/components/seller/SellerBadges";
 import { logout } from "@/lib/authActions";
 import { buildListingSlug } from "@/lib/slug";
 import { useCurrency } from "@/lib/CurrencyContext";
+import { useNavigating } from "@/lib/useNavigating";
+import NavSpinnerIcon from "@/components/shared/NavSpinnerIcon";
 
 // Ports the PROFILE MODAL from Js/profile.js + Js/profile-early.js
 // (index.html lines 12099-12279 and 17189-18238) as a real routed page at
@@ -121,6 +123,22 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   // now also renders a matching skeleton during that gap; this spinner
   // covers the instant between tap and that skeleton mounting.
   const [navigatingToInbox, setNavigatingToInbox] = useState(false);
+  // Dashboard has no route-level loading.tsx gap the way /messages does
+  // (app/dashboard/page.tsx is a synchronous server component — Next's
+  // loading.tsx only fires around async server work, so it never showed
+  // here regardless). The actual silent gap is client-side: the
+  // dashboard button click today does nothing visible until
+  // SellerDashboard's JS chunk downloads, hydrates, and first-paints.
+  // Same fix as the inbox button — instant spinner on tap.
+  const dashNav = useNavigating();
+  // Settings is also a "use client" page (app/settings/page.tsx) — same
+  // reasoning as dashNav above, its own client bundle load/hydrate is
+  // the real gap, not something loading.tsx can see.
+  const settingsNav = useNavigating();
+  // /sell (app/sell/page.tsx) is a server page returning SellPickerClient
+  // synchronously, so loading.tsx can't cover its client-side data fetch
+  // gap either — same class of bug as dashNav/settingsNav above.
+  const addListingNav = useNavigating();
 
   const [usernameInput, setUsernameInput] = useState("");
   const [contactEmailInput, setContactEmailInput] = useState("");
@@ -406,14 +424,23 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
               </svg>
               <span>AI Agent</span>
             </button>
-            <button className="pm-quick-btn pm-dash-btn" type="button" onClick={() => router.push("/dashboard")}>
-              <span className="pm-dash-chart" aria-hidden="true">
-                <span className="pm-dash-bar" />
-                <span className="pm-dash-bar" />
-                <span className="pm-dash-bar" />
-                <span className="pm-dash-bar" />
-              </span>
-              <span>Dashboard</span>
+            <button
+              className="pm-quick-btn pm-dash-btn"
+              type="button"
+              disabled={dashNav.isNavigating}
+              onClick={() => dashNav.navigate("/dashboard")}
+            >
+              {dashNav.isNavigating ? (
+                <NavSpinnerIcon size={16} />
+              ) : (
+                <span className="pm-dash-chart" aria-hidden="true">
+                  <span className="pm-dash-bar" />
+                  <span className="pm-dash-bar" />
+                  <span className="pm-dash-bar" />
+                  <span className="pm-dash-bar" />
+                </span>
+              )}
+              <span>{dashNav.isNavigating ? "Opening…" : "Dashboard"}</span>
             </button>
           </div>
 
@@ -711,12 +738,16 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                   </div>
                 )}
               </div>
-              <button className="pm-add-listing-btn" onClick={() => router.push("/sell")}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                Add new listing
+              <button className="pm-add-listing-btn" disabled={addListingNav.isNavigating} onClick={() => addListingNav.navigate("/sell")}>
+                {addListingNav.isNavigating ? (
+                  <NavSpinnerIcon size={15} />
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                )}
+                {addListingNav.isNavigating ? "Opening…" : "Add new listing"}
               </button>
             </div>
           )}
@@ -794,12 +825,16 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
           {/* Always-visible bottom actions */}
           <div className="pm-bottom-actions" style={{ position: "relative", zIndex: 1 }}>
             <div className="pm-bottom-row">
-              <button className="pm-bottom-btn" onClick={() => router.push("/settings")}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                </svg>
-                Settings
+              <button className="pm-bottom-btn" disabled={settingsNav.isNavigating} onClick={() => settingsNav.navigate("/settings")}>
+                {settingsNav.isNavigating ? (
+                  <NavSpinnerIcon size={15} />
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                )}
+                {settingsNav.isNavigating ? "Opening…" : "Settings"}
               </button>
               <button
                 className="pm-bottom-btn pm-bottom-dispute"
