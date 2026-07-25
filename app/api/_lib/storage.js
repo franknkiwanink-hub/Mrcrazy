@@ -267,8 +267,24 @@ async function autoCleanup() {
 }
 
 // ---------- Firebase Admin init (lazy singleton) ----------
+// Was guarded only by a private module-local _firebaseApp variable, not
+// admin.apps.length/getApps() like every other _handler.js file. That
+// looks safe in isolation, but the module-local flag and the Admin SDK's
+// own internal app registry are two different things — on a warm
+// serverless invocation where this module gets re-evaluated (or bundled
+// alongside another route that already initialized the default app),
+// _firebaseApp resets to undefined while the SDK's registry still has
+// "[DEFAULT]" registered, so admin.initializeApp() throws "the default
+// Firebase app already exists". Checking admin.apps.length first (same
+// as every other handler's `if (!getApps().length)` guard) fixes that:
+// if the default app is already registered by anyone, reuse it instead
+// of trying to register it again.
 let _firebaseApp
 function getFirebaseAdmin() {
+  if (admin.apps.length) {
+    _firebaseApp = admin.apps[0]
+    return _firebaseApp
+  }
   if (!_firebaseApp) {
     _firebaseApp = admin.initializeApp({
       credential: admin.credential.cert({
