@@ -19,6 +19,7 @@ import RequestPaymentOverlay from "./RequestPaymentOverlay";
 import SignInRequired from "@/components/auth/SignInRequired";
 import { buildListingSlug } from "@/lib/slug";
 import { useCurrency } from "@/lib/CurrencyContext";
+import NavSpinnerIcon from "@/components/shared/NavSpinnerIcon";
 
 // Ports the deal chat panel from Js/inbox.js (lines 937-2774): sticky
 // item bar, escrow announcement bar + actions (pay/release/dispute),
@@ -59,6 +60,13 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   const [deleteAfterCancel, setDeleteAfterCancel] = useState<{ deleteAt: number } | null>(null);
   const [deleteCountdown, setDeleteCountdown] = useState("");
   const [requestPaymentOverlayOpen, setRequestPaymentOverlayOpen] = useState(false);
+  // Separate from ctaBusy on purpose: this covers the "Transfer Deal"
+  // attach-pill in the message composer bar, which is a different button
+  // from the announcement bar's Mark Delivered CTA (both can navigate to
+  // the same /transfer route, but they're not the same element on
+  // screen — reusing ctaBusy here would spinner/disable the announcement
+  // bar's button when this pill is the one that was actually tapped).
+  const [transferPillBusy, setTransferPillBusy] = useState(false);
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -469,7 +477,16 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
             onRelease={handleRelease}
             onDispute={handleDispute}
             onRemindBuyer={handleRemindBuyer}
-            onMarkDelivered={() => router.push(`/messages/deal/${chatRoomId}/transfer`)}
+            onMarkDelivered={() => {
+              // Same fix as handlePay above: flip to the busy/"Processing…"
+              // state the instant this is tapped, instead of leaving the
+              // button looking inert while router.push resolves and the
+              // transfer route's own data loads (that route now also has
+              // a route-level loading.tsx skeleton — see
+              // app/messages/deal/[id]/transfer/loading.tsx).
+              setCtaBusy(true);
+              router.push(`/messages/deal/${chatRoomId}/transfer`);
+            }}
           />
         ) : null}
 
@@ -524,9 +541,21 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
                 File
               </button>
               {isSeller ? (
-                <button id="dcpOptTransfer" className="dcp-attach-pill dcp-transfer-pill" onClick={() => router.push(`/messages/deal/${chatRoomId}/transfer`)}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 014-4h14" /><path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 01-4 4H3" /></svg>
-                  Transfer Deal
+                <button
+                  id="dcpOptTransfer"
+                  className="dcp-attach-pill dcp-transfer-pill"
+                  disabled={transferPillBusy}
+                  onClick={() => {
+                    setTransferPillBusy(true);
+                    router.push(`/messages/deal/${chatRoomId}/transfer`);
+                  }}
+                >
+                  {transferPillBusy ? (
+                    <NavSpinnerIcon size={16} />
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 1l4 4-4 4" /><path d="M3 11V9a4 4 0 014-4h14" /><path d="M7 23l-4-4 4-4" /><path d="M21 13v2a4 4 0 01-4 4H3" /></svg>
+                  )}
+                  {transferPillBusy ? "Opening…" : "Transfer Deal"}
                 </button>
               ) : null}
             </div>
