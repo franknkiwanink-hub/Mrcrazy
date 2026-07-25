@@ -126,6 +126,16 @@ export default function ThemeModal({
     };
   }, []);
 
+  // Lock page scroll while open, same as the other modals in the app.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
   function showUpgradeNudge() {
     setNudge(true);
     nudgeTimers.current.forEach(clearTimeout);
@@ -166,7 +176,7 @@ export default function ThemeModal({
       }}
     >
       <div className="theme-card">
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <div className="theme-card-sticky-header">
           <div className="theme-heading" style={{ marginBottom: 0 }}>
             Pick a theme
           </div>
@@ -189,6 +199,7 @@ export default function ThemeModal({
             <CloseIcon />
           </button>
         </div>
+        <div className="theme-card-scroll">
         <div className="theme-sub">Tap any theme to apply it instantly. Syncs across all your devices.</div>
         <div className="theme-divider" />
         <div className="theme-grid" id="themeGrid">
@@ -277,6 +288,7 @@ export default function ThemeModal({
               </div>
             );
           })}
+        </div>
         </div>
       </div>
 
