@@ -7249,10 +7249,21 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
     border: 1px solid var(--mp-border);
     width: 100%;
     max-width: 440px;
+    /* Was flex-item tabs with flex:1 sized to fit exactly 3 tabs in this
+       pill — adding a 4th (Following) meant 4 equal-width, nowrap tabs no
+       longer fit a narrow phone screen, and the row had no overflow
+       handling, so the last tab just got clipped off the right edge
+       instead of shrinking or wrapping. Making the row itself scroll
+       horizontally fixes this regardless of how many tabs exist, rather
+       than re-tuning flex-basis math every time a tab is added/removed. */
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
+  .pm-parent-tab-row::-webkit-scrollbar { display: none; width: 0; height: 0; }
   .pm-parent-tab {
-    flex: 1;
-    padding: 0.65rem 0.5rem;
+    flex: 1 0 auto;
+    padding: 0.65rem 0.9rem;
     border: none;
     background: transparent;
     border-radius: 50px;
@@ -7872,7 +7883,8 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
      anything below 900px. */
   @media (min-width: 900px) {
     .pm-quick-row,
-    .pm-parent-content {
+    .pm-parent-content,
+    .pm-parent-tab-row {
       max-width: 720px;
     }
     .pm-modal-content {
@@ -9823,8 +9835,44 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
             .dcp-attach-pill:disabled { opacity: 0.6; cursor: default; }
             .dcp-attach-pill:disabled:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.5); }
             #dcpInputInner {
-            width: 90%; display: flex; align-items: flex-end; position: relative;
+            width: 90%; display: flex; flex-direction: column; align-items: stretch; position: relative;
             }
+            /* Staged image/file preview strip — sits above the textarea,
+               inside #dcpInputInner, so it visually reads as "attached to
+               this message" rather than a separate overlay. Scrolls
+               horizontally if more than a couple of files are staged at
+               once (multi-file pick for html/css/js handoffs). */
+            .dcp-attach-preview-strip {
+            width: 100%; display: flex; gap: 0.5rem; overflow-x: auto;
+            padding: 0 0.1rem 0.55rem; scrollbar-width: none; -ms-overflow-style: none;
+            }
+            .dcp-attach-preview-strip::-webkit-scrollbar { display: none; width: 0; height: 0; }
+            .dcp-attach-preview-card {
+            position: relative; flex-shrink: 0; width: 76px;
+            display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
+            }
+            .dcp-attach-preview-thumb {
+            width: 64px; height: 64px; border-radius: 0.85rem; object-fit: cover;
+            background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+            flex-shrink: 0;
+            }
+            .dcp-attach-preview-file {
+            display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,0.4);
+            }
+            .dcp-attach-preview-file svg { width: 24px; height: 24px; }
+            .dcp-attach-preview-name {
+            width: 100%; font-size: 0.62rem; color: rgba(255,255,255,0.5); text-align: center;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            }
+            .dcp-attach-preview-remove {
+            position: absolute; top: -6px; right: -6px; width: 20px; height: 20px;
+            border-radius: 50%; background: #1a1a1a; border: 1px solid rgba(255,255,255,0.18);
+            color: rgba(255,255,255,0.75); display: flex; align-items: center; justify-content: center;
+            cursor: pointer; padding: 0;
+            }
+            .dcp-attach-preview-remove svg { width: 11px; height: 11px; }
+            .dcp-attach-preview-remove:hover { background: rgba(239,68,68,0.24); border-color: rgba(239,68,68,0.55); color: #fca5a5; }
+            .dcp-attach-preview-remove:disabled { opacity: 0.4; cursor: not-allowed; }
             .dcp-textarea-wrap {
             flex: 1; position: relative; display: flex; align-items: flex-end;
             background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09);
@@ -9857,6 +9905,9 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
             }
             #dcpSendBtn:hover { filter: brightness(1.1); }
             #dcpSendBtn:active { transform: scale(0.93); }
+            #dcpSendBtn:disabled { opacity: 0.35; cursor: default; }
+            #dcpSendBtn:disabled:hover { filter: none; }
+            #dcpSendBtn:disabled:active { transform: none; }
             #dcpSendBtn svg { width: 14px; height: 14px; stroke: #000; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
             .ibx-deal-countdown { font-size: 0.63rem; font-weight: 700; color: #a3e635; white-space: nowrap; }
             .ibx-open-chat-btn {
