@@ -1937,16 +1937,6 @@ const DISCOVER_SELLER_LIMIT = 6;
 const DISCOVER_BLOG_POOL = DISCOVER_BLOG_LIMIT * 4;
 const DISCOVER_SELLER_POOL = DISCOVER_SELLER_LIMIT * 4;
 
-function _discoverToLiteListing(id, v) {
-  return {
-    id,
-    title: v.title || 'Untitled',
-    type: v.type || 'website',
-    price: typeof v.financials?.price === 'number' ? v.financials.price : null,
-    boosted: _isBoosted(v),
-  };
-}
-
 async function handleDiscover(body, idToken) {
   if (idToken) await verifyFirebaseToken(idToken);
   const db = getAdminDb();
@@ -1986,7 +1976,23 @@ async function handleDiscover(body, idToken) {
     .map(item => ({ item, key: _seededSortKey(seed, item.id) }))
     .sort((a, b) => a.key - b.key)
     .slice(0, DISCOVER_LISTING_LIMIT)
-    .map(({ item }) => _discoverToLiteListing(item.id, item));
+    .map(({ item }) => item);
+
+  // Attach ownerPlan the same way handleFeed does, so DiscoverPanel's
+  // listings render with premium-seller shimmer and full owner context
+  // exactly like the main marketplace grid, not a stripped-down variant.
+  const listingOwnerIds = [...new Set(listings.map(l => l.ownerId).filter(Boolean))];
+  if (listingOwnerIds.length) {
+    const ownerRefs = listingOwnerIds.map(id => db.collection('users').doc(id));
+    const ownerSnaps = await db.getAll(...ownerRefs);
+    const ownerPlanById = new Map();
+    ownerSnaps.forEach(snap => {
+      if (snap.exists) ownerPlanById.set(snap.id, snap.data()?.plan || 'free');
+    });
+    listings.forEach(l => { l.ownerPlan = l.ownerId ? (ownerPlanById.get(l.ownerId) || 'free') : 'free'; });
+  } else {
+    listings.forEach(l => { l.ownerPlan = 'free'; });
+  }
 
   const sellers = userSnap.docs
     .filter(d => !d.data().disabled)
