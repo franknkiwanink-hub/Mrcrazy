@@ -9,21 +9,28 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
 import { createBlogPost } from "@/lib/blog";
 
-async function uploadCoverImage(file: File, idToken: string): Promise<string> {
-  const base64 = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve((reader.result as string).split(",")[1]);
-    reader.onerror = () => reject(new Error("Image read failed"));
-    reader.readAsDataURL(file);
-  });
-  const res = await fetch("/api/storage", {
+// Same public Imgur client ID already used for profile pics
+// (lib/useProfileData.ts) and appeal screenshots (lib/accountAppeal.ts) —
+// blog covers now go through the same direct, client-side path instead
+// of /api/storage. That route's image handling goes through Supabase via
+// Firebase Admin (app/api/_lib/storage.js) for cases that need server-side
+// quota/account tracking (e.g. transfer-deal files); a blog cover is just
+// a public image with no such tracking need, so it doesn't need that
+// server round-trip at all — one less hop, and one less thing that can
+// throw a Firebase Admin init error.
+const IMGUR_CLIENT_ID_BLOG = "891e5bb4aa94282";
+
+async function uploadCoverImage(file: File): Promise<string> {
+  const fd = new FormData();
+  fd.append("image", file);
+  const res = await fetch("https://api.imgur.com/3/image", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
-    body: JSON.stringify({ filename: file.name, content: base64, encoding: "base64" }),
+    headers: { Authorization: "Client-ID " + IMGUR_CLIENT_ID_BLOG },
+    body: fd,
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error || "Image upload failed");
-  return json.url;
+  if (!json.success) throw new Error(json.data?.error || "Image upload failed");
+  return json.data.link as string;
 }
 
 export default function AddBlogButton() {
@@ -77,7 +84,7 @@ function AddBlogModal({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       const idToken = await user.getIdToken();
-      const coverImage = await uploadCoverImage(imageFile, idToken);
+      const coverImage = await uploadCoverImage(imageFile);
       const post = await createBlogPost(idToken, {
         title: title.trim(),
         description: description.trim(),
