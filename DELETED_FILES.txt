@@ -1,9 +1,2 @@
-The following files were deleted as dead code (confirmed unused, no working
-imports referenced them anywhere in the project):
-
-- components/onboarding/TourModal.tsx
-- lib/og/supportOgImage.tsx
-- lib/reports.ts
-
-Delete these manually from your project — they aren't included here since
-this zip only contains added/edited files.
+Note: AiSearchPanel.tsx was DELETED — not included, remove it manually from your project
+components/marketplace/AiSearchPanel.tsx
