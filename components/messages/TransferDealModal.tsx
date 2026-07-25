@@ -32,6 +32,68 @@ import type { PaymentStatus } from "@/lib/useDealChat";
 
 const NAV_TABS: TdmListingType[] = ["website", "game", "app"];
 
+// Route-level (and pre-data) loading state for the Transfer Deals flow.
+// Mirrors the real header/nav/checklist-grid shape so there's no visible
+// swap-in jolt once the actual data (chat room, checklist progress) loads —
+// same reasoning as CheckoutRouteSkeleton in CheckoutRoute.tsx. Used two
+// places: TransferDealRoute renders this itself while chat.room is still
+// loading, and app/messages/deal/[id]/transfer/loading.tsx renders it as
+// the route's Suspense fallback for the gap before TransferDealRoute's own
+// JS/data even starts resolving.
+export function TransferDealModalSkeleton({ onBack }: { onBack?: () => void }) {
+  return (
+    <div id="transferDealModal" className="tdm-open">
+      <header className="tdm-header">
+        <div className="tdm-brand">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 1l4 4-4 4" />
+            <path d="M3 11V9a4 4 0 014-4h14" />
+            <path d="M7 23l-4-4 4-4" />
+            <path d="M21 13v2a4 4 0 01-4 4H3" />
+          </svg>
+          <h2>TRANSFER DEALS</h2>
+        </div>
+        <button className="tdm-cancel-btn" onClick={onBack} disabled={!onBack}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+          Cancel
+        </button>
+      </header>
+
+      <nav className="tdm-checklist-nav">
+        {NAV_TABS.map((t, i) => (
+          <button key={t} className={`tdm-nav-btn${i === 0 ? " active" : ""}`} disabled>
+            {t.toUpperCase()}
+          </button>
+        ))}
+      </nav>
+
+      <main className="tdm-checklist-main">
+        <div className="tdm-checklist-container">
+          <div className="tdm-checklist-column">
+            {[0, 1, 2, 3].map((i) => (
+              <div className="tdm-checklist-item" key={`l-${i}`}>
+                <div className="skel-block" style={{ width: 34, height: 34, borderRadius: 9 }} />
+                <div className="skel-block skel-text" style={{ width: "55%" }} />
+              </div>
+            ))}
+          </div>
+          <div className="tdm-checklist-column">
+            {[0, 1, 2, 3].map((i) => (
+              <div className="tdm-checklist-item" key={`r-${i}`}>
+                <div className="skel-block" style={{ width: 34, height: 34, borderRadius: 9 }} />
+                <div className="skel-block skel-text" style={{ width: "55%" }} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 export interface TransferDealModalProps {
   chatRoomId: string;
   sellerUid: string | null;
