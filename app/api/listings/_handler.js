@@ -308,7 +308,7 @@ export default async function handler(req, res) {
   // browse listings and preview/download an already-attached build file
   // without being logged in. Every other action (create/update/delete/
   // report) still requires auth.
-  const PUBLIC_ACTIONS = ['listing.feed', 'listing.file-url', 'listing.impression', 'listing.view', 'listing.premium-sellers', 'listing.similar', 'listing.search', 'listing.boosted-ads'];
+  const PUBLIC_ACTIONS = ['listing.feed', 'listing.file-url', 'listing.impression', 'listing.view', 'listing.premium-sellers', 'listing.similar', 'listing.search', 'listing.boosted-ads', 'listing.discover'];
   if (!idToken && !PUBLIC_ACTIONS.includes(action)) {
     return fail(res, new ApiError('Missing auth token', 'AUTH_MISSING', 401));
   }
@@ -329,6 +329,7 @@ export default async function handler(req, res) {
       case 'listing.impression': return ok(res, await handleImpression(req.body, idToken));
       case 'listing.view':   return ok(res, await handleView(req.body, idToken));
       case 'listing.premium-sellers': return ok(res, await handlePremiumSellers(req.body, idToken));
+      case 'listing.discover': return ok(res, await handleDiscover(req.body, idToken));
       case 'listing.verify-generate': return ok(res, await handleVerifyGenerate(req.body, idToken));
       case 'listing.verify-check': return ok(res, await handleVerifyCheck(req.body, idToken));
       case 'listing.link-check': return ok(res, await handleLinkCheck(req.body, idToken));
@@ -1901,6 +1902,111 @@ async function handlePremiumSellers(body, idToken) {
   }));
 
   return { sellers: sellers.filter(Boolean), seed };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// listing.discover  { idToken?, seed? }  → { blogs, listings, sellers, seed }
+//
+// Powers the full-screen "Discover" panel (replaces the old small AI Search
+// popup — this has nothing to do with AI, it's a browse/discovery surface).
+// Deliberately NOT a scored/ranked feed: per product decision, sorting by
+// engagement would mean collecting and maintaining extra counters across a
+// lot of docs for a payoff that isn't worth the added read/write cost here.
+// Instead this returns a random slice of blogs, active listings, and users
+// each time — genuinely random per open (unless a seed is echoed back, same
+// convention as handleFeed/handlePremiumSellers, for pagination-free stable
+// reshuffles within one sitting).
+//
+// Cost profile:
+//   - listings: reuses handleFeed's existing _getTypePool cache (shared,
+//     Firestore-backed, 1hr TTL) — zero additional collection scans beyond
+//     what the marketplace feed already pays for.
+//   - blogs: blogPosts is a small collection by nature (editorial content,
+//     not user-generated at scale) — a capped, non-cached direct read is
+//     cheap and always fresh; no pool needed.
+//   - sellers: small capped read from `users`, same shape/cost class as
+//     handlePremiumSellers just above, minus the per-seller follower/listing
+//     count() aggregations (not needed here since this is unranked).
+// ─────────────────────────────────────────────────────────────────────────────
+const DISCOVER_BLOG_LIMIT = 6;
+const DISCOVER_LISTING_LIMIT = 12;
+const DISCOVER_SELLER_LIMIT = 6;
+// Pull a slightly larger capped pool than we need so the seeded shuffle
+// actually varies the visible slice instead of always returning the same
+// handful in the same order.
+const DISCOVER_BLOG_POOL = DISCOVER_BLOG_LIMIT * 4;
+const DISCOVER_SELLER_POOL = DISCOVER_SELLER_LIMIT * 4;
+
+function _discoverToLiteListing(id, v) {
+  return {
+    id,
+    title: v.title || 'Untitled',
+    type: v.type || 'website',
+    price: typeof v.financials?.price === 'number' ? v.financials.price : null,
+    boosted: _isBoosted(v),
+  };
+}
+
+async function handleDiscover(body, idToken) {
+  if (idToken) await verifyFirebaseToken(idToken);
+  const db = getAdminDb();
+
+  let { seed } = body || {};
+  if (!Number.isInteger(seed)) seed = Math.floor(Math.random() * 2 ** 31);
+
+  const [blogSnap, listingPools, userSnap] = await Promise.all([
+    db.collection('blogPosts')
+      .orderBy('createdAt', 'desc')
+      .limit(DISCOVER_BLOG_POOL)
+      .get(),
+    Promise.all(FEED_TYPES.map((t) => _getTypePool(db, t))),
+    db.collection('users')
+      .limit(DISCOVER_SELLER_POOL)
+      .get(),
+  ]);
+
+  const blogs = blogSnap.docs
+    .map(d => {
+      const v = d.data();
+      return {
+        id: d.id,
+        title: v.title || 'Untitled',
+        description: v.description || '',
+        coverImage: v.coverImage || '',
+        createdAt: v.createdAt?.toMillis ? v.createdAt.toMillis() : (v.createdAt || null),
+        key: _seededSortKey(seed, d.id),
+      };
+    })
+    .sort((a, b) => a.key - b.key)
+    .slice(0, DISCOVER_BLOG_LIMIT)
+    .map(({ key, ...rest }) => rest);
+
+  const allListings = listingPools.flat();
+  const listings = allListings
+    .map(item => ({ item, key: _seededSortKey(seed, item.id) }))
+    .sort((a, b) => a.key - b.key)
+    .slice(0, DISCOVER_LISTING_LIMIT)
+    .map(({ item }) => _discoverToLiteListing(item.id, item));
+
+  const sellers = userSnap.docs
+    .filter(d => !d.data().disabled)
+    .map(d => {
+      const v = d.data();
+      return {
+        uid: d.id,
+        username: v.username || v.displayName || 'Anonymous',
+        profilePic: v.profilePic || '',
+        plan: v.plan || 'free',
+        rating: typeof v.rating === 'number' ? v.rating : 0,
+        ratingCount: typeof v.ratingCount === 'number' ? v.ratingCount : 0,
+        key: _seededSortKey(seed, d.id),
+      };
+    })
+    .sort((a, b) => a.key - b.key)
+    .slice(0, DISCOVER_SELLER_LIMIT)
+    .map(({ key, ...rest }) => rest);
+
+  return { blogs, listings, sellers, seed };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
