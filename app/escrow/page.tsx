@@ -39,27 +39,35 @@ export default function EscrowPage() {
     >
       <StaticSection heading="What escrow means here">
         <p>
-          When a buyer pays for a deal, the money moves into escrow — held by Siterifty, not the
-          seller. It only reaches the seller&apos;s wallet once the buyer confirms delivery, or
-          once the 72-hour verification window passes without a dispute. At no point can a seller
-          pull funds out of an unconfirmed deal.
+          When a buyer pays for a deal, PayPal authorizes and holds the payment — the money is
+          never sent to the seller up front, and Siterifty never takes custody of it either. It
+          only reaches the seller once the buyer confirms delivery, or once the 72-hour
+          verification window passes without a dispute. At no point can a seller pull funds out of
+          an unconfirmed deal, and at no point does Siterifty hold your money in its own accounts.
         </p>
       </StaticSection>
 
-      <StaticSection heading="The wallet">
+      <StaticSection heading="PayPal holds the money, not your Siterifty wallet">
         <p>
-          All payments on Siterifty run through your wallet, not directly card-to-card or
-          account-to-account. You top up your wallet (via card or PayPal, from Settings → Payment
-          Methods), and that balance is what funds deals and receives payouts. This keeps every
-          transaction inside one consistent, logged system instead of scattering payment methods
-          across individual deals.
+          Siterifty isn&apos;t a licensed money transmitter, so we don&apos;t hold customer funds
+          ourselves. Every marketplace purchase is paid for directly through PayPal at checkout —
+          PayPal authorizes the charge and holds it until the deal completes, then we instruct
+          PayPal to capture and release it to the seller&apos;s payout method (minus the platform
+          fee) once the buyer confirms.
+        </p>
+        <p style={{ marginTop: 10 }}>
+          Your Siterifty <strong>wallet</strong> is a separate, much smaller thing: it&apos;s an
+          in-app credit used only to boost your own listings. It isn&apos;t funded by card or bank
+          transfer, can&apos;t be withdrawn, and can&apos;t be sent to other users — it exists
+          purely for spending inside Siterifty, not as a place we hold your money.
         </p>
       </StaticSection>
 
       <StaticSection heading="Platform fees">
         <p>
           Siterifty takes a percentage of the sale price when a deal completes — never charged
-          up front. The rate depends on the seller&apos;s plan at the time of sale:
+          up front, and always shown at checkout before you confirm. The rate depends on the
+          seller&apos;s plan at the time of sale:
         </p>
         <table style={{ width: "100%", marginTop: 12, borderCollapse: "collapse", fontSize: 14 }}>
           <thead>
@@ -82,6 +90,20 @@ export default function EscrowPage() {
             ))}
           </tbody>
         </table>
+        <p style={{ marginTop: 10 }}>
+          A separate buyer service fee is also shown at checkout, covering PayPal&apos;s
+          escrow-style authorization and Siterifty&apos;s transaction processing.
+        </p>
+      </StaticSection>
+
+      <StaticSection heading="Getting paid as a seller">
+        <p>
+          Once a deal completes, your share of the sale is credited to your withdrawable balance —
+          not held by Siterifty as a stored balance, just tracked as money you&apos;re owed. From
+          there you can request a payout to your PayPal email, bank account, or Bitcoin address, set
+          up in Settings → Payments. Payouts are processed as real transfers out to you; they&apos;re
+          never routed back through the in-app wallet.
+        </p>
       </StaticSection>
 
       <StaticSection heading="Delivery & downloads">
@@ -97,7 +119,9 @@ export default function EscrowPage() {
         <p>
           Either party can raise a dispute before funds release, which freezes the escrow
           immediately — no further action happens on that deal until our team reviews it, which
-          we do within 24–48 hours.
+          we do within 24–48 hours. Because the money sits in a PayPal authorization rather than a
+          Siterifty-held balance, a dispute resolved in the buyer&apos;s favor is refunded by voiding
+          that authorization — nothing is ever captured until we're sure where it should go.
         </p>
       </StaticSection>
     </StaticPage>
