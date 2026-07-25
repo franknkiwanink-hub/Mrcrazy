@@ -52,11 +52,11 @@ export default function TransferDealModal(props: TransferDealModalProps) {
 
   const [activeItem, setActiveItem] = useState<{ key: string; item: TdmChecklistItem } | null>(null);
   // The full-screen "Protected Transaction" cover always shows first for
-  // an opened item. Continue is intentionally a no-op right now (per
-  // instruction — item panels ship in a later pass), so this stays false;
-  // flip it inside ItemCoverScreen's onContinue to reveal the panel below.
+  // an opened item; Continue flips this to true to reveal the real
+  // item panel (file upload / secure secret / collaborator invite / etc).
   const [itemPanelUnlocked, setItemPanelUnlocked] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [addOtherOpen, setAddOtherOpen] = useState(false);
 
   // Lock page scroll while open, same as the rest of the app's modals.
   useEffect(() => {
@@ -116,10 +116,12 @@ export default function TransferDealModal(props: TransferDealModalProps) {
         <ChecklistGrid
           tab={tdm.tab}
           completed={tdm.completed}
+          customItems={tdm.customItems}
           onOpenItem={(key, item) => {
             setActiveItem({ key, item });
             setItemPanelUnlocked(false);
           }}
+          onAddOther={() => setAddOtherOpen(true)}
         />
       </main>
 
@@ -130,14 +132,7 @@ export default function TransferDealModal(props: TransferDealModalProps) {
           key={activeItem.key}
           item={activeItem.item}
           onCancel={() => setActiveItem(null)}
-          onContinue={() => {
-            // Continue is a placeholder for now, per instruction — the
-            // per-item panels (file upload, secure secret, collaborator
-            // invite, recipient proof) ship in a later pass. Flipping
-            // this flag is what will reveal ItemModal below once ready;
-            // left as a no-op call today so nothing advances past the
-            // cover screen yet.
-          }}
+          onContinue={() => setItemPanelUnlocked(true)}
         />
       ) : null}
 
@@ -160,9 +155,22 @@ export default function TransferDealModal(props: TransferDealModalProps) {
         />
       ) : null}
 
+      {addOtherOpen ? (
+        <AddOtherModal
+          onCancel={() => setAddOtherOpen(false)}
+          onCreate={(label, type) => {
+            const created = tdm.addCustomItem(label, type);
+            setAddOtherOpen(false);
+            setActiveItem(created);
+            setItemPanelUnlocked(false);
+          }}
+        />
+      ) : null}
+
       {previewOpen ? (
         <PreviewSheet
           tab={tdm.tab}
+          customItems={tdm.customItems}
           completedKeysForTab={tdm.completedKeysForTab}
           finalizing={tdm.finalizing}
           onRemove={(key) => {
@@ -206,25 +214,43 @@ function warningBannerClass(status: PaymentStatus, isFinalized: boolean): string
 function ChecklistGrid({
   tab,
   completed,
+  customItems,
   onOpenItem,
+  onAddOther,
 }: {
   tab: TdmListingType;
   completed: Record<string, boolean>;
+  customItems: TdmChecklistItem[];
   onOpenItem: (key: string, item: TdmChecklistItem) => void;
+  onAddOther: () => void;
 }) {
   const data = TDM_CATEGORIES[tab];
+  const builtinCount = data.left.length + data.right.length;
   return (
     <div className="tdm-checklist-container">
       <div className="tdm-checklist-column">
         {data.left.map((item, idx) => (
           <ChecklistRow key={idx} item={item} itemKey={`${tab}-${idx}`} completed={!!completed[`${tab}-${idx}`]} onOpen={onOpenItem} />
         ))}
+        {customItems.map((item, i) => {
+          const realIdx = builtinCount + i;
+          return <ChecklistRow key={`custom-${realIdx}`} item={item} itemKey={`${tab}-${realIdx}`} completed={!!completed[`${tab}-${realIdx}`]} onOpen={onOpenItem} />;
+        })}
       </div>
       <div className="tdm-checklist-column">
         {data.right.map((item, idx) => {
           const realIdx = data.left.length + idx;
           return <ChecklistRow key={realIdx} item={item} itemKey={`${tab}-${realIdx}`} completed={!!completed[`${tab}-${realIdx}`]} onOpen={onOpenItem} />;
         })}
+        <div className="tdm-checklist-item" onClick={onAddOther}>
+          <div className="tdm-icon-wrapper">
+            <TdmIcon id="other" />
+          </div>
+          <span className="tdm-item-label">Other (not listed here)</span>
+          <div className="tdm-arrow-wrapper">
+            <TdmArrowIcon />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -251,6 +277,78 @@ function ChecklistRow({
         <TdmArrowIcon />
       </div>
       <TdmCheckmarkIcon />
+    </div>
+  );
+}
+
+// ---------- "Other" prompt: name a custom item + pick its delivery type ----------
+function AddOtherModal({
+  onCancel,
+  onCreate,
+}: {
+  onCancel: () => void;
+  onCreate: (label: string, type: "file_upload" | "secure_secret") => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [type, setType] = useState<"file_upload" | "secure_secret">("file_upload");
+
+  return (
+    <div className="tdm-item-modal-overlay active" onClick={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="tdm-item-modal" style={{ "--tdm-accent": TDM_TYPE_THEME[type].accent } as React.CSSProperties}>
+        <div className="tdm-modal-theme-head" style={{ "--tdm-accent": TDM_TYPE_THEME[type].accent } as React.CSSProperties}>
+          <div className="tdm-modal-theme-icon">
+            <TdmIcon id="other" />
+          </div>
+          <div>
+            <div className="tdm-modal-theme-kicker">Other</div>
+            <h2 style={{ margin: 0 }}>Add a custom item</h2>
+          </div>
+        </div>
+        <p className="tdm-modal-blurb">Not seeing what you need to transfer? Name it and choose how you'll deliver it.</p>
+
+        <input
+          className="tdm-gh-input"
+          type="text"
+          placeholder="e.g. Newsletter subscriber list"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          maxLength={80}
+          autoFocus
+        />
+
+        <div className="tdm-type-choice">
+          <button
+            type="button"
+            className={`tdm-type-choice-btn${type === "file_upload" ? " active" : ""}`}
+            style={{ "--tdm-accent": TDM_TYPE_THEME.file_upload.accent } as React.CSSProperties}
+            onClick={() => setType("file_upload")}
+          >
+            {TDM_TYPE_THEME.file_upload.heading}
+          </button>
+          <button
+            type="button"
+            className={`tdm-type-choice-btn${type === "secure_secret" ? " active" : ""}`}
+            style={{ "--tdm-accent": TDM_TYPE_THEME.secure_secret.accent } as React.CSSProperties}
+            onClick={() => setType("secure_secret")}
+          >
+            {TDM_TYPE_THEME.secure_secret.heading}
+          </button>
+        </div>
+
+        <div className="tdm-btn-group">
+          <button type="button" className="tdm-cover-cancel" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="tdm-cover-continue"
+            disabled={!label.trim()}
+            onClick={() => onCreate(label, type)}
+          >
+            Add Item
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1028,6 +1126,7 @@ function FileThumb({ file, onRemove, thumbUrlsRef }: { file: File; onRemove: () 
 // ---------- Preview sheet ----------
 function PreviewSheet({
   tab,
+  customItems,
   completedKeysForTab,
   finalizing,
   onRemove,
@@ -1035,6 +1134,7 @@ function PreviewSheet({
   onConfirm,
 }: {
   tab: TdmListingType;
+  customItems: TdmChecklistItem[];
   completedKeysForTab: (t: TdmListingType) => string[];
   finalizing: boolean;
   onRemove: (key: string) => void;
@@ -1043,7 +1143,7 @@ function PreviewSheet({
 }) {
   const keys = completedKeysForTab(tab);
   const items = { ...TDM_CATEGORIES[tab] };
-  const flat = [...items.left, ...items.right];
+  const flat = [...items.left, ...items.right, ...customItems];
 
   return (
     <div className="tdm-preview-overlay active" onClick={(e) => e.target === e.currentTarget && onClose()}>
