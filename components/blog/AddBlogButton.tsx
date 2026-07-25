@@ -1,15 +1,12 @@
 "use client";
 
-// Admin-only "add post" control for /blog. The button itself only
-// renders for the admin account (see useIsAdmin) — that's a UI nicety,
-// not the security boundary; every write is independently re-verified
-// server-side in app/api/blog/route.ts. A signed-out or non-admin
-// visitor never sees this button at all.
+// "Add post" control for /blog. Any signed-in user sees this button —
+// no admin check. Server-side, app/api/blog/route.ts only requires a
+// valid idToken (any authenticated user), not an admin match.
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
-import { useIsAdmin } from "@/lib/useIsAdmin";
 import { createBlogPost } from "@/lib/blog";
 
 async function uploadCoverImage(file: File, idToken: string): Promise<string> {
@@ -31,10 +28,9 @@ async function uploadCoverImage(file: File, idToken: string): Promise<string> {
 
 export default function AddBlogButton() {
   const { user } = useAuth();
-  const isAdmin = useIsAdmin();
   const [open, setOpen] = useState(false);
 
-  if (!isAdmin || !user) return null;
+  if (!user) return null;
 
   return (
     <>
