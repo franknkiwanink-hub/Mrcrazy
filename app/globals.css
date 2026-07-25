@@ -7249,10 +7249,21 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
     border: 1px solid var(--mp-border);
     width: 100%;
     max-width: 440px;
+    /* Was flex-item tabs with flex:1 sized to fit exactly 3 tabs in this
+       pill — adding a 4th (Following) meant 4 equal-width, nowrap tabs no
+       longer fit a narrow phone screen, and the row had no overflow
+       handling, so the last tab just got clipped off the right edge
+       instead of shrinking or wrapping. Making the row itself scroll
+       horizontally fixes this regardless of how many tabs exist, rather
+       than re-tuning flex-basis math every time a tab is added/removed. */
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
+  .pm-parent-tab-row::-webkit-scrollbar { display: none; width: 0; height: 0; }
   .pm-parent-tab {
-    flex: 1;
-    padding: 0.65rem 0.5rem;
+    flex: 1 0 auto;
+    padding: 0.65rem 0.9rem;
     border: none;
     background: transparent;
     border-radius: 50px;
@@ -7872,7 +7883,8 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
      anything below 900px. */
   @media (min-width: 900px) {
     .pm-quick-row,
-    .pm-parent-content {
+    .pm-parent-content,
+    .pm-parent-tab-row {
       max-width: 720px;
     }
     .pm-modal-content {
