@@ -178,7 +178,9 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 8v5M12 16h.01" strokeLinecap="round" />
               </svg>
-              Only sale earnings, money received, and referral bonuses can be withdrawn. Deposited funds can be spent on Siterifty but not cashed out.
+              Siterifty wallet balance is currently used only to boost your own listings — it can&apos;t be withdrawn
+              or sent to other users. We&apos;re not licensed to hold customer funds; PayPal handles the full
+              escrow-protected payment for every marketplace purchase.
             </div>
           </div>
 
@@ -219,8 +221,9 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
               </svg>
               <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>Add Funds is being updated</div>
               <div style={{ fontSize: 12.5, color: "rgba(255,255,255,0.45)", maxWidth: 320, lineHeight: 1.5 }}>
-                We're switching to a new payment provider for wallet deposits. This tab will be back shortly — your
-                existing balance and withdrawals aren't affected.
+                We're switching to a new payment provider for wallet top-ups. Wallet balance is only ever used to
+                boost your own listings — it can't be withdrawn or sent to others. This tab will be back shortly;
+                your existing balance and withdrawals aren't affected.
               </div>
             </div>
           </div>
@@ -228,8 +231,9 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
           {/* ── Withdraw panel ── */}
           <WithdrawTab active={tab === "withdraw"} withdrawable={summary.withdrawableBalance} onSuccess={refresh} awdOpen={awdOpen} onToggleAwd={() => setAwdOpen((o) => !o)} />
 
-          {/* ── Send panel ── */}
-          <SendTab active={tab === "send"} balance={balance} onSuccess={refresh} />
+          {/* ── Send panel — disabled pending money-transmission licensing,
+              see SendTab.tsx's top comment ── */}
+          <SendTab active={tab === "send"} />
 
           {/* ── History panel ── */}
           <div className={`wallet-panel${tab === "history" ? " active" : ""}`} id="walletPanelHistory">
