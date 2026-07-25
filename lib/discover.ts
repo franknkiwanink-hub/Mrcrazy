@@ -8,6 +8,7 @@
 // worth the added read/write cost). Mirrors lib/premiumSellers.ts's
 // fetch-helper shape exactly.
 import { auth } from "@/lib/firebase";
+import type { Listing } from "@/lib/listings";
 
 export interface DiscoverBlog {
   id: string;
@@ -17,13 +18,10 @@ export interface DiscoverBlog {
   createdAt: number | null;
 }
 
-export interface DiscoverListing {
-  id: string;
-  title: string;
-  type: string;
-  price: number | null;
-  boosted: boolean;
-}
+// Full listing objects now — same shape the main marketplace feed returns
+// (images, financials, ownerId, ownerPlan, etc.), not a stripped-down
+// lite version. See handleDiscover in app/api/listings/_handler.js.
+export type DiscoverListing = Listing;
 
 export interface DiscoverSeller {
   uid: string;
