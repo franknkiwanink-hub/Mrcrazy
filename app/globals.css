@@ -310,7 +310,7 @@
          /* ── ANNOUNCEMENT BAR ── */
          #announcement-bar {
          position: fixed; top: 52px; left: 0; right: 0;
-         z-index: 15; height: 40px;
+         z-index: 9989; height: 40px;
          display: flex; align-items: center; justify-content: space-between;
          padding: 0 16px;
          background: rgba(255,255,255,0.03);
@@ -329,31 +329,44 @@
          .btn-upgrade {
          position: relative; overflow: hidden;
          display: inline-flex; align-items: center; gap: 6px;
-         background: rgba(139,92,246,0.14);
+         background: linear-gradient(160deg, rgba(168,85,247,0.22), rgba(139,92,246,0.1) 55%, rgba(99,60,220,0.16));
          backdrop-filter: blur(16px) saturate(160%);
          -webkit-backdrop-filter: blur(16px) saturate(160%);
-         border: 1px solid rgba(196,181,253,0.28);
-         border-radius: 20px;
+         border: 1px solid rgba(196,181,253,0.32);
+         border-radius: 9px;
          padding: 5px 14px; font-size: 11px; font-weight: 600;
-         letter-spacing: 0.02em; color: rgba(233,213,255,0.95); cursor: pointer;
-         box-shadow: 0 0 16px rgba(139,92,246,0.22), inset 0 1px 0 rgba(255,255,255,0.1);
-         transition: box-shadow 0.3s, opacity 0.2s, transform 0.15s;
+         letter-spacing: 0.02em; color: rgba(238,222,255,0.97); cursor: pointer;
+         box-shadow:
+           0 1px 0 rgba(255,255,255,0.14) inset,
+           0 -1px 0 rgba(0,0,0,0.2) inset,
+           0 4px 14px rgba(124,58,237,0.25);
+         transition: box-shadow 0.3s, transform 0.15s, border-color 0.3s;
          }
          .btn-upgrade::before {
          content: ''; position: absolute; inset: 0;
-         background: radial-gradient(ellipse at 30% 50%, rgba(196,181,253,0.14) 0%, transparent 70%);
+         background: linear-gradient(180deg, rgba(255,255,255,0.16) 0%, transparent 45%);
          pointer-events: none;
          }
          .btn-upgrade::after {
          content: ''; position: absolute; top: 0; left: -70%; width: 40%; height: 100%;
-         background: linear-gradient(120deg, transparent, rgba(255,255,255,0.35), transparent);
-         transform: skewX(-18deg); animation: shimmer-up 2.6s ease-in-out infinite;
+         background: linear-gradient(120deg, transparent, rgba(255,255,255,0.28), transparent);
+         transform: skewX(-18deg); animation: shimmer-up 3.4s ease-in-out infinite;
          }
          @keyframes shimmer-up { 0% { left: -70%; } 100% { left: 130%; } }
          .btn-upgrade:hover {
-         box-shadow: 0 0 22px rgba(139,92,246,0.4), inset 0 1px 0 rgba(255,255,255,0.12);
-         opacity: 0.95;
-         transform: scale(1.02);
+         border-color: rgba(216,180,254,0.5);
+         box-shadow:
+           0 1px 0 rgba(255,255,255,0.18) inset,
+           0 -1px 0 rgba(0,0,0,0.22) inset,
+           0 6px 18px rgba(124,58,237,0.35);
+         transform: translateY(-1px);
+         }
+         .btn-upgrade:active {
+         transform: translateY(0);
+         box-shadow:
+           0 1px 0 rgba(255,255,255,0.1) inset,
+           0 -1px 0 rgba(0,0,0,0.25) inset,
+           0 2px 8px rgba(124,58,237,0.28);
          }
          .btn-upgrade-wrap {
          position: relative;
@@ -370,7 +383,7 @@
          0%,100% { opacity: 0.95; filter: drop-shadow(0 0 2px rgba(196,181,253,0.4)); }
          50%      { opacity: 0.55; filter: drop-shadow(0 0 5px rgba(167,139,250,0.15)); }
          }
-         .btn-manage { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.13); border-radius: 20px; padding: 5px 14px; font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.6); cursor: pointer; transition: background 0.2s, color 0.2s; }
+         .btn-manage { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.13); border-radius: 9px; padding: 5px 14px; font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.6); cursor: pointer; transition: background 0.2s, color 0.2s; }
          .btn-manage:hover { background: rgba(255,255,255,0.1); color: #fff; }
          /* ── HERO ── */
          .hero {
@@ -2763,7 +2776,7 @@
                .mp-search-clear:hover { background: rgba(255,255,255,0.18); color: #fff; }
                .mp-search-clear svg { width: 12px; height: 12px; }
                .mp-search-suggest {
-               display: none; position: fixed; z-index: 10050;
+               display: none; position: fixed; z-index: 9988;
                background: #18181c; border: 1px solid rgba(255,255,255,0.14);
                border-radius: 14px; box-shadow: 0 16px 48px rgba(0,0,0,0.7);
                overflow: hidden; max-height: 340px; overflow-y: auto;
@@ -3004,8 +3017,12 @@
                .mp-si-sub { font-size: 11px; color: var(--mp-text-muted); text-transform: capitalize; }
                .mp-si-price { font-size: 12px; font-weight: 700; color: var(--mp-accent); flex-shrink: 0; }
                .mp-si-empty { padding: 14px; font-size: 13px; color: var(--mp-text-muted); text-align: center; }
-               /* AI Search button inside search row — glassy purple with glitter sparkles */
-               #mpAiSearchBtn {
+               /* Discover trigger button inside search row — glassy purple,
+                  same visual language as the old AI Search button it
+                  replaced, minus the "AI" framing (compass icon instead of
+                  a sparkle, no glitter animation — this opens a plain
+                  browse surface, not an AI call). */
+               #mpDiscoverBtn {
                position: relative; overflow: hidden;
                background: rgba(139,92,246,0.16);
                backdrop-filter: blur(14px) saturate(160%);
@@ -3019,66 +3036,178 @@
                transition: box-shadow var(--mp-transition), transform var(--mp-transition), opacity var(--mp-transition);
                font-family: inherit;
                }
-               #mpAiSearchBtn::before {
+               #mpDiscoverBtn::before {
                content: ''; position: absolute; inset: 0;
                background: radial-gradient(ellipse at 25% 40%, rgba(196,181,253,0.16) 0%, transparent 70%);
                pointer-events: none;
                }
-               #mpAiSearchBtn::after {
-               content: ''; position: absolute; top: 0; left: -70%; width: 40%; height: 100%;
-               background: linear-gradient(120deg, transparent, rgba(255,255,255,0.32), transparent);
-               transform: skewX(-18deg); animation: mp-ai-shimmer 2.6s ease-in-out infinite;
-               pointer-events: none;
-               }
-               @keyframes mp-ai-shimmer { 0% { left: -70%; } 100% { left: 130%; } }
-               #mpAiSearchBtn:hover {
+               #mpDiscoverBtn:hover {
                box-shadow: 0 0 22px rgba(139,92,246,0.42), inset 0 1px 0 rgba(255,255,255,0.12);
                transform: scale(1.03);
                }
-               #mpAiSearchBtn:active { opacity: 0.9; transform: scale(0.98); }
-               .mp-ai-icon { width: 16px; height: 16px; flex-shrink: 0; display: block; }
-               .mp-ai-spark-main { transform-origin: center; animation: mp-ai-twinkle-main 2.2s ease-in-out infinite; }
-               .mp-ai-spark-sm1 { transform-origin: center; animation: mp-ai-twinkle-sm 1.8s ease-in-out infinite 0.3s; }
-               .mp-ai-spark-sm2 { transform-origin: center; animation: mp-ai-twinkle-sm 1.6s ease-in-out infinite 0.9s; }
-               @keyframes mp-ai-twinkle-main {
-               0%, 100% { opacity: 1;    transform: scale(1)    rotate(0deg); }
-               50%       { opacity: 0.65; transform: scale(0.88) rotate(8deg); }
+               #mpDiscoverBtn:active { opacity: 0.9; transform: scale(0.98); }
+               .mp-disc-icon { width: 16px; height: 16px; flex-shrink: 0; display: block; }
+
+               /* ── Full-screen Discover panel (YouTube-style takeover) ──
+                  Replaces the old small #mpAiSearchPanel popup. Same portal/
+                  scroll-lock/escape pattern as #mpSearchOverlay, same
+                  z-index tier so it never fights the header/announcement
+                  bar (see globals.css header comment on that fix). */
+               #discoverOverlay {
+               position: fixed;
+               inset: 0;
+               z-index: 10200;
+               display: flex;
+               flex-direction: column;
+               background: var(--mp-bg);
+               color: var(--mp-text);
+               animation: mpSoIn 0.16s ease;
                }
-               @keyframes mp-ai-twinkle-sm {
-               0%, 100% { opacity: 0.4; transform: scale(0.7); }
-               50%       { opacity: 1;   transform: scale(1.15); }
+               .disc-header {
+               flex-shrink: 0;
+               display: flex;
+               align-items: center;
+               justify-content: space-between;
+               gap: 10px;
+               padding: 14px 18px;
+               background: rgba(5,5,8,0.96);
+               backdrop-filter: blur(18px) saturate(140%);
+               -webkit-backdrop-filter: blur(18px) saturate(140%);
+               border-bottom: 1px solid var(--mp-border);
                }
-               /* AI Search results panel */
-               #mpAiSearchPanel {
-               margin: 10px 0 16px;
-               background: rgba(139,92,246,0.06);
-               border: 1px solid rgba(196,181,253,0.22);
-               border-radius: 16px;
-               padding: 12px 14px 14px;
+               .disc-title {
+               font-size: 16px; font-weight: 800; color: #fff; letter-spacing: 0.01em;
                }
-               #mpAiSearchPanelInner {
-               display: flex; align-items: center; justify-content: space-between; gap: 8px;
+               .disc-header-actions { display: flex; align-items: center; gap: 8px; }
+               .disc-shuffle-btn, .disc-close-btn {
+               flex-shrink: 0;
+               width: 36px; height: 36px;
+               display: flex; align-items: center; justify-content: center;
+               background: rgba(255,255,255,0.06); border: 1px solid var(--mp-border);
+               border-radius: 50%;
+               color: var(--mp-text); cursor: pointer;
+               transition: background var(--mp-transition), border-color var(--mp-transition);
                }
-               #mpAiSearchTitle {
-               font-size: 13px; font-weight: 700; color: #f0e6ff; letter-spacing: 0.2px;
+               .disc-shuffle-btn:hover, .disc-close-btn:hover {
+               background: rgba(255,255,255,0.12); border-color: var(--mp-border-hover);
                }
-               #mpAiSearchClose {
-               background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
-               border-radius: 10px; width: 32px; height: 32px; flex-shrink: 0;
-               display: flex; align-items: center; justify-content: center; cursor: pointer; color: rgba(255,255,255,0.6);
+               .disc-shuffle-btn:disabled { opacity: 0.4; cursor: default; }
+               .disc-close-btn svg { width: 16px; height: 16px; }
+
+               .disc-scroll {
+               flex: 1;
+               overflow-y: auto;
+               -webkit-overflow-scrolling: touch;
+               padding: 20px 18px 48px;
                }
-               #mpAiSearchClose:hover { background: rgba(255,255,255,0.12); color: #fff; }
-               #mpAiSearchClose svg { width: 14px; height: 14px; }
-               #mpAiSearchReply {
-               margin-top: 10px; font-size: 13px; color: rgba(240,230,255,0.85); line-height: 1.5;
-               display: none;
+               .disc-loading, .disc-error {
+               display: flex; flex-direction: column; align-items: center; justify-content: center;
+               gap: 14px;
+               padding: 80px 20px;
+               color: var(--mp-text-muted);
+               font-size: 14px; text-align: center;
                }
-               #mpAiSearchReply.active { display: block; }
-               #mpAiSearchReply.is-loading { color: rgba(240,230,255,0.5); font-style: italic; }
-               #mpAiSearchReply.no-match { color: rgba(255,205,140,0.85); }
-               #mpAiSearchResults {
-               margin-top: 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap: 14px;
+               .disc-retry-btn {
+               background: var(--mp-accent-muted); border: 1px solid var(--mp-accent-border);
+               color: var(--mp-accent); font-weight: 700; font-size: 13px;
+               border-radius: 20px; padding: 8px 18px; cursor: pointer; font-family: inherit;
                }
+
+               .disc-section { margin-bottom: 32px; }
+               .disc-section:last-child { margin-bottom: 8px; }
+               .disc-section-title {
+               font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+               color: var(--mp-text-sec); margin: 0 0 14px;
+               }
+
+               /* Blog cards — 16:9 media, title, description, date, mirrors
+                  the standalone /blog page's .sr-blog-card sizing but with
+                  its own class names since this needs a description line
+                  the base blog grid card doesn't render. */
+               .disc-blog-grid {
+               display: grid;
+               grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+               gap: 16px;
+               }
+               .disc-blog-card {
+               display: flex; flex-direction: column;
+               background: var(--mp-surface-raised);
+               border: 1px solid var(--mp-border);
+               border-radius: var(--mp-radius);
+               overflow: hidden;
+               cursor: pointer; text-align: left;
+               font-family: inherit; color: inherit;
+               padding: 0;
+               transition: border-color var(--mp-transition), transform var(--mp-transition);
+               }
+               .disc-blog-card:hover {
+               border-color: var(--mp-border-hover);
+               transform: translateY(-2px);
+               }
+               .disc-blog-media { aspect-ratio: 16 / 9; width: 100%; overflow: hidden; background: var(--mp-surface); }
+               .disc-blog-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+               .disc-blog-media-empty { width: 100%; height: 100%; background: linear-gradient(135deg, var(--mp-surface), var(--mp-surface-raised)); }
+               .disc-blog-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 6px; }
+               .disc-blog-title {
+               margin: 0; font-size: 14.5px; font-weight: 700; color: var(--mp-text); line-height: 1.35;
+               display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+               }
+               .disc-blog-desc {
+               margin: 0; font-size: 12.5px; color: var(--mp-text-sec); line-height: 1.5;
+               display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+               }
+               .disc-blog-date {
+               font-size: 11px; font-weight: 600; color: var(--mp-text-muted);
+               text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px;
+               }
+
+               /* Listings — reuses the real marketplace card components via
+                  ListingCard, just needs a grid wrapper here. */
+               .disc-listing-grid {
+               display: grid;
+               grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+               gap: 14px;
+               }
+
+               /* Sellers — mirrors .mp-ts-card's avatar/name/stars layout
+                  from the Premium sellers strip, as its own vertical card
+                  instead of a horizontal scroll-track item. */
+               .disc-seller-grid {
+               display: grid;
+               grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+               gap: 14px;
+               }
+               .disc-seller-card {
+               display: flex; flex-direction: column; align-items: center; text-align: center;
+               gap: 8px;
+               background: var(--mp-surface-raised);
+               border: 1px solid var(--mp-border);
+               border-radius: var(--mp-radius);
+               padding: 18px 12px;
+               cursor: pointer; font-family: inherit; color: inherit;
+               transition: border-color var(--mp-transition), transform var(--mp-transition);
+               }
+               .disc-seller-card:hover {
+               border-color: var(--mp-border-hover);
+               transform: translateY(-2px);
+               }
+               .disc-seller-av {
+               width: 52px; height: 52px; border-radius: 50%;
+               background: rgba(255,255,255,0.08);
+               display: flex; align-items: center; justify-content: center;
+               font-size: 18px; font-weight: 700; color: var(--mp-text);
+               overflow: hidden; flex-shrink: 0;
+               }
+               .disc-seller-av img { width: 100%; height: 100%; object-fit: cover; }
+               .disc-seller-name { display: flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; color: var(--mp-text); min-width: 0; }
+               .disc-seller-name-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 110px; }
+               .disc-seller-stars { display: flex; align-items: center; gap: 2px; }
+               @media (max-width: 360px) {
+                 .disc-blog-grid { grid-template-columns: 1fr; }
+                 .disc-listing-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+                 .disc-seller-grid { grid-template-columns: repeat(2, 1fr); }
+               }
+
                /* Filter chips row — horizontal scroll, no wrap */
                #mpChipsRow {
                display: flex; align-items: center; gap: 8px;
@@ -6684,7 +6813,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
   .pm-modal {
     width: 100%;
     height: 100%;
-    background: #050506;
+    background: #0a0a0b;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -6868,13 +6997,6 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
   .pm-inbox-btn:hover {
     border-color: var(--mp-border-hover);
     background: #141419;
-  }
-  .pm-inbox-btn:disabled {
-    cursor: default;
-    opacity: 0.85;
-  }
-  .pm-inbox-spinner {
-    animation: dcpSpin 0.7s linear infinite;
   }
   .pm-inbox-btn-left {
     display: flex;
