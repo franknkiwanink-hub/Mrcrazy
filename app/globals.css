@@ -7242,6 +7242,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
        directly and stops propagation before the tab-switch runs). ── */
   .pm-parent-tab-row {
     display: flex;
+    align-items: stretch;
     gap: 0.3rem;
     background: var(--mp-surface);
     padding: 0.28rem;
@@ -7249,13 +7250,18 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
     border: 1px solid var(--mp-border);
     width: 100%;
     max-width: 440px;
+    min-height: 48px;
+    box-sizing: border-box;
+    flex-shrink: 0;
     /* Was flex-item tabs with flex:1 sized to fit exactly 3 tabs in this
        pill — adding a 4th (Following) meant 4 equal-width, nowrap tabs no
        longer fit a narrow phone screen, and the row had no overflow
        handling, so the last tab just got clipped off the right edge
        instead of shrinking or wrapping. Making the row itself scroll
        horizontally fixes this regardless of how many tabs exist, rather
-       than re-tuning flex-basis math every time a tab is added/removed. */
+       than re-tuning flex-basis math every time a tab is added/removed.
+       min-height + flex-shrink:0 stop the row from collapsing to a
+       sliver if a parent flex container ever squeezes it. */
     overflow-x: auto;
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -7278,6 +7284,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
     gap: 0.35rem;
     white-space: nowrap;
     font-family: inherit;
+    min-height: 40px;
   }
   .pm-parent-tab.active {
     background: var(--mp-text);
