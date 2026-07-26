@@ -4,6 +4,7 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 import WalletModal from "@/components/wallet/WalletModal";
 import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports window.__openWallet / window.__closeWallet from wallet.js. Same
 // shape as AuthModalProvider — any component reaches this via
@@ -24,6 +25,7 @@ export function WalletModalProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { openAuthModal } = useAuthModal();
   const [open, setOpen] = useState(false);
+  useScrollLock(open);
 
   // Ports window.__openWallet's __requireAuth guard: signed-out visitors
   // get the auth modal instead of the wallet.
