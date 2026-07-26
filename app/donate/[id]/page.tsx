@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+1import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
 import DonatePageClient from "./DonatePageClient";
