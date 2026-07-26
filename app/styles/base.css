@@ -6,7 +6,14 @@ input, textarea { user-select: text; -webkit-user-select: text; }
 *:focus { outline: none; }
 
 /* ── HIDE SCROLLBARS GLOBALLY (scrolling still works) ── */
-html { scrollbar-width: none; -ms-overflow-style: none; background: #000; }
+/* overflow-x:hidden on body alone doesn't reliably stop the page from
+   being draggable sideways on mobile Safari/Chrome — if any descendant
+   (e.g. a grid that can't shrink below its column minmax width, like
+   .mp-grid on a narrow in-app browser viewport) ends up wider than the
+   viewport, the html root itself can still scroll/rubber-band
+   horizontally and drag the whole page with it, even though body's own
+   overflow-x is hidden. Lock it at both levels. */
+html { scrollbar-width: none; -ms-overflow-style: none; background: #000; overflow-x: hidden; }
 
 html::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
