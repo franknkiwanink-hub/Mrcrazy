@@ -44,7 +44,7 @@ export default function robots(): MetadataRoute.Robots {
       // /sell type-picker stays disallowed (it's just a nav step, not
       // content worth indexing); the typed routes under it are allowed
       // above.
-      disallow: ["/settings", "/myprofile", "/profile", "/messages", "/aiagent", "/sell", "/sellers"],
+      disallow: ["/settings", "/myprofile", "/profile", "/messages", "/aiagent", "/sell", "/sellers", "/onboarding"],
     },
     sitemap: `${baseUrl}/sitemap.xml`,
   };
