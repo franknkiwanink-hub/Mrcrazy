@@ -19,6 +19,8 @@ import type { Listing } from "@/lib/listings";
 import ListingCard from "@/components/marketplace/ListingCard";
 import SellerBadges from "@/components/seller/SellerBadges";
 import Stars from "@/components/marketplace/Stars";
+import { useScrollLock } from "@/lib/useScrollLock";
+import ChatLoadingState from "@/components/shared/ChatLoadingState";
 
 function BlogCard({ post }: { post: DiscoverBlog }) {
   const router = useRouter();
@@ -128,16 +130,12 @@ export default function DiscoverPanel({
     }
   }, [open]);
 
-  // Full-screen takeover: lock background scroll + close on Escape, same
-  // pattern as SearchOverlay.
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
+  // Full-screen takeover: lock background scroll (via the shared
+  // reference-counted hook — see lib/useScrollLock.ts; the previous
+  // plain body.style.overflow toggle here could stomp another modal's
+  // lock and restore scroll while that modal was still open) + close on
+  // Escape, same pattern as SearchOverlay.
+  useScrollLock(open);
 
   useEffect(() => {
     if (!open) return;
@@ -181,7 +179,7 @@ export default function DiscoverPanel({
 
       <div className="disc-scroll">
         {status === "loading" && !blogs.length && !listings.length && !sellers.length ? (
-          <div className="disc-loading">Finding things for you…</div>
+          <ChatLoadingState label="Finding things for you…" />
         ) : status === "error" ? (
           <div className="disc-error">
             Something went wrong loading Discover.
