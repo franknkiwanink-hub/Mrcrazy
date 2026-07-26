@@ -218,7 +218,7 @@ export default function DisputePicker({ open, onClose }: { open: boolean; onClos
           </button>
         </div>
 
-        <div id="srfDisputeBody">
+        <div id="srfDisputeBody" data-scroll-lock-exempt>
           {loadState === "loading" && (
             <div id="srfDisputeLoading" style={{ display: "flex" }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
