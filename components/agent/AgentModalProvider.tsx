@@ -4,6 +4,7 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 import AgentModal from "@/components/agent/AgentModal";
 import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports window.__openAgentModal / window.__closeAgentModal from
 // plans-boost.js. Same shape as BoostModalProvider/WalletModalProvider —
@@ -28,6 +29,7 @@ export function AgentModalProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { openAuthModal } = useAuthModal();
   const [open, setOpen] = useState(false);
+  useScrollLock(open);
 
   // Original's button is only reachable from the profile menu (signed-in
   // only), so there's no existing "signed out" UI for it — same guard
