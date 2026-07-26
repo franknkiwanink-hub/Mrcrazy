@@ -338,7 +338,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
           />
         </div>
 
-        <div className="pm-modal-content" data-scroll-lock-exempt>
+        <div className="pm-modal-content">
           {/* Identity */}
           <div className="pm-identity" style={{ position: "relative", zIndex: 1 }}>
             <div className="pm-avatar-wrapper">
