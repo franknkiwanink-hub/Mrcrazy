@@ -329,22 +329,22 @@
          .btn-upgrade {
          position: relative; overflow: hidden;
          display: inline-flex; align-items: center; gap: 6px;
-         background: linear-gradient(160deg, rgba(168,85,247,0.22), rgba(139,92,246,0.1) 55%, rgba(99,60,220,0.16));
+         background: linear-gradient(160deg, rgba(163,230,53,0.18), rgba(132,204,22,0.08) 55%, rgba(101,163,13,0.14));
          backdrop-filter: blur(16px) saturate(160%);
          -webkit-backdrop-filter: blur(16px) saturate(160%);
-         border: 1px solid rgba(196,181,253,0.32);
+         border: 1px solid rgba(163,230,53,0.32);
          border-radius: 9px;
          padding: 5px 14px; font-size: 11px; font-weight: 600;
-         letter-spacing: 0.02em; color: rgba(238,222,255,0.97); cursor: pointer;
+         letter-spacing: 0.02em; color: rgba(220,252,127,0.97); cursor: pointer;
          box-shadow:
-           0 1px 0 rgba(255,255,255,0.14) inset,
+           0 1px 0 rgba(255,255,255,0.1) inset,
            0 -1px 0 rgba(0,0,0,0.2) inset,
-           0 4px 14px rgba(124,58,237,0.25);
+           0 4px 14px rgba(163,230,53,0.18);
          transition: box-shadow 0.3s, transform 0.15s, border-color 0.3s;
          }
          .btn-upgrade::before {
          content: ''; position: absolute; inset: 0;
-         background: linear-gradient(180deg, rgba(255,255,255,0.16) 0%, transparent 45%);
+         background: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, transparent 45%);
          pointer-events: none;
          }
          .btn-upgrade::after {
@@ -354,19 +354,19 @@
          }
          @keyframes shimmer-up { 0% { left: -70%; } 100% { left: 130%; } }
          .btn-upgrade:hover {
-         border-color: rgba(216,180,254,0.5);
+         border-color: rgba(163,230,53,0.55);
          box-shadow:
-           0 1px 0 rgba(255,255,255,0.18) inset,
+           0 1px 0 rgba(255,255,255,0.14) inset,
            0 -1px 0 rgba(0,0,0,0.22) inset,
-           0 6px 18px rgba(124,58,237,0.35);
+           0 6px 18px rgba(163,230,53,0.28);
          transform: translateY(-1px);
          }
          .btn-upgrade:active {
          transform: translateY(0);
          box-shadow:
-           0 1px 0 rgba(255,255,255,0.1) inset,
+           0 1px 0 rgba(255,255,255,0.08) inset,
            0 -1px 0 rgba(0,0,0,0.25) inset,
-           0 2px 8px rgba(124,58,237,0.28);
+           0 2px 8px rgba(163,230,53,0.2);
          }
          .btn-upgrade-wrap {
          position: relative;
@@ -3035,25 +3035,25 @@
                   browse surface, not an AI call). */
                #mpDiscoverBtn {
                position: relative; overflow: hidden;
-               background: rgba(139,92,246,0.16);
+               background: rgba(163,230,53,0.12);
                backdrop-filter: blur(14px) saturate(160%);
                -webkit-backdrop-filter: blur(14px) saturate(160%);
-               border: 1px solid rgba(196,181,253,0.32);
+               border: 1px solid rgba(163,230,53,0.28);
                border-radius: 24px; padding: 8px 16px 8px 12px;
-               color: rgba(233,213,255,0.95);
+               color: rgba(220,252,127,0.95);
                font-size: 13px; font-weight: 700; letter-spacing: 0.01em; cursor: pointer; white-space: nowrap;
                display: flex; align-items: center; gap: 6px; flex-shrink: 0;
-               box-shadow: 0 0 14px rgba(139,92,246,0.25), inset 0 1px 0 rgba(255,255,255,0.1);
+               box-shadow: 0 0 14px rgba(163,230,53,0.18), inset 0 1px 0 rgba(255,255,255,0.08);
                transition: box-shadow var(--mp-transition), transform var(--mp-transition), opacity var(--mp-transition);
                font-family: inherit;
                }
                #mpDiscoverBtn::before {
                content: ''; position: absolute; inset: 0;
-               background: radial-gradient(ellipse at 25% 40%, rgba(196,181,253,0.16) 0%, transparent 70%);
+               background: radial-gradient(ellipse at 25% 40%, rgba(163,230,53,0.14) 0%, transparent 70%);
                pointer-events: none;
                }
                #mpDiscoverBtn:hover {
-               box-shadow: 0 0 22px rgba(139,92,246,0.42), inset 0 1px 0 rgba(255,255,255,0.12);
+               box-shadow: 0 0 22px rgba(163,230,53,0.32), inset 0 1px 0 rgba(255,255,255,0.1);
                transform: scale(1.03);
                }
                #mpDiscoverBtn:active { opacity: 0.9; transform: scale(0.98); }
@@ -14062,25 +14062,12 @@ select.srf-tools-url-input option { background: #0d0d0d; color: #fff; }
 .am-brand {
   display: flex;
   align-items: center;
-  gap: 9px;
 }
-.am-brand-mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: var(--mp-accent, #a3e635);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #08130a;
-  flex-shrink: 0;
-}
-.am-brand-mark svg { width: 15px; height: 15px; }
-.am-brand-name {
-  font-size: 0.95rem;
-  font-weight: 800;
-  color: #fff;
-  letter-spacing: -0.01em;
+.am-brand-logo {
+  height: 28px;
+  width: auto;
+  object-fit: contain;
+  display: block;
 }
 .am-close-btn {
   width: 32px;
