@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { fetchFullSeller, fetchSellerDealStats, type FullSeller, type SellerDealStats } from "@/lib/useSeller";
@@ -8,7 +9,6 @@ import SellerProfileHeader from "@/components/seller/SellerProfileHeader";
 import SellerListingsGrid from "@/components/seller/SellerListingsGrid";
 import SellerDetailsOverlay from "@/components/seller/SellerDetailsOverlay";
 import RateOverlay from "@/components/seller/RateOverlay";
-import DonateOverlay from "@/components/seller/DonateOverlay";
 
 // Matches the original's .sp-loading skeleton state — CSS-driven shimmer
 // already exists for #spModal.sp-loading in globals.css. Exported so
@@ -66,13 +66,13 @@ export default function SellerProfileClient({
 }) {
   const { user } = useAuth();
   const { openAuthModal } = useAuthModal();
+  const router = useRouter();
 
   const [seller, setSeller] = useState<FullSeller | null>(initialSeller);
   const [notFoundState, setNotFoundState] = useState(false);
   const [dealStats, setDealStats] = useState<SellerDealStats | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [rateOpen, setRateOpen] = useState(false);
-  const [donateOpen, setDonateOpen] = useState(false);
 
   const isOwnProfile = !!user && user.uid === uid;
 
@@ -237,7 +237,7 @@ export default function SellerProfileClient({
           onSellerChange={(updater) => setSeller((s) => (s ? updater(s) : s))}
           onOpenDetails={() => setDetailsOpen(true)}
           onOpenRate={() => setRateOpen(true)}
-          onOpenDonate={() => setDonateOpen(true)}
+          onOpenDonate={() => router.push(`/donate/${seller.uid}`)}
         />
         <SellerListingsGrid listings={seller.listings} />
       </div>
@@ -266,7 +266,6 @@ export default function SellerProfileClient({
           }
         />
       )}
-      {donateOpen && <DonateOverlay sellerUid={seller.uid} sellerName={seller.username} onClose={() => setDonateOpen(false)} />}
     </div>
   );
 }
