@@ -8166,7 +8166,7 @@ body.theme-active .sr-icon-btn { background: rgba(255,255,255,0.06); }
          .modal-header .brand svg {
          width: 26px;
          height: 26px;
-         stroke: #a5b4fc;
+         stroke: var(--mp-accent, #a3e635);
          fill: none;
          stroke-width: 2;
          }
@@ -14084,7 +14084,7 @@ select.srf-tools-url-input option { background: #0d0d0d; color: #fff; }
   align-items: center;
 }
 .am-brand-logo {
-  height: 28px;
+  height: 26px;
   width: auto;
   object-fit: contain;
   display: block;
