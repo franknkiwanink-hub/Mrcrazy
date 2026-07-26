@@ -150,6 +150,11 @@ export default function UpgradePageClient() {
   const [showSubscribeBtn, setShowSubscribeBtn] = useState(true);
   const [msg, setMsg] = useState<{ text: string; kind: "ok" | "err" | "" }>({ text: "", kind: "" });
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<"plans" | "how">("plans");
+  // Detail/payment panel now opens as a centered modal on plan-card tap
+  // instead of rendering inline further down the page, so the Subscribe
+  // button + PayPal button are visible immediately without scrolling.
+  const [showPayModal, setShowPayModal] = useState(false);
 
   const paypalContainerRef = useRef<HTMLDivElement>(null);
   const buttonsRef = useRef<any>(null);
@@ -179,6 +184,11 @@ export default function UpgradePageClient() {
     setActivePlan(start);
     setShowSubscribeBtn(true);
     setMsg({ text: "", kind: "" });
+    // Arriving with ?plan=... means some other CTA in the app (Settings,
+    // a gated-feature prompt, etc.) already asked for a specific plan —
+    // open straight to checkout instead of making them tap the card
+    // again, same as the old openPlansModal(plan) behavior.
+    if (preselect && PLANS[preselect]) setShowPayModal(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselect]);
 
@@ -189,6 +199,16 @@ export default function UpgradePageClient() {
     buttonsRef.current?.close?.();
     buttonsRef.current = null;
     if (paypalContainerRef.current) paypalContainerRef.current.innerHTML = "";
+    setShowPayModal(true);
+  }
+
+  function closePayModal() {
+    buttonsRef.current?.close?.();
+    buttonsRef.current = null;
+    if (paypalContainerRef.current) paypalContainerRef.current.innerHTML = "";
+    setShowSubscribeBtn(true);
+    setMsg({ text: "", kind: "" });
+    setShowPayModal(false);
   }
 
   async function mountPaypalButton(planKey: PlanKey) {
@@ -280,13 +300,16 @@ export default function UpgradePageClient() {
 
   return (
     <div className="upg-page">
-      <div className="upg-hero">
+      <div className="upg-back-bar">
         <button className="upg-back" onClick={() => router.back()} aria-label="Go back">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
             <path d="M15 18l-6-6 6-6" />
           </svg>
           Back
         </button>
+      </div>
+
+      <div className="upg-hero">
         <div className="upg-hero-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="#a3e635" strokeWidth="2">
             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -299,128 +322,213 @@ export default function UpgradePageClient() {
         </p>
       </div>
 
-      <div className="upg-plan-grid">
-        {PLAN_ORDER.map((key) => {
-          const plan = PLANS[key];
-          const isActive = activePlan === key;
-          return (
-            <button
-              key={key}
-              className={`upg-plan-card${isActive ? " active" : ""}`}
-              style={isActive ? { borderColor: `${plan.color}88`, boxShadow: `0 0 0 1px ${plan.color}55` } : undefined}
-              onClick={() => selectPlan(key)}
-            >
-              {key === "growth" && <span className="upg-plan-chip">Most popular</span>}
-              <div className="upg-plan-name">{plan.name}</div>
-              <div className="upg-plan-price">
-                {formatBalance(plan.price).replace(/\.00$/, "")}
-                <small>/month</small>
-              </div>
-              <div className="upg-plan-tagline">{plan.tagline}</div>
-              <div className="upg-plan-pills">
-                {plan.pills.map((text) => (
-                  <span key={text} className="upg-plan-pill" style={{ color: plan.color, borderColor: `${plan.color}55` }}>
-                    {text}
-                  </span>
-                ))}
-              </div>
-            </button>
-          );
-        })}
+      <div className="upg-tabs" role="tablist">
+        <button
+          role="tab"
+          aria-selected={activeTab === "plans"}
+          className={`upg-tab${activeTab === "plans" ? " active" : ""}`}
+          onClick={() => setActiveTab("plans")}
+        >
+          Plans
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === "how"}
+          className={`upg-tab${activeTab === "how" ? " active" : ""}`}
+          onClick={() => setActiveTab("how")}
+        >
+          How it works
+        </button>
       </div>
 
-      <div className="upg-detail-panel">
-        <div className="upg-detail-left">
-          <div className="upg-detail-name">
-            {p.name}
-            {activePlan === "growth" && <span className="upg-plan-chip">Most popular</span>}
-          </div>
-          {currency !== "USD" && (
-            <div className="upg-currency-note">Billed in USD via PayPal — shown converted to {currency}</div>
-          )}
-          <ul className="upg-feature-list">
-            {p.features.map((f) => (
-              <li key={f.text} className={f.on ? "" : "is-dim"}>
-                {f.on ? <CheckIcon color={p.color} /> : <XIcon />}
-                {f.text}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="upg-detail-right">
-          {isCurrentPlan ? (
-            <div className="upg-current-banner">✓ This is your current plan</div>
-          ) : (
-            <>
-              {showSubscribeBtn ? (
-                <button
-                  className="upg-subscribe-cta"
-                  style={{ background: p.color, color: "#000" }}
-                  onClick={() => {
-                    setShowSubscribeBtn(false);
-                    mountPaypalButton(activePlan);
-                  }}
-                >
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                  </svg>
-                  Subscribe to {p.name}
-                </button>
-              ) : null}
-              <div ref={paypalContainerRef} />
-            </>
-          )}
-          {msg.text && <div className={`upg-msg${msg.kind ? ` ${msg.kind}` : ""}`}>{msg.text}</div>}
-          <p className="upg-note">Secure payment via PayPal · Cancel anytime</p>
-        </div>
-      </div>
-
-      <div className="upg-section">
-        <h2 className="upg-section-title">Compare every plan</h2>
-        <div className="upg-compare-table-wrap">
-          <table className="upg-compare-table">
-            <thead>
-              <tr>
-                <th />
-                {PLAN_ORDER.map((key) => (
-                  <th key={key} style={{ color: PLANS[key].color }}>
-                    {PLANS[key].name}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {COMPARISON_ROWS.map((row) => (
-                <tr key={row.label}>
-                  <td className="upg-compare-label">{row.label}</td>
-                  {PLAN_ORDER.map((key) => (
-                    <td key={key}>{row.values[key]}</td>
+      {activeTab === "plans" ? (
+        <div className="upg-plan-grid">
+          {PLAN_ORDER.map((key) => {
+            const plan = PLANS[key];
+            const isThisCurrent = currentPlan === key;
+            return (
+              <button
+                key={key}
+                className={`upg-plan-card${isThisCurrent ? " is-current" : ""}`}
+                onClick={() => selectPlan(key)}
+              >
+                {key === "growth" && <span className="upg-plan-chip">Most popular</span>}
+                {isThisCurrent && <span className="upg-plan-current-chip">Your plan</span>}
+                <div className="upg-plan-name">{plan.name}</div>
+                <div className="upg-plan-price">
+                  {formatBalance(plan.price).replace(/\.00$/, "")}
+                  <small>/month</small>
+                </div>
+                <div className="upg-plan-tagline">{plan.tagline}</div>
+                <div className="upg-plan-pills">
+                  {plan.pills.map((text) => (
+                    <span key={text} className="upg-plan-pill" style={{ color: plan.color, borderColor: `${plan.color}55` }}>
+                      {text}
+                    </span>
                   ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="upg-section">
-        <h2 className="upg-section-title">Frequently asked questions</h2>
-        <div className="upg-faq-list">
-          {FAQS.map((item, i) => (
-            <div key={item.q} className={`upg-faq-item${openFaq === i ? " open" : ""}`}>
-              <button className="upg-faq-q" onClick={() => setOpenFaq(openFaq === i ? null : i)}>
-                {item.q}
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="upg-faq-chevron">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
+                </div>
+                <div className="upg-plan-cta" style={{ color: plan.color }}>
+                  {isThisCurrent ? "Manage" : "Select plan"}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </div>
               </button>
-              {openFaq === i && <div className="upg-faq-a">{item.a}</div>}
-            </div>
-          ))}
+            );
+          })}
         </div>
-      </div>
+      ) : (
+        <div className="upg-how-tab">
+          <div className="upg-section">
+            <h2 className="upg-section-title">How subscriptions work</h2>
+            <ul className="upg-how-steps">
+              <li>
+                <span className="upg-how-num">1</span>
+                Pick a plan and tap it to open checkout — you subscribe securely through PayPal, billed monthly in USD.
+              </li>
+              <li>
+                <span className="upg-how-num">2</span>
+                Your plan activates immediately after payment, raising your weekly listing limit and lowering your sale fee right away.
+              </li>
+              <li>
+                <span className="upg-how-num">3</span>
+                You're billed automatically every month on the same date until you cancel — no manual renewal needed.
+              </li>
+              <li>
+                <span className="upg-how-num">4</span>
+                Cancel anytime from Settings. You keep your plan's benefits until the end of the current billing period, then drop to Free.
+              </li>
+            </ul>
+          </div>
+
+          <div className="upg-section">
+            <h2 className="upg-section-title">Benefits per plan</h2>
+            <div className="upg-benefits-grid">
+              {PLAN_ORDER.map((key) => {
+                const plan = PLANS[key];
+                return (
+                  <div key={key} className="upg-benefits-card" style={{ borderColor: `${plan.color}33` }}>
+                    <div className="upg-benefits-name" style={{ color: plan.color }}>{plan.name}</div>
+                    <ul className="upg-feature-list">
+                      {plan.features.map((f) => (
+                        <li key={f.text} className={f.on ? "" : "is-dim"}>
+                          {f.on ? <CheckIcon color={plan.color} /> : <XIcon />}
+                          {f.text}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="upg-section">
+            <h2 className="upg-section-title">Compare every plan</h2>
+            <div className="upg-compare-table-wrap">
+              <table className="upg-compare-table">
+                <thead>
+                  <tr>
+                    <th />
+                    {PLAN_ORDER.map((key) => (
+                      <th key={key} style={{ color: PLANS[key].color }}>
+                        {PLANS[key].name}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {COMPARISON_ROWS.map((row) => (
+                    <tr key={row.label}>
+                      <td className="upg-compare-label">{row.label}</td>
+                      {PLAN_ORDER.map((key) => (
+                        <td key={key}>{row.values[key]}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="upg-section">
+            <h2 className="upg-section-title">Frequently asked questions</h2>
+            <div className="upg-faq-list">
+              {FAQS.map((item, i) => (
+                <div key={item.q} className={`upg-faq-item${openFaq === i ? " open" : ""}`}>
+                  <button className="upg-faq-q" onClick={() => setOpenFaq(openFaq === i ? null : i)}>
+                    {item.q}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="upg-faq-chevron">
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+                  {openFaq === i && <div className="upg-faq-a">{item.a}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPayModal && (
+        <div className="upg-modal-overlay" onClick={closePayModal}>
+          <div className="upg-modal-box" onClick={(e) => e.stopPropagation()}>
+            <button className="upg-modal-close" onClick={closePayModal} aria-label="Close">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+
+            <div className="upg-detail-name">
+              {p.name}
+              {activePlan === "growth" && <span className="upg-plan-chip">Most popular</span>}
+            </div>
+            <div className="upg-modal-price" style={{ color: p.color }}>
+              {formatBalance(p.price).replace(/\.00$/, "")}<small>/month</small>
+            </div>
+            {currency !== "USD" && (
+              <div className="upg-currency-note">Billed in USD via PayPal — shown converted to {currency}</div>
+            )}
+            <ul className="upg-feature-list">
+              {p.features.map((f) => (
+                <li key={f.text} className={f.on ? "" : "is-dim"}>
+                  {f.on ? <CheckIcon color={p.color} /> : <XIcon />}
+                  {f.text}
+                </li>
+              ))}
+            </ul>
+
+            <div className="upg-detail-right">
+              {isCurrentPlan ? (
+                <div className="upg-current-banner">✓ This is your current plan</div>
+              ) : (
+                <>
+                  {showSubscribeBtn ? (
+                    <button
+                      className="upg-subscribe-cta"
+                      style={{ background: p.color, color: "#000" }}
+                      onClick={() => {
+                        setShowSubscribeBtn(false);
+                        mountPaypalButton(activePlan);
+                      }}
+                    >
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                      Subscribe to {p.name}
+                    </button>
+                  ) : null}
+                  <div ref={paypalContainerRef} />
+                </>
+              )}
+              {msg.text && <div className={`upg-msg${msg.kind ? ` ${msg.kind}` : ""}`}>{msg.text}</div>}
+              <p className="upg-note">Secure payment via PayPal · Cancel anytime</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
