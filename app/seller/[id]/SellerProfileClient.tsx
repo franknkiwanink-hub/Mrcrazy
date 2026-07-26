@@ -9,6 +9,9 @@ import SellerProfileHeader from "@/components/seller/SellerProfileHeader";
 import SellerListingsGrid from "@/components/seller/SellerListingsGrid";
 import SellerDetailsOverlay from "@/components/seller/SellerDetailsOverlay";
 import RateOverlay from "@/components/seller/RateOverlay";
+import { SellerNotFoundScreen, SellerPrivateScreen } from "@/components/seller/SellerStateScreen";
+import { useConfirm } from "@/lib/useConfirm";
+import { db } from "@/lib/firebase";
 
 // Matches the original's .sp-loading skeleton state — CSS-driven shimmer
 // already exists for #spModal.sp-loading in globals.css. Exported so
@@ -67,12 +70,15 @@ export default function SellerProfileClient({
   const { user } = useAuth();
   const { openAuthModal } = useAuthModal();
   const router = useRouter();
+  const { alert: confirmAlert, confirm: confirmDialog, ConfirmHost } = useConfirm();
 
   const [seller, setSeller] = useState<FullSeller | null>(initialSeller);
   const [notFoundState, setNotFoundState] = useState(false);
   const [dealStats, setDealStats] = useState<SellerDealStats | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [rateOpen, setRateOpen] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportDone, setReportDone] = useState(false);
 
   const isOwnProfile = !!user && user.uid === uid;
 
@@ -133,10 +139,72 @@ export default function SellerProfileClient({
     };
   }, [uid]);
 
+  // Report action for the private-profile screen — a private profile is
+  // exactly the kind of profile someone may need to flag (can't see its
+  // history to judge it), so this state must keep Report working even
+  // though it skips SellerProfileHeader (which is where Report normally
+  // lives). Mirrors SellerProfileHeader's own handleReport exactly.
+  async function handleReportFromPrivateScreen() {
+    if (!user || !seller) {
+      openAuthModal();
+      return;
+    }
+    const confirmed = await confirmDialog({
+      theme: "report",
+      title: "Report Seller",
+      msg: `Report ${seller.username || "this seller"}'s profile to our team? Our moderators will review it and take action if needed. False reports may result in account restrictions.`,
+      confirmText: "Report",
+    });
+    if (!confirmed) return;
+
+    setReportBusy(true);
+    try {
+      const { addDoc, collection, serverTimestamp } = await import("firebase/firestore");
+      const reportRef = await addDoc(collection(db, "reports"), {
+        reporterUid: user.uid,
+        reportedUid: seller.uid,
+        reason: "seller_profile_report",
+        status: "open",
+        createdAt: serverTimestamp(),
+      });
+      (async () => {
+        try {
+          const idToken = await user.getIdToken();
+          await fetch("/api/aistudio", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: "Bearer " + idToken },
+            body: JSON.stringify({
+              action: "triage-report",
+              reportId: reportRef.id,
+              evidence: { reporterUid: user.uid, reportedUid: seller.uid, reason: "seller_profile_report" },
+            }),
+          });
+        } catch (err) {
+          console.warn("AI triage call failed (report still filed, will need manual review):", err);
+        }
+      })();
+    } catch (err) {
+      console.warn("seller report write (private profile)", err);
+    } finally {
+      setReportBusy(false);
+      setReportDone(true);
+    }
+    await confirmAlert({
+      theme: "report",
+      title: "Report Submitted",
+      msg: "Our team will review this within 24 hours. Thank you for keeping Siterifty safe.",
+    });
+  }
+
+  // A genuinely missing seller — deleted account, bad/stale link, or a
+  // uid that never resolved to anything (see fetchFullSeller in
+  // lib/useSeller.ts, which now returns null here instead of silently
+  // falling back to a fabricated "Anonymous" profile). Full-screen state
+  // instead of a bare heading so a dead link doesn't read as broken.
   if (notFoundState) {
     return (
-      <div style={{ marginTop: 92, padding: "40px 24px 80px", textAlign: "center", color: "#fff" }}>
-        <h1>Seller not found</h1>
+      <div style={{ marginTop: 92 }}>
+        <SellerNotFoundScreen context="profile" />
       </div>
     );
   }
@@ -145,50 +213,24 @@ export default function SellerProfileClient({
     return <SellerProfileSkeleton />;
   }
 
-  // ── Privacy gate ── mirrors mpOpenSellerModal exactly: a private
-  // profile is fully hidden (except username/handle) from anyone but
-  // its owner; a members-only profile is hidden from signed-out
-  // visitors. Both cases skip the listings grid, socials, and
-  // follow/rate actions entirely rather than rendering the full header.
+  // ── Privacy gate ── mirrors mpOpenSellerModal's intent: a private
+  // profile is fully hidden from anyone but its owner; a members-only
+  // profile is hidden from signed-out visitors. Both skip the listings
+  // grid, socials, and follow/rate actions entirely. Uses the dedicated
+  // full-screen state (not SellerProfileHeader, which owns Follow/
+  // Donate/Rate/Report for the public view) — Report is wired up
+  // separately here via handleReportFromPrivateScreen so a private
+  // profile can still be flagged.
   if (!isOwnProfile && seller.profileVisibility === "private") {
     return (
-      <div id="spModal" className="active" style={{ position: "static", marginTop: 92 }}>
-        <div id="spModalInner">
-          <div id="spModalMain">
-            <div id="spModalNameInfo">
-              <div id="spModalNameLine">
-                <span id="spModalName">{seller.username}</span>
-                <span id="spModalHandle">{"@" + seller.username.toLowerCase().replace(/\s+/g, "_")}</span>
-              </div>
-              <div id="spModalBio">
-                <div id="spModalBioText" style={{ color: "#555" }}>
-                  This profile is private.
-                </div>
-              </div>
-            </div>
-          </div>
-          <div id="spModalPrivate" style={{ display: "block" }}>
-            <div className="sp-empty-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-            </div>
-            <h3>This profile has been made private</h3>
-            <p>The seller&apos;s listings and details aren&apos;t visible right now.</p>
-            <div className="sp-safety-row sp-safety-bad" id="spModalPrivateTip">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              <div>
-                <b>Double-check before you buy.</b> Private profiles hide history and reviews, so it&apos;s harder to
-                verify a seller. Prefer sellers with a visible track record, and always use Siterifty Escrow.
-              </div>
-            </div>
-          </div>
-        </div>
+      <div style={{ marginTop: 92 }}>
+        <SellerPrivateScreen
+          username={seller.username || "This seller"}
+          onReport={() => (user ? handleReportFromPrivateScreen() : openAuthModal())}
+          reportBusy={reportBusy}
+          reportDone={reportDone}
+        />
+        <ConfirmHost />
       </div>
     );
   }
