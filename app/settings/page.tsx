@@ -90,27 +90,6 @@ function SettingsPageInner() {
   // them on a page they can't scroll away from for no reason.
   useScrollLock(!!user);
 
-  useEffect(() => {
-    if (!user) return;
-    const html = document.documentElement;
-    const prevHtmlOverflow = html.style.overflow;
-    const prevHtmlHeight = html.style.height;
-    const prevOverscroll = (html.style as any).overscrollBehavior;
-    const prevTouchAction = (html.style as any).touchAction;
-
-    html.style.overflow = "hidden";
-    html.style.height = "100%";
-    (html.style as any).overscrollBehavior = "none";
-    (html.style as any).touchAction = "none";
-
-    return () => {
-      html.style.overflow = prevHtmlOverflow;
-      html.style.height = prevHtmlHeight;
-      (html.style as any).overscrollBehavior = prevOverscroll;
-      (html.style as any).touchAction = prevTouchAction;
-    };
-  }, [user]);
-
   function renderPanel() {
     if (loading) {
       return <div style={{ opacity: 0.5, padding: "40px 0", textAlign: "center" }}>Loading…</div>;
