@@ -44,7 +44,7 @@
 // inline styles (index.html's #ibxImgViewer element was itself styled
 // inline, not via a stylesheet rule).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   collection,
@@ -249,6 +249,7 @@ export default function GroupChatPanel({ groupId }: { groupId: string }) {
 
   const messagesRef = useRef<HTMLDivElement>(null);
   const wasNearBottomRef = useRef(true);
+  const hasAutoScrolledRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -278,11 +279,35 @@ export default function GroupChatPanel({ groupId }: { groupId: string }) {
     return () => unsub();
   }, [group, user]);
 
-  // Auto-scroll only if the viewer was already near the bottom — mirrors
-  // the original's 140px heuristic exactly.
+  // Reset the auto-scroll state whenever the group changes, so switching
+  // between groups re-triggers the "jump straight to latest" behavior
+  // below instead of carrying over the previous group's scroll state.
   useEffect(() => {
+    hasAutoScrolledRef.current = false;
+    wasNearBottomRef.current = true;
+  }, [group?.id]);
+
+  // Scroll-to-bottom for the message list. Query above orders messages
+  // oldest-first (asc) so the newest are last in the DOM — a plain
+  // useEffect here ran after paint, so the panel would render at the
+  // TOP (oldest messages) for a beat before jumping down, visible as a
+  // flash/flicker on open. useLayoutEffect runs synchronously after DOM
+  // mutations but before the browser paints, so the jump to bottom
+  // happens invisibly. Same pattern as DealChatPanel: (a) always force
+  // to bottom the first time this group has messages, and (b) on later
+  // updates, only follow new messages down if the viewer was already
+  // near the bottom — if they've scrolled up to read history, leave
+  // their position alone.
+  useLayoutEffect(() => {
     const el = messagesRef.current;
     if (!el) return;
+    if (!messages.length) return;
+    if (!hasAutoScrolledRef.current) {
+      el.scrollTop = el.scrollHeight;
+      wasNearBottomRef.current = true;
+      hasAutoScrolledRef.current = true;
+      return;
+    }
     if (wasNearBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
