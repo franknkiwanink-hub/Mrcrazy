@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { useScrollLock } from "@/lib/useScrollLock";
 import { useCurrency } from "@/lib/CurrencyContext";
 
 // Fixed 15% platform fee — mirrors DONATION_FEE_RATE in paypal.js. Used
@@ -90,14 +91,12 @@ export default function DonateOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Lock page scroll while open, same as the other modals in the app.
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, []);
+  // Lock page scroll while open — uses the shared reference-counted hook
+  // (see lib/useScrollLock.ts) rather than a plain body.style.overflow
+  // toggle, since this overlay can be open at the same time as another
+  // modal (e.g. opened from SellerDetailsOverlay); a plain toggle would
+  // restore scroll on unmount even while the other modal is still up.
+  useScrollLock(true);
 
   useEffect(() => {
     let cancelled = false;
