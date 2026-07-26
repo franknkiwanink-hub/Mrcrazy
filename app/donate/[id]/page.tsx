@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
-import DonatePageClient from "./DonatePageClient";
+import DonatePageClient, { DonatePageSkeleton } from "./DonatePageClient";
 
 // Same treatment as /onboarding, /upgrade — own explicit metadata so this
 // route doesn't inherit the root layout's site-wide title/description.
@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function DonatePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<DonatePageSkeleton />}>
       <DonatePageClient sellerUid={id} />
     </Suspense>
   );
