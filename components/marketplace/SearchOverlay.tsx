@@ -347,7 +347,7 @@ export default function SearchOverlay({
         </div>
       </div>
 
-      <div className="mp-so-body">
+      <div className="mp-so-body" data-scroll-lock-exempt>
         {!q ? (
           <>
             {recent.length ? (
