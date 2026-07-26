@@ -736,3 +736,203 @@
                font-size: 12.5px; color: rgba(255,255,255,.35);
                }
 
+/* ═══════════════════════════════════════
+   DONATE PAGE (full-page /donate/[id] — replaces the old DonateOverlay popup)
+   ═══════════════════════════════════════ */
+.dnp-page {
+               max-width: 760px; margin: 0 auto;
+               padding: 110px 24px 80px;
+               font-family: inherit; color: #eee;
+               }
+
+.dnp-back {
+               display: inline-flex; align-items: center; gap: 6px;
+               background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+               color: #ccc; font-size: 0.8rem; font-weight: 600;
+               padding: 0.5rem 0.9rem; border-radius: 50px; cursor: pointer;
+               font-family: inherit; margin-bottom: 2rem; transition: background .16s, color .16s;
+               }
+
+.dnp-back:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+.dnp-hero { text-align: center; margin-bottom: 1.8rem; position: relative; }
+
+.dnp-hero-av {
+               width: 76px; height: 76px; border-radius: 50%; margin: 0 auto 1rem;
+               background: rgba(163,230,53,0.12); border: 1px solid rgba(163,230,53,0.25);
+               display: flex; align-items: center; justify-content: center;
+               font-size: 1.8rem; font-weight: 800; color: #a3e635; overflow: hidden;
+               }
+
+.dnp-hero-av img { width: 100%; height: 100%; object-fit: cover; }
+
+.dnp-hero-icon {
+               width: 34px; height: 34px; margin: -1.6rem auto 0.9rem; position: relative; z-index: 1;
+               border-radius: 10px; background: #0a0a0e; border: 1px solid rgba(163,230,53,0.3);
+               display: flex; align-items: center; justify-content: center;
+               }
+
+.dnp-hero-icon svg { width: 16px; height: 16px; color: #a3e635; }
+
+.dnp-hero-title { font-size: 1.7rem; font-weight: 900; color: #fff; letter-spacing: -0.4px; margin-bottom: 0.5rem; }
+
+.dnp-hero-title span { color: #a3e635; }
+
+.dnp-hero-sub { font-size: 0.9rem; color: #999; }
+
+.dnp-notfound { text-align: center; color: #999; font-size: 0.95rem; padding: 4rem 0; }
+
+.dnp-stats-row {
+               display: flex; gap: 1px; background: rgba(163,230,53,0.15);
+               border: 1px solid rgba(163,230,53,0.18); border-radius: 16px; overflow: hidden;
+               margin-bottom: 2.2rem;
+               }
+
+.dnp-stat-card { flex: 1; background: rgba(163,230,53,0.04); text-align: center; padding: 1.1rem 0.5rem; }
+
+.dnp-stat-val { font-size: 1.6rem; font-weight: 800; color: #a3e635; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+
+.dnp-stat-lbl { font-size: 0.7rem; color: rgba(255,255,255,.4); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }
+
+.dnp-main-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 1.6rem; margin-bottom: 2.8rem; }
+
+.dnp-form-panel {
+               background: #0c0c14; border: 1px solid rgba(255,255,255,.09); border-radius: 20px; padding: 1.6rem;
+               }
+
+.dnp-side-panel {
+               background: #0e0e14; border: 1px solid rgba(255,255,255,.06); border-radius: 20px; padding: 1.6rem;
+               }
+
+.dnp-how-title { font-size: 0.95rem; font-weight: 800; color: #fff; margin-bottom: 1rem; }
+
+.dnp-how-list { list-style: none; display: flex; flex-direction: column; gap: 0.85rem; }
+
+.dnp-how-list li {
+               font-size: 0.82rem; color: #999; line-height: 1.5; padding-left: 1.1rem; position: relative;
+               }
+
+.dnp-how-list li::before {
+               content: ''; position: absolute; left: 0; top: 0.5em; width: 5px; height: 5px;
+               border-radius: 50%; background: #a3e635;
+               }
+
+.dnp-field-label { font-size: 0.78rem; font-weight: 700; color: rgba(255,255,255,.55); margin-bottom: 0.5rem; margin-top: 1rem; }
+
+.dnp-field-label:first-child { margin-top: 0; }
+
+.dnp-amount-wrap {
+               display: flex; align-items: center; gap: 6px;
+               background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1);
+               border-radius: 12px; padding: 0.7rem 0.9rem;
+               }
+
+.dnp-amount-currency { font-size: 1.1rem; font-weight: 700; color: #a3e635; }
+
+.dnp-amount-wrap input {
+               flex: 1; background: transparent; border: none; outline: none; color: #fff;
+               font-size: 1.1rem; font-weight: 700; font-family: inherit;
+               }
+
+.dnp-quick-amounts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0 6px; }
+
+.dnp-quick-btn {
+               background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+               border-radius: 10px; padding: 9px 4px; font-size: 12.5px; font-weight: 700;
+               color: rgba(255,255,255,.65); cursor: pointer; font-family: inherit;
+               transition: all .16s;
+               }
+
+.dnp-quick-btn:hover { border-color: rgba(163,230,53,0.4); color: #a3e635; }
+
+.dnp-quick-btn.active { background: rgba(163,230,53,0.14); border-color: rgba(163,230,53,0.45); color: #a3e635; }
+
+.dnp-text-input {
+               width: 100%; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1);
+               border-radius: 12px; padding: 0.7rem 0.9rem; color: #eee; font-size: 0.85rem; font-family: inherit;
+               outline: none;
+               }
+
+.dnp-fee-breakdown {
+               background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07);
+               border-radius: 12px; padding: 0.8rem 0.9rem; margin-top: 1rem;
+               }
+
+.dnp-fee-line { display: flex; justify-content: space-between; font-size: 0.78rem; color: #999; padding: 0.15rem 0; }
+
+.dnp-fee-line.total { color: #a3e635; font-weight: 700; }
+
+.dnp-msg { font-size: 0.8rem; text-align: center; margin-top: 0.9rem; }
+
+.dnp-msg.err { color: #f87171; }
+
+.dnp-msg.ok { color: #a3e635; }
+
+.dnp-coming-soon { font-size: 0.78rem; color: rgba(255,255,255,.4); text-align: center; margin-top: 1.2rem; }
+
+.dnp-submit-btn {
+               width: 100%; padding: 14px; border-radius: 14px; margin-top: 10px;
+               background: #a3e635; border: none; color: #0a0a0e; font-size: 14px; font-weight: 800;
+               cursor: pointer; font-family: inherit;
+               display: flex; align-items: center; justify-content: center; gap: 7px;
+               }
+
+.dnp-submit-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.dnp-recent-section { }
+
+.dnp-recent-hdr {
+               font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em;
+               color: rgba(255,255,255,.4); margin-bottom: 1rem;
+               }
+
+.dnp-recent-list { display: flex; flex-direction: column; gap: 8px; }
+
+.dnp-row {
+               display: flex; align-items: center; gap: 12px;
+               padding: 12px; border-radius: 14px;
+               background: #0e0e14; border: 1px solid rgba(255,255,255,.06);
+               transition: background .16s;
+               }
+
+.dnp-row:hover { background: #131318; }
+
+.dnp-av {
+               width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+               background: rgba(163,230,53,0.12); border: 1px solid rgba(163,230,53,0.25);
+               display: flex; align-items: center; justify-content: center;
+               font-size: 13.5px; font-weight: 800; color: #a3e635; overflow: hidden;
+               }
+
+.dnp-av img { width: 100%; height: 100%; object-fit: cover; }
+
+.dnp-mid { flex: 1; min-width: 0; }
+
+.dnp-name { font-size: 13px; font-weight: 700; color: #eee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.dnp-note { font-size: 11.5px; color: rgba(255,255,255,.4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+.dnp-when { font-size: 10.5px; color: rgba(255,255,255,.3); margin-top: 1px; }
+
+.dnp-amt { font-size: 14px; font-weight: 800; color: #a3e635; flex-shrink: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.dnp-skel {
+               height: 58px; border-radius: 14px;
+               background: linear-gradient(90deg, rgba(255,255,255,.03) 25%, rgba(255,255,255,.06) 37%, rgba(255,255,255,.03) 63%);
+               background-size: 400% 100%; animation: spSkelPulse 1.3s ease-in-out infinite;
+               }
+
+.dnp-recent-empty {
+               text-align: center; padding: 24px 0;
+               font-size: 12.5px; color: rgba(255,255,255,.35);
+               }
+
+@media (max-width: 720px) {
+               .dnp-main-grid { grid-template-columns: 1fr; }
+               }
+
+@media (max-width: 480px) {
+               .dnp-page { padding: 90px 16px 60px; }
+               .dnp-hero-title { font-size: 1.4rem; }
+               }
+
