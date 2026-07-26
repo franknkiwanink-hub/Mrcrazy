@@ -300,7 +300,10 @@
          }
 
 /* ── Responsive ────────────────── */
-@media (max-width: 700px) {
+/* 641–700px: sidebar shrinks a little but stays a genuine two-pane
+   layout — there's enough width here for both columns to still be
+   usable side by side. */
+@media (max-width: 700px) and (min-width: 641px) {
          .settings-sidebar {
          width: 220px;
          min-width: 200px;
@@ -323,27 +326,54 @@
          }
          }
 
-@media (max-width: 500px) {
+/* ≤640px (phones): stop shrinking both columns side by side — at this
+   width that just crushes labels and icons into an unreadable strip
+   next to a half-width panel (see the /settings mobile screenshot this
+   fixed). Instead .main-content switches to a single full-width column
+   and only one pane is shown at a time, controlled by the
+   data-mobile-view attribute SettingsPage sets on it:
+     - data-mobile-view="list"  → sidebar shows (full width, icon+label
+       exactly as on desktop, just full width instead of a narrow strip)
+       and .detail-panel is hidden.
+     - data-mobile-view="panel" → sidebar hides and .detail-panel takes
+       the full width, with .settings-mobile-back-btn at the top to
+       return to the list.
+   Both elements stay mounted at all times — this is a visibility swap,
+   not a mount/unmount — so no state is lost switching back and forth. */
+@media (max-width: 640px) {
+         .main-content { flex-direction: column; }
+
          .settings-sidebar {
-         width: 160px;
-         min-width: 140px;
-         padding: 0.5rem 0.2rem;
+         width: 100%;
+         min-width: 0;
+         max-width: 100%;
+         padding: 0.8rem 0.6rem;
+         border-right: none;
          }
+         .main-content[data-mobile-view="panel"] .settings-sidebar {
+         display: none;
+         }
+
          .settings-nav-item {
-         font-size: 0.7rem;
-         padding: 0.5rem 0.5rem;
-         gap: 0.3rem;
-         border-radius: 0.5rem;
+         font-size: 0.92rem;
+         padding: 0.85rem 0.9rem;
+         gap: 0.75rem;
          }
          .settings-nav-item svg {
-         width: 14px;
-         height: 14px;
+         width: 19px;
+         height: 19px;
          }
+
          .detail-panel {
-         padding: 1rem 0.7rem 1.2rem;
+         width: 100%;
+         padding: 1.1rem 1rem 1.5rem;
          }
+         .main-content[data-mobile-view="list"] .detail-panel {
+         display: none;
+         }
+
          .detail-panel-header h3 {
-         font-size: 1rem;
+         font-size: 1.15rem;
          }
          .toggle-item {
          flex-direction: column;
@@ -354,6 +384,39 @@
          .danger-btn {
          width: 100%;
          justify-content: center;
+         }
+
+         /* Back-to-list control, only shown on this breakpoint's panel
+            view — see settings/page.tsx. Deliberately its own class,
+            not a reuse of .panel-back-btn (that one's PanelHeader's
+            shared always-visible back button used on other full-screen
+            overlay routes like My Profile — scoping this separately
+            avoids a display:none here leaking into those). */
+         .settings-mobile-back-btn {
+         display: none;
+         align-items: center;
+         gap: 0.4rem;
+         background: transparent;
+         border: 1px solid var(--mp-border, rgba(255,255,255,0.12));
+         color: var(--mp-text-sec, rgba(255,255,255,0.7));
+         padding: 0.5rem 1.1rem;
+         border-radius: 50px;
+         font-weight: 600;
+         font-size: 0.82rem;
+         font-family: inherit;
+         cursor: pointer;
+         white-space: nowrap;
+         margin-bottom: 0.6rem;
+         }
+         .settings-mobile-back-btn svg {
+         width: 15px;
+         height: 15px;
+         stroke: currentColor;
+         fill: none;
+         flex-shrink: 0;
+         }
+         .main-content[data-mobile-view="panel"] .settings-mobile-back-btn {
+         display: flex;
          }
          }
 
