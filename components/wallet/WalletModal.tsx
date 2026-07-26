@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { useWalletSummary } from "@/lib/useWalletSummary";
 import { useCurrency } from "@/lib/CurrencyContext";
+import { useScrollLock } from "@/lib/useScrollLock";
 import WithdrawTab from "@/components/wallet/WithdrawTab";
 import SendTab from "@/components/wallet/SendTab";
 import HistoryTab from "@/components/wallet/HistoryTab";
@@ -44,41 +45,12 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
     }
   }, [open, refresh]);
 
-  useEffect(() => {
-    if (!open) return;
-    const { style: bodyStyle } = document.body;
-    const { style: htmlStyle } = document.documentElement;
-    const scrollY = window.scrollY;
-
-    const prev = {
-      bodyOverflow: bodyStyle.overflow,
-      bodyPosition: bodyStyle.position,
-      bodyWidth: bodyStyle.width,
-      bodyTop: bodyStyle.top,
-      bodyHeight: bodyStyle.height,
-      htmlOverflow: htmlStyle.overflow,
-      htmlHeight: htmlStyle.height,
-    };
-
-    htmlStyle.overflow = "hidden";
-    htmlStyle.height = "100%";
-    bodyStyle.overflow = "hidden";
-    bodyStyle.position = "fixed";
-    bodyStyle.width = "100%";
-    bodyStyle.height = "100%";
-    bodyStyle.top = `-${scrollY}px`;
-
-    return () => {
-      htmlStyle.overflow = prev.htmlOverflow;
-      htmlStyle.height = prev.htmlHeight;
-      bodyStyle.overflow = prev.bodyOverflow;
-      bodyStyle.position = prev.bodyPosition;
-      bodyStyle.width = prev.bodyWidth;
-      bodyStyle.height = prev.bodyHeight;
-      bodyStyle.top = prev.bodyTop;
-      window.scrollTo(0, scrollY);
-    };
-  }, [open]);
+  // Shared reference-counted lock (see lib/useScrollLock.ts) instead of a
+  // hand-rolled html/body position:fixed toggle — the previous version
+  // saved/restored styles independently of every other modal's lock, so
+  // whichever modal closed first could rip out another modal's lock (or
+  // jump the page's scroll position) if two were ever open at once.
+  useScrollLock(open);
 
   if (!open) return null;
 
