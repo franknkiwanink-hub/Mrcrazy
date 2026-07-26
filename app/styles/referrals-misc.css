@@ -912,6 +912,176 @@
 
 .srf-plans-msg.ok { color: #a3e635; }
 
+/* ═══════════════════════════════════════
+   UPGRADE PAGE (full-page /upgrade — replaces the old PlansModal popup)
+   ═══════════════════════════════════════ */
+.upg-page {
+  max-width: 980px; margin: 0 auto;
+  padding: 110px 24px 80px;
+  font-family: 'Inter', sans-serif;
+  color: #eee;
+}
+
+.upg-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+  color: #ccc; font-size: 0.8rem; font-weight: 600;
+  padding: 0.5rem 0.9rem; border-radius: 50px; cursor: pointer;
+  font-family: inherit; margin-bottom: 2rem; transition: background 0.2s, color 0.2s;
+}
+
+.upg-back:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+.upg-hero { text-align: center; margin-bottom: 2.8rem; }
+
+.upg-hero-icon {
+  width: 56px; height: 56px; margin: 0 auto 1rem;
+  border-radius: 16px; background: rgba(163,230,53,0.08); border: 1px solid rgba(163,230,53,0.25);
+  display: flex; align-items: center; justify-content: center;
+}
+
+.upg-hero-icon svg { width: 26px; height: 26px; }
+
+.upg-hero-title {
+  font-size: 2.1rem; font-weight: 900; color: #fff; letter-spacing: -0.5px; margin-bottom: 0.6rem;
+}
+
+.upg-hero-sub { font-size: 1rem; color: #999; max-width: 480px; margin: 0 auto; line-height: 1.5; }
+
+.upg-plan-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+  margin-bottom: 1.4rem;
+}
+
+.upg-plan-card {
+  position: relative;
+  background: #111116; border: 1px solid rgba(255,255,255,0.1); border-radius: 20px;
+  padding: 1.6rem 1.4rem; text-align: left; cursor: pointer;
+  font-family: inherit; color: inherit;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+}
+
+.upg-plan-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.22); }
+
+.upg-plan-card.active { background: #16161c; }
+
+.upg-plan-chip {
+  position: absolute; top: -10px; right: 16px;
+  background: #a3e635; color: #000; font-size: 0.6rem; font-weight: 800;
+  padding: 0.2rem 0.55rem; border-radius: 20px; letter-spacing: 0.3px;
+}
+
+.upg-detail-panel .upg-plan-chip { position: static; margin-left: 0.5rem; }
+
+.upg-plan-name { font-size: 1.15rem; font-weight: 800; color: #fff; margin-bottom: 0.3rem; }
+
+.upg-plan-price { font-size: 1.7rem; font-weight: 900; color: #fff; margin-bottom: 0.35rem; }
+
+.upg-plan-price small { font-size: 0.75rem; font-weight: 500; color: #999; }
+
+.upg-plan-tagline { font-size: 0.78rem; color: #888; margin-bottom: 0.9rem; line-height: 1.4; min-height: 2.2em; }
+
+.upg-plan-pills { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+
+.upg-plan-pill {
+  font-size: 0.68rem; font-weight: 700; padding: 0.25rem 0.6rem;
+  border-radius: 20px; border: 1px solid; white-space: nowrap;
+}
+
+.upg-detail-panel {
+  display: grid; grid-template-columns: 1.4fr 1fr; gap: 2rem;
+  background: #0e0e14; border: 1px solid rgba(255,255,255,0.08); border-radius: 22px;
+  padding: 2rem; margin-bottom: 3.5rem;
+}
+
+.upg-detail-name {
+  font-size: 1.4rem; font-weight: 800; color: #fff; display: flex; align-items: center; margin-bottom: 0.9rem;
+}
+
+.upg-currency-note { font-size: 0.75rem; color: rgba(255,255,255,0.35); margin-bottom: 0.9rem; margin-top: -0.4rem; }
+
+.upg-feature-list { list-style: none; display: flex; flex-direction: column; gap: 0.65rem; }
+
+.upg-feature-list li { display: flex; align-items: center; gap: 0.6rem; font-size: 0.9rem; color: #ddd; }
+
+.upg-feature-list li.is-dim { color: #555; }
+
+.upg-detail-right { display: flex; flex-direction: column; justify-content: center; }
+
+.upg-current-banner {
+  background: rgba(163,230,53,0.08); border: 1px solid rgba(163,230,53,0.25);
+  color: #a3e635; font-size: 0.85rem; font-weight: 600; border-radius: 14px;
+  padding: 0.9rem 1rem; text-align: center;
+}
+
+.upg-subscribe-cta {
+  width: 100%; border: none; font-weight: 700; font-size: 0.95rem;
+  padding: 0.95rem 1.6rem; border-radius: 50px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  transition: filter 0.2s; font-family: inherit;
+}
+
+.upg-subscribe-cta:hover { filter: brightness(1.08); }
+
+.upg-note { text-align: center; color: #555; font-size: 0.74rem; margin-top: 1rem; }
+
+.upg-msg { font-size: 0.8rem; text-align: center; margin-top: 0.7rem; }
+
+.upg-msg.err { color: #f87171; }
+
+.upg-msg.ok { color: #a3e635; }
+
+.upg-section { margin-bottom: 3.2rem; }
+
+.upg-section-title {
+  font-size: 1.4rem; font-weight: 800; color: #fff; margin-bottom: 1.4rem; letter-spacing: -0.3px;
+}
+
+.upg-compare-table-wrap { overflow-x: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; }
+
+.upg-compare-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+
+.upg-compare-table th, .upg-compare-table td {
+  padding: 0.85rem 1.1rem; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.upg-compare-table thead th { font-weight: 800; font-size: 0.95rem; background: #14141a; }
+
+.upg-compare-table tbody tr:last-child td { border-bottom: none; }
+
+.upg-compare-label { text-align: left !important; color: #999; font-weight: 600; }
+
+.upg-compare-table td:not(.upg-compare-label) { color: #ddd; }
+
+.upg-faq-list { display: flex; flex-direction: column; gap: 0.6rem; }
+
+.upg-faq-item {
+  background: #111116; border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; overflow: hidden;
+}
+
+.upg-faq-q {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  background: transparent; border: none; color: #eee; font-family: inherit;
+  font-size: 0.92rem; font-weight: 600; padding: 1rem 1.2rem; cursor: pointer; text-align: left;
+}
+
+.upg-faq-chevron { transition: transform 0.2s; flex-shrink: 0; margin-left: 1rem; color: #888; }
+
+.upg-faq-item.open .upg-faq-chevron { transform: rotate(180deg); }
+
+.upg-faq-a { padding: 0 1.2rem 1.1rem; color: #999; font-size: 0.85rem; line-height: 1.55; }
+
+@media (max-width: 860px) {
+  .upg-plan-grid { grid-template-columns: 1fr; }
+  .upg-detail-panel { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+  .upg-page { padding: 90px 16px 60px; }
+  .upg-hero-title { font-size: 1.6rem; }
+  .upg-compare-table th, .upg-compare-table td { padding: 0.7rem 0.6rem; font-size: 0.78rem; }
+}
+
 /* ── extracted style block 21 (originally around char offset 2112727) ── */
 #shareModalOverlay {
        display: none; position: fixed; inset: 0; z-index: 10060;
