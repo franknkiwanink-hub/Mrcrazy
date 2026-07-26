@@ -20,6 +20,7 @@ import SignInRequired from "@/components/auth/SignInRequired";
 import { buildListingSlug } from "@/lib/slug";
 import { useCurrency } from "@/lib/CurrencyContext";
 import NavSpinnerIcon from "@/components/shared/NavSpinnerIcon";
+import ChatLoadingState from "@/components/shared/ChatLoadingState";
 
 // Ports the deal chat panel from Js/inbox.js (lines 937-2774): sticky
 // item bar, escrow announcement bar + actions (pay/release/dispute),
@@ -80,6 +81,11 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   const [deleteAfterCancel, setDeleteAfterCancel] = useState<{ deleteAt: number } | null>(null);
   const [deleteCountdown, setDeleteCountdown] = useState("");
   const [requestPaymentOverlayOpen, setRequestPaymentOverlayOpen] = useState(false);
+  // Full-view lightbox for tapped image bubbles — previously image
+  // bubbles used window.open(url, "_blank"), which redirected out to a
+  // new tab/the raw image URL instead of showing it in-app. Mirrors
+  // GroupChatPanel's viewerImage overlay pattern.
+  const [viewerImage, setViewerImage] = useState<string | null>(null);
   // Separate from ctaBusy on purpose: this covers the "Transfer Deal"
   // attach-pill in the message composer bar, which is a different button
   // from the announcement bar's Mark Delivered CTA (both can navigate to
@@ -188,6 +194,23 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   // read history, it leaves their position alone.
   const wasNearBottomRef = useRef(true);
   const hasAutoScrolledRef = useRef(false);
+
+  // Called when an image bubble finishes loading (see MessageBubble's
+  // onLoad below). Images load asynchronously, after the message list's
+  // first paint — the layout effect below fires before the <img> has
+  // any height, so it scrolls to what *looks* like the bottom, then the
+  // image pops in seconds later, grows the list taller, and pushes the
+  // real latest message out of view with nothing re-checking the scroll
+  // position. This re-runs the same "stick to bottom if we were there"
+  // logic once the image's actual height is known.
+  const stickToBottom = useRef(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    if (!hasAutoScrolledRef.current || wasNearBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+      wasNearBottomRef.current = true;
+    }
+  }).current;
 
   useEffect(() => {
     hasAutoScrolledRef.current = false;
@@ -672,7 +695,7 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
         <div id="dcpMessages" ref={messagesRef}>
           {chat.chatError ? <div style={{ padding: "0.55rem 1rem", textAlign: "center", color: "#fecaca", fontSize: "0.75rem", fontWeight: 600, background: "#3f1d1d" }}>{chat.chatError}</div> : null}
           {chat.messagesLoading ? (
-            <div style={{ padding: "1.5rem", textAlign: "center", color: "rgba(255,255,255,0.25)", fontSize: "0.8rem" }}>Loading…</div>
+            <ChatLoadingState label="Loading messages…" />
           ) : chat.messages.length === 0 ? (
             <div style={{ padding: "1.5rem", textAlign: "center", color: "rgba(255,255,255,0.2)", fontSize: "0.8rem" }}>No messages yet.</div>
           ) : (
@@ -685,6 +708,8 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
                 dealId={room?.dealId || null}
                 onDelete={chat.deleteMessage}
                 onReport={() => alert({ theme: "report", title: "Message Reported", msg: "Our moderation team will review this message within 24 hours." })}
+                onImageLoad={stickToBottom}
+                onImageClick={setViewerImage}
               />
             ))
           )}
@@ -823,6 +848,16 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
           }}
         />
       </div>
+
+      {viewerImage ? (
+        <div
+          onClick={() => setViewerImage(null)}
+          style={{ display: "flex", position: "fixed", inset: 0, zIndex: 10100, background: "rgba(0,0,0,0.95)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", justifyContent: "center", alignItems: "center", cursor: "zoom-out" }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={viewerImage} alt="" style={{ maxWidth: "95vw", maxHeight: "92vh", borderRadius: 12, objectFit: "contain", pointerEvents: "none" }} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1075,6 +1110,8 @@ function MessageRow({
   dealId,
   onDelete,
   onReport,
+  onImageLoad,
+  onImageClick,
 }: {
   m: DealMessage;
   currentUid: string;
@@ -1082,6 +1119,8 @@ function MessageRow({
   dealId: string | null;
   onDelete: (id: string) => void;
   onReport: () => void;
+  onImageLoad: () => void;
+  onImageClick: (url: string) => void;
 }) {
   const [ctxOpen, setCtxOpen] = useState(false);
 
@@ -1123,17 +1162,17 @@ function MessageRow({
           </div>
         ) : null}
       </div>
-      <MessageBubble m={m} isMine={isMine} chatRoomId={chatRoomId} dealId={dealId} />
+      <MessageBubble m={m} isMine={isMine} chatRoomId={chatRoomId} dealId={dealId} onImageLoad={onImageLoad} onImageClick={onImageClick} />
     </div>
   );
 }
 
-function MessageBubble({ m, isMine, chatRoomId, dealId }: { m: DealMessage; isMine: boolean; chatRoomId: string; dealId: string | null }) {
+function MessageBubble({ m, isMine, chatRoomId, dealId, onImageLoad, onImageClick }: { m: DealMessage; isMine: boolean; chatRoomId: string; dealId: string | null; onImageLoad: () => void; onImageClick: (url: string) => void }) {
   if (m.type === "image" && m.imageUrl) {
     return (
       <div className="dcp-bubble img-bubble">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={m.imageUrl} alt="" onClick={() => window.open(m.imageUrl, "_blank", "noopener")} />
+        <img src={m.imageUrl} alt="" onClick={() => onImageClick(m.imageUrl!)} onLoad={onImageLoad} />
       </div>
     );
   }
@@ -1143,7 +1182,7 @@ function MessageBubble({ m, isMine, chatRoomId, dealId }: { m: DealMessage; isMi
         <div className="ibx-link-prev">
           {m.linkThumb ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={m.linkThumb} className="ibx-link-prev-img" alt="" onError={(e) => (e.currentTarget.style.display = "none")} />
+            <img src={m.linkThumb} className="ibx-link-prev-img" alt="" onLoad={onImageLoad} onError={(e) => (e.currentTarget.style.display = "none")} />
           ) : null}
           <div className="ibx-link-prev-body">
             <div className="ibx-link-prev-title">{m.linkTitle || m.linkUrl}</div>
