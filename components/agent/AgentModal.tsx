@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the Autopilot Agent modal from Js/plans-boost.js (openAgentModal /
 // window.__openAgentModal, lines 336-776) + the #agentModal markup in
@@ -102,6 +103,13 @@ function tsAgo(date: Date): string {
 export default function AgentModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user } = useAuth();
   const router = useRouter();
+
+  // AgentModal never had a scroll lock of its own — see
+  // lib/useScrollLock.ts's top comment; this was one of the
+  // modals/overlays that let the page underneath keep scrolling while
+  // it was open. Reference-counted, so it stacks safely with whatever
+  // opened this (e.g. MyProfileHub) already having its own lock active.
+  useScrollLock(open);
 
   const [loading, setLoading] = useState(false);
   const [limits, setLimits] = useState<AgentLimitsData | null>(null);
@@ -354,7 +362,7 @@ export default function AgentModal({ open, onClose }: { open: boolean; onClose: 
           </button>
         </div>
 
-        <div id="agentModalBody">
+        <div id="agentModalBody" data-scroll-lock-exempt>
           <div id="agentModalContent">
             <div id="agentStatusBar">
               <div id="agentStatusIconWrap" className={isActive ? "online" : ""}>
