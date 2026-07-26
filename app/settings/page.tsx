@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
+import PanelHeader from "@/components/shared/PanelHeader";
 import SettingsSidebar, { type SettingsPanelId } from "@/components/settings/SettingsSidebar";
 import { useSettingsState } from "@/lib/useSettingsState";
 import { useAuth } from "@/lib/AuthContext";
@@ -203,9 +204,10 @@ function SettingsPageInner() {
         zIndex: 9995,
         display: "flex",
         flexDirection: "column",
-        background: "#000",
+        background: "var(--mp-bg, #050508)",
       }}
     >
+      <PanelHeader />
       <div className="main-content" style={{ flex: 1, minHeight: 0 }}>
         <SettingsSidebar
           activePanel={activePanel}
