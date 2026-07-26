@@ -1,9 +1,8 @@
 "use client";
 
 import { createContext, useContext, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import AuthModal from "@/components/auth/AuthModal";
-import OnboardingWizard from "@/components/onboarding/OnboardingWizard";
-import { useThemeModal } from "@/components/theme/ThemeModalProvider";
 
 interface AuthModalContextValue {
   openAuthModal: () => void;
@@ -19,10 +18,7 @@ export function useAuthModal() {
 
 export function AuthModalProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const { openThemePicker } = useThemeModal();
-
-  const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardUsername, setWizardUsername] = useState("");
+  const router = useRouter();
 
   return (
     <AuthModalContext.Provider value={{ openAuthModal: () => setOpen(true) }}>
@@ -31,23 +27,13 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
         open={open}
         onClose={() => setOpen(false)}
         onSignupComplete={(username) => {
-          // Same 300ms delay after the auth modal closes as the original
-          // tour used, now opening OnboardingWizard instead of TourModal
-          // at this same signup call site.
+          // Onboarding now lives at its own /onboarding route instead of
+          // opening as a modal over the current page. Same 300ms delay
+          // after the auth modal closes as before.
           setTimeout(() => {
-            setWizardUsername(username);
-            setWizardOpen(true);
+            setOpen(false);
+            router.push(`/onboarding?username=${encodeURIComponent(username)}`);
           }, 300);
-        }}
-      />
-      <OnboardingWizard
-        open={wizardOpen}
-        username={wizardUsername}
-        onFinish={() => {
-          // Same as the old tour's last-step behavior: close, then open
-          // the theme picker.
-          setWizardOpen(false);
-          openThemePicker();
         }}
       />
     </AuthModalContext.Provider>
