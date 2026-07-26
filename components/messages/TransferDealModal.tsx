@@ -71,7 +71,7 @@ export function TransferDealModalSkeleton({ onBack }: { onBack?: () => void }) {
         ))}
       </nav>
 
-      <main className="tdm-checklist-main">
+      <main className="tdm-checklist-main" data-scroll-lock-exempt>
         <div className="tdm-checklist-container">
           <div className="tdm-checklist-column">
             {[0, 1, 2, 3].map((i) => (
@@ -173,7 +173,7 @@ export default function TransferDealModal(props: TransferDealModalProps) {
         ))}
       </nav>
 
-      <main className="tdm-checklist-main">
+      <main className="tdm-checklist-main" data-scroll-lock-exempt>
         <ChecklistGrid
           tab={tdm.tab}
           completed={tdm.completed}
