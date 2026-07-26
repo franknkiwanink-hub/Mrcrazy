@@ -388,6 +388,8 @@
                overflow-x: auto; overflow-y: hidden;
                -webkit-overflow-scrolling: touch;
                scrollbar-width: none;
+               touch-action: pan-x;
+               overscroll-behavior-x: contain;
                }
 
 #mpChipsRow::-webkit-scrollbar { display: none; }
@@ -495,6 +497,8 @@
                -webkit-overflow-scrolling: touch;
                scrollbar-width: none;
                flex-wrap: nowrap;
+               touch-action: pan-x;
+               overscroll-behavior-x: contain;
                }
 
 #mpActiveTags::-webkit-scrollbar { display: none; }
@@ -1345,6 +1349,8 @@
                scroll-snap-type: x proximity;
                -webkit-overflow-scrolling: touch;
                scrollbar-width: none;
+               touch-action: pan-x;
+               overscroll-behavior-x: contain;
                }
 
 #mpTopSellersTrack::-webkit-scrollbar { display: none; }
