@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/AuthContext";
@@ -158,44 +158,60 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
     };
   }, []);
 
-  // Scroll to the most recent messages the moment the chat has content to
-  // show, rather than relying on the "stay near bottom" effect below to
-  // happen to fire correctly on the very first render. That effect reads
-  // el.scrollHeight/clientHeight, which can be 0 or stale before the
-  // message list has actually laid out — on some devices that meant the
-  // panel opened showing the oldest messages at the top instead of
-  // jumping straight to the latest ones like every other chat app.
-  // hasAutoScrolledRef ensures this only forces a jump once per chat
-  // room open — after that, the effect below (which respects whether the
-  // user has scrolled up to read history) takes over.
+  // Scroll-to-bottom behavior for the message list. Previous approach
+  // used two plain useEffects keyed off chat.messages with a double-rAF
+  // delay — in practice that left the panel opening scrolled to the
+  // TOP (oldest messages) instead of the latest ones, and new messages
+  // (including ones the user just sent) didn't scroll the view down at
+  // all. Root cause: useEffect runs after paint but the ref-gated
+  // "first jump" effect and the "stay near bottom" effect both fired
+  // off the same dependency in the same commit, so the near-bottom
+  // effect could read stale scroll metrics before the first jump had
+  // actually applied, and there was no guarantee a later render
+  // wouldn't race the same way.
+  //
+  // Fix: a single useLayoutEffect (runs synchronously after DOM
+  // mutations, before the browser paints — no rAF needed, no visible
+  // jump) that (a) always forces scrollTop to the bottom the first
+  // time this chat room has messages, and (b) on every later update,
+  // checks — via a ref kept current by a scroll listener, not stale
+  // render-time state — whether the user was already near the bottom,
+  // and if so follows new content down. If the user has scrolled up to
+  // read history, it leaves their position alone.
+  const wasNearBottomRef = useRef(true);
   const hasAutoScrolledRef = useRef(false);
-  useEffect(() => {
-    hasAutoScrolledRef.current = false;
-  }, [chatRoomId]);
-  useEffect(() => {
-    if (hasAutoScrolledRef.current) return;
-    if (!chat.messages.length) return;
-    const el = messagesRef.current;
-    if (!el) return;
-    // Two rAFs: one to let this render commit, one more to let the
-    // browser finish layout of the just-rendered message bubbles, so
-    // scrollHeight reflects the real content height instead of a
-    // mid-layout value.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (!messagesRef.current) return;
-        messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-        hasAutoScrolledRef.current = true;
-      });
-    });
-  }, [chat.messages, chatRoomId]);
 
   useEffect(() => {
-    if (!hasAutoScrolledRef.current) return;
+    hasAutoScrolledRef.current = false;
+    wasNearBottomRef.current = true;
+  }, [chatRoomId]);
+
+  useEffect(() => {
     const el = messagesRef.current;
     if (!el) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-    if (nearBottom) el.scrollTop = el.scrollHeight;
+    function onScroll() {
+      if (!el) return;
+      wasNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    }
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    if (!chat.messages.length) return;
+    if (!hasAutoScrolledRef.current) {
+      // First paint of this chat room's messages — always jump straight
+      // to the latest message, like every other chat app.
+      el.scrollTop = el.scrollHeight;
+      wasNearBottomRef.current = true;
+      hasAutoScrolledRef.current = true;
+      return;
+    }
+    if (wasNearBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [chat.messages]);
 
   useEffect(() => {
