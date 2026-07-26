@@ -431,7 +431,7 @@ export default function EditListingModal({
           </div>
         </div>
 
-        <div className="el-body">
+        <div className="el-body" data-scroll-lock-exempt>
           {loading ? (
             <div className="el-loading">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
