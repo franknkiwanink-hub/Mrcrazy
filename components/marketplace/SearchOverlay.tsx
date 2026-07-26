@@ -24,6 +24,7 @@ import type { Listing } from "@/lib/listings";
 import { isBoosted, fetchSearchResults } from "@/lib/listings";
 import { useRecentSearches } from "@/lib/useRecentSearches";
 import { useCurrency } from "@/lib/CurrencyContext";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 interface Suggestion {
   listing: Listing;
@@ -208,14 +209,11 @@ export default function SearchOverlay({
 
   // Lock background scroll while the overlay is up — a full-screen
   // takeover shouldn't let the marketplace grid scroll underneath it.
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
+  // Uses the shared reference-counted hook (see lib/useScrollLock.ts);
+  // the previous plain body.style.overflow toggle here could stomp
+  // another modal's lock and restore scroll while that modal was still
+  // open.
+  useScrollLock(open);
 
   useEffect(() => {
     if (!open) return;
