@@ -18,6 +18,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
+import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
 
 interface CapStatus {
@@ -102,6 +103,21 @@ function WeeklyLimitBar() {
 
 export default function SellPickerClient() {
   const router = useRouter();
+  const { user } = useAuth();
+  const { openAuthModal } = useAuthModal();
+
+  // Gate every type-card click behind auth. Previously all five cards
+  // called router.push() unconditionally, so a guest could freely
+  // browse into any listing-creation form. Now: if not signed in,
+  // open the auth modal right from the picker instead of letting them
+  // start filling out a form they can't submit.
+  function guardedPush(href: string) {
+    if (!user) {
+      openAuthModal();
+      return;
+    }
+    router.push(href);
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "#000", color: "#fff", paddingTop: 92, paddingBottom: 80 }}>
@@ -124,7 +140,7 @@ export default function SellPickerClient() {
             accent="#a3e635"
             icon={<GlobeIcon />}
             bannerSrc="https://cdn.phototourl.com/member/2026-07-23-94028826-7b73-44cb-aa8e-784df56bc085.jpg"
-            onClick={() => router.push("/sell/website")}
+            onClick={() => guardedPush("/sell/website")}
           />
           <TypeCard
             label="App"
@@ -132,7 +148,7 @@ export default function SellPickerClient() {
             accent="#fbbf24"
             icon={<AppIcon />}
             bannerSrc="https://cdn.phototourl.com/member/2026-07-23-a4b0ee23-15a4-44b5-8ea7-b86414ea3e1f.jpg"
-            onClick={() => router.push("/sell/app")}
+            onClick={() => guardedPush("/sell/app")}
           />
           <TypeCard
             label="Game"
@@ -140,7 +156,7 @@ export default function SellPickerClient() {
             accent="#f59e0b"
             icon={<GameIcon />}
             bannerSrc="https://cdn.phototourl.com/member/2026-07-23-43f253a3-d3dd-411a-970e-066ae0e3b477.jpg"
-            onClick={() => router.push("/sell/game")}
+            onClick={() => guardedPush("/sell/game")}
           />
           <TypeCard
             label="Template"
@@ -148,7 +164,7 @@ export default function SellPickerClient() {
             accent="#c084fc"
             icon={<TemplateIcon />}
             bannerSrc="https://cdn.phototourl.com/member/2026-07-23-510375af-9619-486a-b1cd-da57626b1755.jpg"
-            onClick={() => router.push("/sell/template")}
+            onClick={() => guardedPush("/sell/template")}
           />
           <TypeCard
             label="3D Assets"
@@ -156,7 +172,7 @@ export default function SellPickerClient() {
             accent="#2dd4bf"
             icon={<AssetsIcon />}
             bannerSrc="https://cdn.phototourl.com/member/2026-07-23-44fc3828-068f-4bfc-82e3-10e2be1c0df7.jpg"
-            onClick={() => router.push("/sell/3d-assets")}
+            onClick={() => guardedPush("/sell/3d-assets")}
           />
         </div>
       </div>
