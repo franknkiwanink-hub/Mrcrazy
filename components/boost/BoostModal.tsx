@@ -239,7 +239,7 @@ export default function BoostModal({
         </div>
 
         {/* Body */}
-        <div style={{ overflowY: "auto", padding: "20px 24px 24px" }}>
+        <div data-scroll-lock-exempt style={{ overflowY: "auto", padding: "20px 24px 24px" }}>
           {/* Listing chip */}
           <div
             style={{
