@@ -51,6 +51,7 @@ export default function MarketplaceModal({
       role="dialog"
       aria-modal="true"
       aria-label="Marketplace"
+      data-scroll-lock-exempt
       style={{
         position: "fixed",
         inset: 0,
