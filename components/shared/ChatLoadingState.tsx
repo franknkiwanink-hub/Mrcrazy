@@ -5,7 +5,13 @@
 // style, matching the rest of the app's icon language) centered in the
 // messages area, with a lime accent spinner underneath so it actually
 // reads as "in progress" rather than inert text.
-export default function ChatLoadingState({ label = "Loading messages…" }: { label?: string }) {
+export default function ChatLoadingState({
+  label = "Loading messages…",
+  compact = false,
+}: {
+  label?: string;
+  compact?: boolean;
+}) {
   return (
     <div
       style={{
@@ -13,16 +19,16 @@ export default function ChatLoadingState({ label = "Loading messages…" }: { la
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: "0.9rem",
-        padding: "3rem 1.5rem",
-        minHeight: "60%",
+        gap: compact ? "0.6rem" : "0.9rem",
+        padding: compact ? "1.75rem 1.5rem" : "3rem 1.5rem",
+        minHeight: compact ? undefined : "60%",
         color: "rgba(255,255,255,0.35)",
       }}
     >
       <svg
         viewBox="0 0 64 64"
-        width="52"
-        height="52"
+        width={compact ? 36 : 52}
+        height={compact ? 36 : 52}
         fill="none"
         stroke="currentColor"
         strokeWidth="2"
@@ -41,8 +47,8 @@ export default function ChatLoadingState({ label = "Loading messages…" }: { la
       <span
         aria-hidden="true"
         style={{
-          width: 22,
-          height: 22,
+          width: compact ? 16 : 22,
+          height: compact ? 16 : 22,
           borderRadius: "50%",
           border: "2.5px solid rgba(163,230,53,0.18)",
           borderTopColor: "#a3e635",
