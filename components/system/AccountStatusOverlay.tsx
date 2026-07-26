@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { AccountStatus } from "@/lib/accountStatus";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports #acctStatusOverlay + __applyAccountStatusOverlay's countdown
 // logic. Purely a display layer — never writes banned/suspended state
@@ -16,6 +17,7 @@ export default function AccountStatusOverlay({
   onAppeal: () => void;
 }) {
   const [countdownText, setCountdownText] = useState("");
+  useScrollLock(true);
 
   useEffect(() => {
     if (status.isBanned || !status.isSuspendedActive || !status.suspendedUntilMs) return;
