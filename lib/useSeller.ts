@@ -88,7 +88,14 @@ export async function fetchFullSeller(uid: string): Promise<FullSeller | null> {
       "firebase/firestore"
     );
     const snap = await getDoc(doc(db, "users", uid));
-    const d: any = snap.exists() ? snap.data() : {};
+    // A missing user doc means this seller's account no longer exists
+    // (deleted, or the id/username never matched one) — previously this
+    // fell through with `d` as an empty object, so every field below
+    // resolved to its fallback and the page rendered a fake "Anonymous"
+    // seller with 0 listings instead of a real not-found state. Bail out
+    // here instead so the caller's `!seller` / notFound branch fires.
+    if (!snap.exists()) return null;
+    const d: any = snap.data();
 
     // Seller's listings — deliberately no orderBy('createdAt') to avoid
     // requiring a composite index (ownerId + status + orderBy). Sorted
