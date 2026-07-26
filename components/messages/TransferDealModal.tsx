@@ -435,13 +435,12 @@ function ItemCoverScreen({ item, onCancel, onContinue }: { item: TdmChecklistIte
   const [scrolled, setScrolled] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, []);
+  // Scroll lock — shared reference-counted hook (see lib/useScrollLock.ts).
+  // This screen renders while TransferDealModal is already locked; a
+  // hand-rolled body.style.overflow toggle here would capture that
+  // already-"hidden" value as its own "previous" and restore it on
+  // close, leaving scroll stuck locked afterward.
+  useScrollLock(true);
 
   return (
     <div className="tdm-cover-overlay">
