@@ -171,7 +171,7 @@ export default function AuthModal({ open, onClose, onSignupComplete }: AuthModal
           </button>
         </div>
 
-        <div data-sr-modal-scroll className="am-body">
+        <div data-scroll-lock-exempt className="am-body">
           {oauthError && <div className="am-banner am-banner-error">{oauthError}</div>}
 
           {/* Tab switch — one sliding indicator behind whichever tab is
