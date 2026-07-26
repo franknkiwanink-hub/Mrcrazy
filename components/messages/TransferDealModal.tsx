@@ -14,6 +14,7 @@ import {
 } from "@/lib/useTransferDeal";
 import { TdmIcon, TdmArrowIcon, TdmCheckmarkIcon } from "./tdmIcons";
 import type { PaymentStatus } from "@/lib/useDealChat";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the UI layer of Js/transfer-deal.js (933 lines) — checklist grid
 // (2-column, per .tdm-checklist-column in globals.css), per-item modal
@@ -120,14 +121,12 @@ export default function TransferDealModal(props: TransferDealModalProps) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [addOtherOpen, setAddOtherOpen] = useState(false);
 
-  // Lock page scroll while open, same as the rest of the app's modals.
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, []);
+  // Lock page scroll while open — shared reference-counted hook (see
+  // lib/useScrollLock.ts). The previous plain body.style.overflow toggle
+  // could stomp another modal's lock and restore scroll while that
+  // modal was still open (e.g. this route can be reached while
+  // DealChatPanel's own overlays are still logically "open" in history).
+  useScrollLock(true);
 
   function handleClose() {
     onClose();
