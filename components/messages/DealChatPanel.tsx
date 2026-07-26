@@ -21,6 +21,7 @@ import { buildListingSlug } from "@/lib/slug";
 import { useCurrency } from "@/lib/CurrencyContext";
 import NavSpinnerIcon from "@/components/shared/NavSpinnerIcon";
 import ChatLoadingState from "@/components/shared/ChatLoadingState";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the deal chat panel from Js/inbox.js (lines 937-2774): sticky
 // item bar, escrow announcement bar + actions (pay/release/dispute),
@@ -129,48 +130,16 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Lock the page behind this panel for as long as it's mounted — same
-  // hardened pattern as WalletModal/SiteriftyLoader (lock both html and
-  // body, pin to the exact scroll offset, restore it on close) rather
-  // than relying on #dealChatPanel's own position:fixed/100dvh alone,
-  // which doesn't stop the underlying document from still scrolling on
-  // a touch-drag over the overlay. The messages list itself (messagesRef
-  // below) has its own independent overflow-y:auto and is the only
-  // thing meant to still scroll while this is open.
-  useEffect(() => {
-    const { style: bodyStyle } = document.body;
-    const { style: htmlStyle } = document.documentElement;
-    const scrollY = window.scrollY;
-
-    const prev = {
-      bodyOverflow: bodyStyle.overflow,
-      bodyPosition: bodyStyle.position,
-      bodyWidth: bodyStyle.width,
-      bodyTop: bodyStyle.top,
-      bodyHeight: bodyStyle.height,
-      htmlOverflow: htmlStyle.overflow,
-      htmlHeight: htmlStyle.height,
-    };
-
-    htmlStyle.overflow = "hidden";
-    htmlStyle.height = "100%";
-    bodyStyle.overflow = "hidden";
-    bodyStyle.position = "fixed";
-    bodyStyle.width = "100%";
-    bodyStyle.height = "100%";
-    bodyStyle.top = `-${scrollY}px`;
-
-    return () => {
-      htmlStyle.overflow = prev.htmlOverflow;
-      htmlStyle.height = prev.htmlHeight;
-      bodyStyle.overflow = prev.bodyOverflow;
-      bodyStyle.position = prev.bodyPosition;
-      bodyStyle.width = prev.bodyWidth;
-      bodyStyle.height = prev.bodyHeight;
-      bodyStyle.top = prev.bodyTop;
-      window.scrollTo(0, scrollY);
-    };
-  }, []);
+  // Shared reference-counted lock (see lib/useScrollLock.ts) instead of a
+  // hand-rolled html/body position:fixed toggle — the previous version
+  // saved/restored styles independently of every other modal's lock, so
+  // whichever one unmounted first could rip out another modal's lock (or
+  // jump the page's scroll position) if this panel and another overlay
+  // were ever open at once. The messages list itself (messagesRef below)
+  // has its own independent overflow-y:auto and is the only thing meant
+  // to still scroll while this is open — mark it exempt so the shared
+  // hook's touch blocker doesn't also swallow scrolls inside it.
+  useScrollLock(true);
 
   // Scroll-to-bottom behavior for the message list. Previous approach
   // used two plain useEffects keyed off chat.messages with a double-rAF
@@ -692,7 +661,7 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
           />
         ) : null}
 
-        <div id="dcpMessages" ref={messagesRef}>
+        <div id="dcpMessages" ref={messagesRef} data-scroll-lock-exempt>
           {chat.chatError ? <div style={{ padding: "0.55rem 1rem", textAlign: "center", color: "#fecaca", fontSize: "0.75rem", fontWeight: 600, background: "#3f1d1d" }}>{chat.chatError}</div> : null}
           {chat.messagesLoading ? (
             <ChatLoadingState label="Loading messages…" />
