@@ -37,16 +37,60 @@ function unlock() {
   }
 }
 
+// `overflow:hidden` on body stops wheel/keyboard scroll but does NOT stop
+// iOS Safari from rubber-band scrolling the page behind a fixed-position
+// overlay via touch drag. AuthModal and OnboardingWizard each hand-rolled
+// a document-level touchmove blocker for this; every other modal (Rate,
+// Donate, seller details/report, PlansModal/Upgrade, ThemeModal, etc.)
+// never got one, which is why body scroll looked "locked" on desktop but
+// the page behind the modal still dragged/rubber-banded on a phone.
+// Reference-counted the same way as the overflow lock above, so several
+// stacked modals share one listener instead of each registering its own.
+let touchLockCount = 0;
+function blockTouch(e: TouchEvent) {
+  const target = e.target as HTMLElement | null;
+  // Exempt anything inside a designated scrollable content area so a
+  // modal whose own body is taller than the viewport can still scroll
+  // internally (mirrors AuthModal's [data-sr-modal-scroll] / 
+  // OnboardingWizard's .ob-content-wrapper exemption).
+  if (target && target.closest("[data-scroll-lock-exempt]")) return;
+  e.preventDefault();
+}
+
+function lockTouch() {
+  if (touchLockCount === 0) {
+    document.addEventListener("touchmove", blockTouch, { passive: false });
+  }
+  touchLockCount += 1;
+}
+
+function unlockTouch() {
+  touchLockCount = Math.max(0, touchLockCount - 1);
+  if (touchLockCount === 0) {
+    document.removeEventListener("touchmove", blockTouch);
+  }
+}
+
 /**
- * Locks page scroll while `active` is true. Safe to use in many
- * components at once — scroll is only restored once every component
- * that locked it has released (unmounted or flipped `active` to false).
+ * Locks page scroll (both wheel/keyboard via body overflow, and iOS touch
+ * drag via a document-level touchmove blocker) while `active` is true.
+ * Safe to use in many components at once — scroll is only restored once
+ * every component that locked it has released (unmounted or flipped
+ * `active` to false).
+ *
+ * If the modal has its own internal scrollable area that needs to keep
+ * working (e.g. step content taller than the viewport), add
+ * `data-scroll-lock-exempt` to that element.
  */
 export function useScrollLock(active: boolean) {
   useEffect(() => {
     if (!active) return;
     lock();
-    return () => unlock();
+    lockTouch();
+    return () => {
+      unlock();
+      unlockTouch();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 }
