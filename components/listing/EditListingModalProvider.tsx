@@ -5,6 +5,7 @@ import EditListingModal from "@/components/listing/EditListingModal";
 import type { Listing } from "@/lib/listings";
 import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports window.__openEditListingModal(listingId) from sellers-transfer.js.
 // Same shape as BoostModalProvider/WalletModalProvider — any component
@@ -31,6 +32,7 @@ export function EditListingModalProvider({ children }: { children: ReactNode }) 
   const [listingId, setListingId] = useState<string | null>(null);
   const [onSaved, setOnSaved] = useState<((listing: Listing) => void) | undefined>(undefined);
   const [onDeleted, setOnDeleted] = useState<((listingId: string) => void) | undefined>(undefined);
+  useScrollLock(open);
 
   function openEdit(id: string, callbacks?: { onSaved?: (listing: Listing) => void; onDeleted?: (listingId: string) => void }) {
     if (!user) {
