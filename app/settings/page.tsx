@@ -192,23 +192,21 @@ function SettingsPageInner() {
     <div
       style={{
         position: "fixed",
-        top: 92,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        // main collapses to 0 height once this panel takes itself out
-        // of flow, so Footer (which sits right after <main> with no
-        // z-index of its own) slides up underneath this point and,
-        // being later in the DOM at the same auto stacking level, was
-        // painting over this fixed panel instead of behind it. An
-        // explicit z-index here (above Footer's implicit auto/0, below
-        // Header's 9990 so the top bar stays usable) fixes the stacking
-        // order without needing to touch Footer or Header at all.
-        zIndex: 10,
+        inset: 0,
+        // zIndex: 10 was below the announcement bar (z-index: 9989) and
+        // even the header (z-index: 9990), so both were painting over the
+        // top of the settings panel — the announcement bar especially was
+        // visually overlapping the sidebar and panel header. Settings is
+        // a full-screen page-level route, not a floating modal, so it
+        // should sit above all persistent chrome (header, announcement
+        // bar, nav drawer) — the same way DealChatPanel uses 9997.
+        zIndex: 9995,
         display: "flex",
+        flexDirection: "column",
+        background: "#000",
       }}
     >
-      <div className="main-content" style={{ height: "100%" }}>
+      <div className="main-content" style={{ flex: 1, minHeight: 0 }}>
         <SettingsSidebar
           activePanel={activePanel}
           onSelectPanel={setActivePanel}
