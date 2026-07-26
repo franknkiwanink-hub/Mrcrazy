@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { notifyOnRestore } from "@/lib/accountAppeal";
 import type { MaintenanceState } from "@/lib/accountStatus";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Full-screen, no-dismiss, no-nav takeover — same markup/ids as the
 // original's #maintenanceOverlay so the existing .mnt-* CSS in
@@ -12,6 +13,7 @@ export default function MaintenanceOverlay({ heading, body }: MaintenanceState) 
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
   const [message, setMessage] = useState("");
+  useScrollLock(true);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
