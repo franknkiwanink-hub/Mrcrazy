@@ -4,6 +4,7 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 import BoostModal, { type BoostListingData } from "@/components/boost/BoostModal";
 import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports window.__openBoostModal(listingId, listingData?) from
 // sellers-transfer.js. Same shape as WalletModalProvider/AuthModalProvider
@@ -27,6 +28,7 @@ export function BoostModalProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [listingId, setListingId] = useState<string | null>(null);
   const [listing, setListing] = useState<BoostListingData | null>(null);
+  useScrollLock(open);
 
   // Ports the __openBoostModal guard implied by the original's submit-time
   // "sign in required" check — surfaced earlier here (at open-time) for a
