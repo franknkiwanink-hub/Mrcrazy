@@ -170,16 +170,13 @@ function SettingsPageInner() {
   return (
     <div
       style={{
-        position: "fixed",
-        inset: 0,
-        // zIndex: 10 was below the announcement bar (z-index: 9989) and
-        // even the header (z-index: 9990), so both were painting over the
-        // top of the settings panel — the announcement bar especially was
-        // visually overlapping the sidebar and panel header. Settings is
-        // a full-screen page-level route, not a floating modal, so it
-        // should sit above all persistent chrome (header, announcement
-        // bar, nav drawer) — the same way DealChatPanel uses 9997.
-        zIndex: 9995,
+        // Was position:fixed;inset:0 — that covered the entire viewport,
+        // which also hid <Footer/> (rendered right after <main> in the
+        // root layout) behind it, same bug fixed on /myprofile's
+        // #profileModal. min-height keeps the same full-viewport look
+        // when content is short, but lets the page (and footer) extend
+        // below when content is tall, instead of clipping/hiding it.
+        minHeight: "100dvh",
         display: "flex",
         flexDirection: "column",
         background: "var(--mp-bg, #050508)",
