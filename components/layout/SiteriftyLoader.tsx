@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Shared full-screen skeleton loader — glass/blurred overlay with shimmer
 // skeleton blocks mirroring the real layout (nav + search + avatar, hero
@@ -19,48 +19,13 @@ import { useEffect } from "react";
 // of the "white sheet" flash at the bottom — the underlying page content
 // peeking through while it scrolled independently of the loader).
 export default function SiteriftyLoader() {
-  useEffect(() => {
-    const { style: bodyStyle } = document.body;
-    const { style: htmlStyle } = document.documentElement;
-    const scrollY = window.scrollY;
-
-    const prev = {
-      bodyOverflow: bodyStyle.overflow,
-      bodyPosition: bodyStyle.position,
-      bodyWidth: bodyStyle.width,
-      bodyTop: bodyStyle.top,
-      bodyHeight: bodyStyle.height,
-      htmlOverflow: htmlStyle.overflow,
-      htmlHeight: htmlStyle.height,
-    };
-
-    // Lock BOTH html and body, and pin body to its current scroll offset
-    // via a negative top — position:fixed alone (with no top set) still
-    // lets some browsers scroll the underlying document, and locking
-    // body without also locking html leaves html free to scroll on its
-    // own. This combination is what makes the lock airtight.
-    htmlStyle.overflow = "hidden";
-    htmlStyle.height = "100%";
-    bodyStyle.overflow = "hidden";
-    bodyStyle.position = "fixed";
-    bodyStyle.width = "100%";
-    bodyStyle.height = "100%";
-    bodyStyle.top = `-${scrollY}px`;
-
-    return () => {
-      htmlStyle.overflow = prev.htmlOverflow;
-      htmlStyle.height = prev.htmlHeight;
-      bodyStyle.overflow = prev.bodyOverflow;
-      bodyStyle.position = prev.bodyPosition;
-      bodyStyle.width = prev.bodyWidth;
-      bodyStyle.height = prev.bodyHeight;
-      bodyStyle.top = prev.bodyTop;
-      // Restore the exact scroll position the page was at before the
-      // lock — without this, removing position:fixed snaps the page
-      // back to the top instead of where the user actually was.
-      window.scrollTo(0, scrollY);
-    };
-  }, []);
+  // Shared reference-counted lock (see lib/useScrollLock.ts) instead of a
+  // hand-rolled html/body position:fixed toggle — the previous version
+  // saved/restored styles independently of every other modal's lock, so
+  // whichever one unmounted first could rip out another modal's lock (or
+  // jump the page's scroll position) if this loader and a modal were ever
+  // mounted at the same time.
+  useScrollLock(true);
 
   return (
     <div id="siterifty-loader">
