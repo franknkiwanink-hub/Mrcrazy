@@ -33,8 +33,31 @@ export default function AnnouncementBar() {
   // cards on /upgrade, the donate form on /donate). Rather than leave
   // that slot empty, it's swapped for a Back button in the exact same
   // spot — so those pages get in-flow back navigation instead of it
-  // floating loose in the page body.
-  const onBackRoute = pathname === "/upgrade" || pathname?.startsWith("/donate/");
+  // floating loose in the page body. /myprofile and /settings get the
+  // same treatment: both used to render their own separate PanelHeader
+  // (duplicate hamburger+logo row) instead of just using this bar, which
+  // is why they never picked up the marginTop:92 every other real page
+  // uses to clear the fixed header+announcement-bar — see MyProfileHub.tsx
+  // and app/settings/page.tsx for that fix.
+  const isProfileRoute = pathname === "/myprofile";
+  const isSettingsRoute = pathname === "/settings";
+  const onBackRoute = pathname === "/upgrade" || pathname?.startsWith("/donate/") || isProfileRoute || isSettingsRoute;
+
+  // /myprofile can be reached from many different places (a listing
+  // card's seller avatar, a notification, a deep link), so router.back()
+  // there could land anywhere, including a non-Siterifty referrer with
+  // an empty history stack. Always going home is the one predictable
+  // destination. /settings and /upgrade/donate keep normal router.back()
+  // — those are reached from a small, predictable set of places (mostly
+  // the profile hub itself), so "wherever I came from" is the more
+  // useful behavior there.
+  function handleBack() {
+    if (isProfileRoute) {
+      router.push("/");
+    } else {
+      router.back();
+    }
+  }
 
   return (
     <div id="announcement-bar" data-plan={plan}>
@@ -50,7 +73,7 @@ export default function AnnouncementBar() {
           originally — wired up in a later step. */}
       <div id="ab-action">
         {onBackRoute ? (
-          <button className="ab-back" onClick={() => router.back()} aria-label="Go back">
+          <button className="ab-back" onClick={handleBack} aria-label="Go back">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 18l-6-6 6-6" />
             </svg>
