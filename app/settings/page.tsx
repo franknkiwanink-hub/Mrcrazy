@@ -3,11 +3,9 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
-import PanelHeader from "@/components/shared/PanelHeader";
 import SettingsSidebar, { type SettingsPanelId } from "@/components/settings/SettingsSidebar";
 import { useSettingsState } from "@/lib/useSettingsState";
 import { useAuth } from "@/lib/AuthContext";
-import { useScrollLock } from "@/lib/useScrollLock";
 import SignInRequired from "@/components/auth/SignInRequired";
 import AccountPanel from "@/components/settings/panels/AccountPanel";
 import SecurityPanel from "@/components/settings/panels/SecurityPanel";
@@ -71,24 +69,15 @@ function SettingsPageInner() {
     document.getElementById("detailPanel")?.scrollTo({ top: 0 });
   }, [activePanel]);
 
-  // <main> has min-height:100vh globally, so with this page's own 92px
-  // top margin the document is always taller than the viewport — meaning
-  // the page itself scrolls no matter what overflow rules the inner
-  // .main-content/.detail-panel use. The original had this exact problem
-  // solved for free by being a position:fixed full-screen modal (so it
-  // was never part of document flow at all). This locks html+body the
-  // same stronger way .mnt-mode already does elsewhere in this codebase
-  // (plain overflow:hidden alone doesn't reliably stop rubber-banding on
-  // mobile Safari/Chrome per that rule's own comment) — so the document
-  // can't move at all while Settings is open, and only
-  // .settings-sidebar / .detail-panel (each overflow-y:auto) can scroll.
-  //
-  // Only applied once a signed-in user is actually confirmed (`user`
-  // truthy) — a logged-out visitor renders SignInRequired below instead
-  // of the fixed sidebar+panel layout this lock exists for, and locking
-  // document scroll under a plain centered sign-in message would trap
-  // them on a page they can't scroll away from for no reason.
-  useScrollLock(!!user);
+  // <main> has min-height:100vh globally, so a hard height on this page's
+  // own wrapper (rather than the min-height it had) plus marginTop:92 —
+  // matching every other real page's clearance for the fixed Header +
+  // AnnouncementBar — keeps this route exactly one viewport tall, same
+  // as the original fixed-overlay version, without needing to lock
+  // document scroll to fake that. Only .settings-sidebar / .detail-panel
+  // (each their own overflow-y:auto box) scroll internally; the document
+  // itself doesn't need to move at all since this wrapper is already
+  // exactly the remaining viewport height.
 
   function renderPanel() {
     if (loading) {
@@ -173,16 +162,25 @@ function SettingsPageInner() {
         // Was position:fixed;inset:0 — that covered the entire viewport,
         // which also hid <Footer/> (rendered right after <main> in the
         // root layout) behind it, same bug fixed on /myprofile's
-        // #profileModal. min-height keeps the same full-viewport look
-        // when content is short, but lets the page (and footer) extend
-        // below when content is tall, instead of clipping/hiding it.
-        minHeight: "100dvh",
+        // #profileModal. marginTop:92 clears the real fixed Header (52px)
+        // + AnnouncementBar (40px) — same 92px convention every other
+        // real page uses — and height (not min-height) locks this
+        // wrapper to exactly the remaining viewport, so .main-content's
+        // flex:1 + .detail-panel's overflow-y:auto keep working as a
+        // real two-pane scroll UI without needing document scroll locked
+        // to fake it.
+        marginTop: 92,
+        height: "calc(100dvh - 92px)",
         display: "flex",
         flexDirection: "column",
         background: "var(--mp-bg, #050508)",
       }}
     >
-      <PanelHeader />
+      {/* Real site Header + AnnouncementBar (both fixed, 92px total)
+          already provide navigation here — AnnouncementBar swaps its
+          Upgrade/Manage-Plan button for a Back button on this route
+          (see AnnouncementBar.tsx's onBackRoute). No page-local header
+          needed. */}
       <div className="main-content" style={{ flex: 1, minHeight: 0 }}>
         <SettingsSidebar
           activePanel={activePanel}
