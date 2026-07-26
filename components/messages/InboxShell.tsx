@@ -172,7 +172,7 @@ export default function InboxShell() {
     if (openingRowId) return;
     if (t.isDealChat) {
       setOpeningRowId(t.chatRoomId);
-      router.push(`/messages/deal/${t.chatRoomId}`);
+      router.push(`/messages/deal/${t.chatRoomId}?from=chats`);
     } else if (t.partnerUid) {
       // 1:1 DM chat panel isn't ported yet (belongs to the same later pass
       // as the deal-chat panel) — route to the deal-chat page's shell
@@ -185,7 +185,7 @@ export default function InboxShell() {
   function openDealRow(chatRoomId: string) {
     if (openingRowId) return;
     setOpeningRowId(chatRoomId);
-    router.push(`/messages/deal/${chatRoomId}`);
+    router.push(`/messages/deal/${chatRoomId}?from=deals`);
   }
 
   function openGroupRow(id: string) {
