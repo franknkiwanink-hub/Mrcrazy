@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useCurrency } from "@/lib/CurrencyContext";
 import { fetchFullSeller, type FullSeller } from "@/lib/useSeller";
+import { SellerNotFoundScreen } from "@/components/seller/SellerStateScreen";
 
 // Full-page version of the old DonateOverlay (seller/DonateOverlay.tsx)
 // — previously a centered popup opened from a seller's profile. Same
@@ -241,11 +242,7 @@ export default function DonatePageClient({ sellerUid }: { sellerUid: string }) {
   }
 
   if (notFound) {
-    return (
-      <div className="dnp-page">
-        <div className="dnp-notfound">Seller not found.</div>
-      </div>
-    );
+    return <SellerNotFoundScreen context="donate" />;
   }
 
   if (!seller) {
