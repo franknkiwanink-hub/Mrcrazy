@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getPublicBaseUrl } from "@/lib/server/adminDb";
-import UpgradePageClient from "./UpgradePageClient";
+import UpgradePageClient, { UpgradePageSkeleton } from "./UpgradePageClient";
 
 // Own explicit metadata, same treatment as /onboarding and /dashboard —
 // otherwise this route silently inherits the root layout's site-wide
@@ -22,7 +22,7 @@ export function generateMetadata(): Metadata {
 
 export default function UpgradePage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<UpgradePageSkeleton />}>
       <UpgradePageClient />
     </Suspense>
   );
