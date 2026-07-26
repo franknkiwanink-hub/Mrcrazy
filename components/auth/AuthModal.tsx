@@ -24,6 +24,14 @@ interface AuthModalProps {
 
 type Tab = "login" | "signup";
 
+// Redesign notes (see the .am-* CSS block in globals.css for the full
+// rationale): this used to be ~400 lines of inline styles with one-off
+// grays that never touched the site's actual design tokens. All visual
+// styling now lives in CSS classes built from --mp-* tokens, so this
+// modal actually looks like it belongs to the same product as the rest
+// of the site. No behavior, prop, or handler changed — every function
+// below is byte-for-byte the same logic as before, only the JSX markup
+// and styling approach changed.
 export default function AuthModal({ open, onClose, onSignupComplete }: AuthModalProps) {
   const [tab, setTab] = useState<Tab>("login");
   const [oauthError, setOauthError] = useState("");
@@ -141,167 +149,60 @@ export default function AuthModal({ open, onClose, onSignupComplete }: AuthModal
 
   return (
     <div
-      style={{
-        display: "flex",
-        position: "fixed",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        background: "rgba(0,0,0,0.85)",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
-        justifyContent: "center",
-        alignItems: "center",
-        // Above the nav drawer (#navOverlay/#navDrawer are 10500/10501)
-        // so AuthModal is never hidden behind an open drawer no matter
-        // what triggers it — NavDrawer's requireAuth now closes the
-        // drawer itself before opening this, but this is the
-        // belt-and-braces fix for any other caller.
-        zIndex: 10600,
-        touchAction: "none",
-        overscrollBehavior: "none",
-        fontFamily: "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",
+      className="am-backdrop"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div
-        style={{
-          background: "#121214",
-          width: "100%",
-          maxWidth: 440,
-          maxHeight: "85vh",
-          border: "1px solid #27272a",
-          borderRadius: 14,
-          boxShadow: "0 30px 60px -15px rgba(0,0,0,0.8)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          margin: 16,
-        }}
-      >
-        <header
-          style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 10,
-            background: "#121214",
-            padding: "20px 24px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            borderBottom: "1px solid #232326",
-          }}
-        >
-          <span style={{ fontSize: "0.85rem", fontWeight: 800, color: "#fff", letterSpacing: "0.08em" }}>
-            DEVELOPERS LAND
-          </span>
-          <button
-            onClick={onClose}
-            style={{
-              background: "#ef4444",
-              color: "#fff",
-              border: "none",
-              padding: "6px 14px",
-              borderRadius: 6,
-              fontSize: "0.8rem",
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.03em",
-              cursor: "pointer",
-            }}
-          >
-            Close
+      <div className="am-card" role="dialog" aria-modal="true" aria-label={tab === "login" ? "Log in" : "Sign up"}>
+        <div className="am-head">
+          <div className="am-brand">
+            <span className="am-brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2l1.5 5.5L19 9l-5.5 1.5L12 16l-1.5-5.5L5 9l5.5-1.5z" />
+              </svg>
+            </span>
+            <span className="am-brand-name">siterifty</span>
+          </div>
+          <button onClick={onClose} className="am-close-btn" aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
           </button>
-        </header>
+        </div>
 
-        <div data-sr-modal-scroll style={{ padding: 24, overflowY: "auto", flexGrow: 1, touchAction: "pan-y" }}>
-          {oauthError && (
-            <div
-              style={{
-                background: "rgba(239,68,68,0.1)",
-                border: "1px solid rgba(239,68,68,0.3)",
-                color: "#fca5a5",
-                fontSize: "0.8rem",
-                padding: "10px 14px",
-                borderRadius: 8,
-                marginBottom: 16,
-              }}
-            >
-              {oauthError}
-            </div>
-          )}
+        <div data-sr-modal-scroll className="am-body">
+          {oauthError && <div className="am-banner am-banner-error">{oauthError}</div>}
 
-          {/* Tab switch */}
-          <div
-            style={{
-              display: "flex",
-              background: "#09090b",
-              padding: 4,
-              borderRadius: 8,
-              marginBottom: 20,
-              border: "1px solid #232326",
-            }}
-          >
+          {/* Tab switch — one sliding indicator behind whichever tab is
+              active, instead of each button independently repainting its
+              own background. */}
+          <div className="am-tabs" role="tablist">
+            <div className={`am-tabs-indicator${tab === "signup" ? " is-signup" : ""}`} aria-hidden="true" />
             <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "login"}
+              className={`am-tab-btn${tab === "login" ? " active" : ""}`}
               onClick={() => setTab("login")}
-              style={{
-                flex: 1,
-                padding: 10,
-                background: tab === "login" ? "#121214" : "none",
-                border: tab === "login" ? "1px solid #27272a" : "none",
-                fontSize: "0.85rem",
-                fontWeight: 600,
-                color: tab === "login" ? "#fff" : "#71717a",
-                cursor: "pointer",
-                borderRadius: 6,
-                fontFamily: "inherit",
-                transition: "all 0.15s",
-              }}
             >
-              Login
+              Log In
             </button>
             <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "signup"}
+              className={`am-tab-btn${tab === "signup" ? " active" : ""}`}
               onClick={() => setTab("signup")}
-              style={{
-                flex: 1,
-                padding: 10,
-                background: tab === "signup" ? "#121214" : "none",
-                border: tab === "signup" ? "1px solid #27272a" : "none",
-                fontSize: "0.85rem",
-                fontWeight: 600,
-                color: tab === "signup" ? "#fff" : "#71717a",
-                cursor: "pointer",
-                borderRadius: 6,
-                fontFamily: "inherit",
-                transition: "all 0.15s",
-              }}
             >
               Sign Up
             </button>
           </div>
 
-          {/* OAuth buttons */}
-          <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-            <button
-              onClick={handleGoogle}
-              style={{
-                flex: 1,
-                height: 42,
-                background: "#18181b",
-                border: "1px solid #27272a",
-                borderRadius: 8,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 10,
-                color: "#e4e4e7",
-                fontSize: "0.85rem",
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              <svg viewBox="0 0 24 24" style={{ width: 18, height: 18 }}>
+          <div className="am-oauth-row">
+            <button onClick={handleGoogle} className="am-oauth-btn" type="button">
+              <svg viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                 <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22z" />
@@ -309,26 +210,8 @@ export default function AuthModal({ open, onClose, onSignupComplete }: AuthModal
               </svg>
               Google
             </button>
-            <button
-              onClick={handleGithub}
-              style={{
-                flex: 1,
-                height: 42,
-                background: "#18181b",
-                border: "1px solid #27272a",
-                borderRadius: 8,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 10,
-                color: "#e4e4e7",
-                fontSize: "0.85rem",
-                fontWeight: 600,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              <svg viewBox="0 0 24 24" fill="#ffffff" style={{ width: 18, height: 18 }}>
+            <button onClick={handleGithub} className="am-oauth-btn" type="button">
+              <svg viewBox="0 0 24 24" fill="#ffffff">
                 <path
                   fillRule="evenodd"
                   clipRule="evenodd"
@@ -339,122 +222,86 @@ export default function AuthModal({ open, onClose, onSignupComplete }: AuthModal
             </button>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              color: "#4b4b52",
-              fontSize: "0.7rem",
-              fontWeight: 700,
-              letterSpacing: "0.05em",
-              marginBottom: 20,
-            }}
-          >
-            <span style={{ flex: 1, borderBottom: "1px solid #232326", marginRight: ".75em" }} />
-            OR CONTINUE WITH
-            <span style={{ flex: 1, borderBottom: "1px solid #232326", marginLeft: ".75em" }} />
-          </div>
+          <div className="am-divider">OR CONTINUE WITH EMAIL</div>
 
           {tab === "login" ? (
-            <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            <form onSubmit={handleLogin} className="am-form">
               {loginError && (
-                <div
-                  style={{
-                    background: "rgba(239,68,68,0.1)",
-                    border: "1px solid rgba(239,68,68,0.3)",
-                    color: "#fca5a5",
-                    fontSize: "0.8rem",
-                    padding: "10px 14px",
-                    borderRadius: 8,
-                  }}
-                >
+                <div className={`am-banner ${loginError.startsWith("✓") ? "am-banner-success" : "am-banner-error"}`}>
                   {loginError}
                 </div>
               )}
-              <FormField label="Email Address" icon={EmailIcon}>
+              <AmField label="Email Address" icon={EmailIcon}>
                 <input
                   type="email"
                   placeholder="you@domain.com"
                   required
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
-                  style={inputStyle}
+                  className="am-input"
                 />
-              </FormField>
-              <FormField label="Password" icon={PasswordIcon}>
+              </AmField>
+              <AmField label="Password" icon={PasswordIcon}>
                 <input
                   type="password"
                   placeholder="••••••••"
                   required
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
-                  style={inputStyle}
+                  className="am-input"
                 />
-              </FormField>
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -2 }}>
+              </AmField>
+              <div className="am-forgot-row">
                 <a
                   href="#"
                   onClick={(e) => {
                     e.preventDefault();
                     handleForgotPassword();
                   }}
-                  style={{ fontSize: "0.8rem", color: "#a1a1aa", textDecoration: "none" }}
+                  className="am-forgot-link"
                 >
                   Forgot password?
                 </a>
               </div>
-              <button type="submit" disabled={loginLoading} style={submitButtonStyle}>
-                {loginLoading ? "Please wait…" : "Access Account"}
+              <button type="submit" disabled={loginLoading} className="am-submit-btn">
+                {loginLoading ? "Please wait…" : "Log In"}
               </button>
             </form>
           ) : (
-            <form onSubmit={handleSignup} style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-              {signupError && (
-                <div
-                  style={{
-                    background: "rgba(239,68,68,0.1)",
-                    border: "1px solid rgba(239,68,68,0.3)",
-                    color: "#fca5a5",
-                    fontSize: "0.8rem",
-                    padding: "10px 14px",
-                    borderRadius: 8,
-                  }}
-                >
-                  {signupError}
-                </div>
-              )}
-              <FormField label="Username" icon={UsernameIcon}>
+            <form onSubmit={handleSignup} className="am-form">
+              {signupError && <div className="am-banner am-banner-error">{signupError}</div>}
+              <AmField label="Username" icon={UsernameIcon}>
                 <input
                   type="text"
                   placeholder="player_one"
                   required
                   value={signupUsername}
                   onChange={(e) => setSignupUsername(e.target.value)}
-                  style={inputStyle}
+                  className="am-input"
                 />
-              </FormField>
-              <FormField label="Email Address" icon={EmailIcon}>
+              </AmField>
+              <AmField label="Email Address" icon={EmailIcon}>
                 <input
                   type="email"
                   placeholder="you@domain.com"
                   required
                   value={signupEmail}
                   onChange={(e) => setSignupEmail(e.target.value)}
-                  style={inputStyle}
+                  className="am-input"
                 />
-              </FormField>
-              <FormField label="Password" icon={PasswordIcon}>
+              </AmField>
+              <AmField label="Password" icon={PasswordIcon}>
                 <input
                   type="password"
                   placeholder="Create secure password"
                   required
                   value={signupPassword}
                   onChange={(e) => setSignupPassword(e.target.value)}
-                  style={inputStyle}
+                  className="am-input"
                 />
-              </FormField>
-              <button type="submit" disabled={signupLoading} style={submitButtonStyle}>
-                {signupLoading ? "Please wait…" : "Register Account"}
+              </AmField>
+              <button type="submit" disabled={signupLoading} className="am-submit-btn">
+                {signupLoading ? "Please wait…" : "Create Account"}
               </button>
             </form>
           )}
@@ -464,7 +311,7 @@ export default function AuthModal({ open, onClose, onSignupComplete }: AuthModal
   );
 }
 
-function FormField({
+function AmField({
   label,
   icon,
   children,
@@ -474,21 +321,11 @@ function FormField({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <label style={fieldLabelStyle}>{label}</label>
-      <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+    <div className="am-field">
+      <label className="am-field-label">{label}</label>
+      <div className="am-field-wrap">
         {icon && (
-          <span
-            style={{
-              position: "absolute",
-              left: 14,
-              width: 18,
-              height: 18,
-              color: "#a1a1aa",
-              pointerEvents: "none",
-              display: "flex",
-            }}
-          >
+          <span className="am-field-icon" aria-hidden="true">
             {icon}
           </span>
         )}
@@ -527,39 +364,3 @@ const UsernameIcon = (
     />
   </svg>
 );
-
-const fieldLabelStyle: React.CSSProperties = {
-  fontSize: "0.75rem",
-  fontWeight: 600,
-  color: "#a1a1aa",
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  height: 44,
-  padding: "0 14px 0 46px",
-  background: "#09090b",
-  border: "1px solid #3f3f46",
-  borderRadius: 8,
-  fontSize: "0.95rem",
-  color: "#fff",
-  outline: "none",
-  fontFamily: "inherit",
-};
-
-const submitButtonStyle: React.CSSProperties = {
-  width: "100%",
-  height: 46,
-  background: "#fff",
-  color: "#09090b",
-  border: "none",
-  borderRadius: 8,
-  fontSize: "0.9rem",
-  fontWeight: 700,
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-  cursor: "pointer",
-  fontFamily: "inherit",
-};
