@@ -10,8 +10,15 @@
        rendered but was always hidden behind this layer. min-height
        instead of a hard height keeps the same full-viewport look on
        short pages while letting content taller than the viewport (and
-       the footer after it) push below normally. */
-    min-height: 100dvh;
+       the footer after it) push below normally.
+       marginTop:92 clears the real site Header (52px) + AnnouncementBar
+       (40px), both position:fixed at the top of every page — every other
+       real page (StaticPage, dashboard, sellers, leaderboard, etc.) uses
+       this same 92px offset. This page used to get that clearance from
+       its own now-removed PanelHeader instead, which is why the banner
+       rotator was rendering underneath the real fixed header. */
+    margin-top: 92px;
+    min-height: calc(100dvh - 92px);
     background: var(--mp-bg);
     display: flex;
     flex-direction: column;
@@ -43,7 +50,7 @@
 /* ── Header — matches settingsModal's .modal-header / .brand / .cancel-btn pattern ── */
 .pm-modal-header {
     position: sticky;
-    top: 52px;
+    top: 92px;
     z-index: 10;
     background: rgba(5,5,8,0.92);
     backdrop-filter: blur(12px);
