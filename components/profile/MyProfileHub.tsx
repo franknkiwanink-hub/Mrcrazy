@@ -20,6 +20,7 @@ import { buildListingSlug } from "@/lib/slug";
 import { useCurrency } from "@/lib/CurrencyContext";
 import { useNavigating } from "@/lib/useNavigating";
 import NavSpinnerIcon from "@/components/shared/NavSpinnerIcon";
+import PanelHeader from "@/components/shared/PanelHeader";
 
 // Ports the PROFILE MODAL from Js/profile.js + Js/profile-early.js
 // (index.html lines 12099-12279 and 17189-18238) as a real routed page at
@@ -305,6 +306,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   return (
     <div id="profileModal">
       <div className="pm-modal">
+        <PanelHeader onBack={() => router.back()} />
         <div className="pm-modal-header">
           <div className="pm-left-title">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -313,13 +315,6 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
             </svg>
             <span>My Profile</span>
           </div>
-          <button className="pm-close-btn" onClick={() => router.push("/")}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
-              <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
-            </svg>
-            Close
-          </button>
         </div>
 
         <div className="pm-modal-content">
