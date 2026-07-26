@@ -300,15 +300,6 @@ export default function UpgradePageClient() {
 
   return (
     <div className="upg-page">
-      <div className="upg-back-bar">
-        <button className="upg-back" onClick={() => router.back()} aria-label="Go back">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-          Back
-        </button>
-      </div>
-
       <div className="upg-hero">
         <div className="upg-hero-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="#a3e635" strokeWidth="2">
