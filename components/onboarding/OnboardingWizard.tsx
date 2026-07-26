@@ -22,10 +22,8 @@ import { useScrollLock } from "@/lib/useScrollLock";
 //     decision — nothing charged/selected here)
 //   - explore buttons (step 6) -> router.push to real routes instead of
 //     the original's window.__open* placeholder globals
-//   - logout buttons    -> real signOut() instead of an alert() placeholder
-
-const INTRO_IMG =
-  "https://www.image2url.com/r2/default/images/1784113259080-f30b21d2-2f1f-4809-bc2e-580093c7700e.jpg";
+//   - header (logo + Logout) removed entirely — onboarding no longer
+//     shows a page chrome/logout option, it's just the step flow itself
 
 type Role = "buyer" | "seller" | "browsing";
 
@@ -38,7 +36,6 @@ export interface OnboardingWizardProps {
 export default function OnboardingWizard({ open, username, onFinish }: OnboardingWizardProps) {
   const router = useRouter();
 
-  const [showIntro, setShowIntro] = useState(true);
   const [step, setStep] = useState(1);
   const totalSteps = 6;
 
@@ -55,7 +52,6 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
   // toggling in the original's IIFE.
   useEffect(() => {
     if (open) {
-      setShowIntro(true);
       setStep(1);
       setRole(null);
       setProfileUsername(username || "Builder");
@@ -66,33 +62,13 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
     }
   }, [open, username]);
 
-  // Locks wheel/keyboard scroll on the page behind the wizard for as
-  // long as it's open — was entirely missing before, so the marketplace
-  // page underneath stayed scrollable while onboarding was up.
+  // Locks both wheel/keyboard scroll (body overflow) and iOS touch/
+  // rubber-band scroll on the page behind the wizard for as long as it's
+  // open. .ob-content-wrapper below is marked data-scroll-lock-exempt so
+  // step content taller than the viewport can still scroll internally.
   useScrollLock(open);
 
-  // `overflow:hidden` on body doesn't stop iOS Safari from rubber-band
-  // scrolling the page behind a fixed-position overlay via touch drag.
-  // Block touchmove at the document level while open, exempting the
-  // wizard's own scrollable content area (.ob-content-wrapper) so step
-  // content that's taller than the viewport can still scroll normally.
-  useEffect(() => {
-    if (!open) return;
-    const blockTouch = (e: TouchEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && target.closest(".ob-content-wrapper")) return;
-      e.preventDefault();
-    };
-    document.addEventListener("touchmove", blockTouch, { passive: false });
-    return () => document.removeEventListener("touchmove", blockTouch);
-  }, [open]);
-
   if (!open) return null;
-
-  async function handleLogout() {
-    const { logout } = await import("@/lib/authActions");
-    await logout();
-  }
 
   function handleAvatarPick() {
     fileInputRef.current?.click();
@@ -171,39 +147,8 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
   const nextDisabled = (step === 2 && !role) || saving;
 
   return (
-    <>
-      {showIntro && (
-        <div className="ob-intro">
-          <div className="ob-header-placeholder">
-            <span className="ob-header-logo">siterifty.com</span>
-            <button className="ob-header-logout" onClick={handleLogout}>
-              Logout
-            </button>
-          </div>
-          <div className="ob-intro-image">
-            <img src={INTRO_IMG} alt="Siterifty marketplace" />
-          </div>
-          <div className="ob-intro-bottom">
-            <button className="ob-intro-cta" onClick={() => setShowIntro(false)}>
-              GET STARTED
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14M13 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {!showIntro && (
-        <div className="ob-wizard">
-          <div className="ob-container">
-            <div className="ob-header-placeholder">
-              <span className="ob-header-logo">siterifty.com</span>
-              <button className="ob-header-logout" onClick={handleLogout}>
-                Logout
-              </button>
-            </div>
-
+    <div className="ob-wizard">
+      <div className="ob-container">
             <div className="ob-progress-header">
               <div className="ob-progress-track">
                 <div className="ob-progress-fill" style={{ width: `${(step / totalSteps) * 100}%` }} />
@@ -213,7 +158,7 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
               </div>
             </div>
 
-            <div className="ob-content-wrapper">
+            <div className="ob-content-wrapper" data-scroll-lock-exempt>
               {step === 1 && (
                 <div className="ob-step active">
                   <div className="ob-icon">
@@ -498,10 +443,9 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
                   <path d="M5 12h14M13 5l7 7-7 7" />
                 </svg>
               </button>
-            </div>
           </div>
         </div>
-      )}
-    </>
+      </div>
+    </div>
   );
 }
