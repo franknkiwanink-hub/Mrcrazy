@@ -772,7 +772,7 @@
 .dnp-hero { text-align: center; margin-bottom: 1.8rem; position: relative; }
 
 .dnp-hero-av {
-               width: 76px; height: 76px; border-radius: 50%; margin: 0 auto 1rem;
+               width: 76px; height: 76px; border-radius: 50%; margin: 0.9rem auto 1rem;
                background: rgba(163,230,53,0.12); border: 1px solid rgba(163,230,53,0.25);
                display: flex; align-items: center; justify-content: center;
                font-size: 1.8rem; font-weight: 800; color: #a3e635; overflow: hidden;
@@ -946,7 +946,13 @@
                }
 
 @media (max-width: 480px) {
-               .dnp-page { padding: 90px 16px 60px; }
+               /* 92px (not 90px) — matches the site-wide Header(52px)+
+                  AnnouncementBar(40px) clearance every other real page
+                  uses. Same fix applied to .upg-page in referrals-misc.css;
+                  both pages had independently drifted to 90px, 2px short
+                  of the fixed chrome, which showed as the hero icon
+                  crowding the header on mobile. */
+               .dnp-page { padding: 92px 16px 60px; }
                .dnp-hero-title { font-size: 1.4rem; }
                }
 
