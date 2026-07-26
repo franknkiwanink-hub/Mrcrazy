@@ -123,6 +123,40 @@ const XIcon = () => (
   </svg>
 );
 
+// Matches the real .upg-page layout (hero icon/title, tab row, 3-card
+// plan grid) using the shared .skel-block/.skel-text shimmer utilities
+// from skeletons.css — same pattern as DonatePageSkeleton and
+// SellerProfileSkeleton. Exported so app/upgrade/loading.tsx can render
+// it during server-side navigation, instead of the generic
+// marketplace-grid-shaped app/loading.tsx.
+export function UpgradePageSkeleton() {
+  return (
+    <div className="upg-page">
+      <div className="upg-hero">
+        <div className="skel-block" style={{ width: 56, height: 56, borderRadius: 16, margin: "0 auto 1rem" }} />
+        <div className="skel-block skel-text lg" style={{ width: 280, height: 28, margin: "0 auto 0.8rem" }} />
+        <div className="skel-block skel-text" style={{ width: 340, margin: "0 auto" }} />
+      </div>
+
+      <div className="skel-block" style={{ width: 180, height: 34, borderRadius: 8, marginBottom: "1.8rem" }} />
+
+      <div className="upg-plan-grid">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="upg-plan-card" style={{ cursor: "default" }}>
+            <div className="skel-block skel-text" style={{ width: "60%", height: 18, marginBottom: 10 }} />
+            <div className="skel-block skel-text lg" style={{ width: "45%", height: 26, marginBottom: 10 }} />
+            <div className="skel-block skel-text" style={{ width: "90%", marginBottom: 14 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <div className="skel-block" style={{ width: 70, height: 20, borderRadius: 20 }} />
+              <div className="skel-block" style={{ width: 60, height: 20, borderRadius: 20 }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function UpgradePageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
