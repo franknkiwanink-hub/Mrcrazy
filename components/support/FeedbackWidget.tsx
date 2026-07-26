@@ -6,6 +6,7 @@
 // send. One job done cleanly. Backend action (feedback-submit) unchanged.
 import { useEffect, useRef, useState } from "react";
 import { auth } from "@/lib/firebase";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 async function authedFetch<T = any>(action: string, extra?: Record<string, unknown>): Promise<T> {
   const user = auth.currentUser;
@@ -78,12 +79,14 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Scroll lock
+  // Scroll lock — shared reference-counted hook (see lib/useScrollLock.ts).
+  // The previous plain body.style.overflow toggle here could capture a
+  // stale "previous" value if another modal was locked at the same time,
+  // then restore that stale value on close and leave scroll stuck.
+  useScrollLock(true);
+
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     textareaRef.current?.focus();
-    return () => { document.body.style.overflow = prev; };
   }, []);
 
   // Escape to close
