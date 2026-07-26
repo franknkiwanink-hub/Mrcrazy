@@ -20,6 +20,7 @@ import { FALLBACK_PRICE_CAP, type ActiveTag, type TemplateFilter } from "@/lib/u
 import { useLimits } from "@/lib/useLimits";
 import MarketplaceSearchBar from "@/components/marketplace/MarketplaceSearchBar";
 import DiscoverPanel, { DiscoverButton } from "@/components/marketplace/DiscoverPanel";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 const TYPE_OPTIONS: { value: ListingType | "all"; label: string }[] = [
   { value: "all", label: "All" },
@@ -96,18 +97,22 @@ export default function MarketplaceFilterBar({
   }, [popoverOpen]);
 
   // Escape-to-close + background scroll lock, matching the other
-  // full-screen/portaled overlays (SearchOverlay, MarketplaceModal).
+  // full-screen/portaled overlays (SearchOverlay, MarketplaceModal). Scroll
+  // lock uses the shared reference-counted hook (see lib/useScrollLock.ts)
+  // — a hand-rolled body.style.overflow toggle here could capture a stale
+  // "previous" value if another modal is locked at the same time, and
+  // restore that stale value on close instead of the real original,
+  // leaving scroll stuck.
+  useScrollLock(popoverOpen);
+
   useEffect(() => {
     if (!popoverOpen) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") setPopoverOpen(false);
     }
     document.addEventListener("keydown", onKeyDown);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = prevOverflow;
     };
   }, [popoverOpen]);
 
