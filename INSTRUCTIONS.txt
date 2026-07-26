@@ -1,79 +1,57 @@
 HOW TO APPLY THIS ZIP
 ======================
-Extract directly into the ROOT of your project — paths mirror your
-project structure, so every file replaces its existing counterpart at
-the exact same path. Nothing here is a snippet; every file is a full,
-ready-to-use replacement.
+Extract directly into the ROOT of your project (the folder containing
+your app/, components/, and lib/ folders) — paths mirror your project
+structure exactly, so every file overwrites its existing counterpart at
+the same path.
 
 WHAT'S IN THIS UPDATE
 -----------------------
 
-1. Backend — money-movement licensing gate
-   app/api/paypal/_handler.js
-     - handleTransfer (P2P wallet-to-wallet send) now returns HTTP 410
-       with a clear message. Original logic is fully preserved just
-       below it as _handleTransfer_DISABLED_pendingLicense — re-enable
-       by deleting the early-return stub once licensed.
-     - handleDonate (wallet-to-wallet donation) now returns HTTP 410.
-       Original logic preserved as
-       _handleDonate_DISABLED_pendingPaypalSplit — when donations come
-       back, they're meant to move to PayPal split payments, not a
-       restored wallet debit.
-     - handleGetDonations (stats/recent list) is untouched and still
-       live — only the money-moving donate action is disabled.
+1. Onboarding wizard — intro splash + header removed
+   components/onboarding/OnboardingWizard.tsx
+     - Removed the "GET STARTED" intro splash screen (showIntro/.ob-intro)
+       entirely. The wizard now opens straight to Step 1.
+     - Removed the header bar (siterifty.com logo + Logout button) that
+       sat above the step content. handleLogout() was also removed since
+       nothing calls it anymore.
+     - Cleaned up the now-redundant manual touchmove blocker — scroll
+       lock (see #2 below) handles this itself now.
+   app/styles/onboarding.css
+     - Unchanged from last update — .ob-intro* rules are correctly
+       absent since the intro screen no longer exists in the component.
 
-2. Frontend — matching UI states
-   components/wallet/SendTab.tsx
-     - Replaced the live P2P transfer form with a coming-soon
-       placeholder (same visual pattern as the existing Add Funds tab).
-       Auto Send goes with it since it's the same transfer mechanism.
-   components/wallet/WalletModal.tsx
-     - Updated SendTab call site (no longer needs balance/onSuccess
-       props).
-     - Updated wallet hint copy + Add Funds placeholder copy to clearly
-       state: wallet balance is boost-only, can't be withdrawn or sent,
-       and PayPal holds the actual escrow money.
+2. Scroll lock — now blocks iOS touch/rubber-band scroll too
+   lib/useScrollLock.ts
+     - useScrollLock(active) previously only set body { overflow: hidden
+       }, which stops desktop wheel/keyboard scroll but does NOT stop
+       iOS Safari from rubber-band scrolling the page behind a
+       fixed-position modal via touch drag. It now also adds a
+       reference-counted document-level touchmove blocker, so every
+       component that already calls useScrollLock (Rate, Donate, seller
+       details/report, PlansModal/Upgrade, ThemeModal via
+       ThemeModalProvider, OnboardingWizard, etc.) gets real scroll
+       lock on mobile with no per-component changes needed.
+     - New opt-in escape hatch: add the `data-scroll-lock-exempt`
+       attribute to any element that needs to keep scrolling internally
+       while the rest of the page is locked (used below).
+   components/onboarding/OnboardingWizard.tsx
+     - .ob-content-wrapper marked data-scroll-lock-exempt so step
+       content taller than the viewport still scrolls normally.
+   components/theme/ThemeModal.tsx
+     - .theme-card-scroll marked data-scroll-lock-exempt.
    components/seller/DonateOverlay.tsx
-     - Only the Donate submit button/CTA was touched — disabled, with a
-       "coming soon" note. Everything else (summary stats, quick
-       amounts, message field, recent donations list) is untouched.
-   components/settings/panels/PaymentsPanel.tsx
-     - Fixed copy that claimed PayPal is used for wallet top-ups — it's
-       the withdrawal payout destination only.
-   components/home/CreditsTicker.tsx
-     - Replaced homepage ticker lines that advertised "wallet-based
-       payments," "deposit once, pay anyone," and "wallet to wallet"
-       (all contradicted the disabled features) with accurate
-       PayPal-escrow / boost-only messaging.
+     - #spDonateScroll marked data-scroll-lock-exempt.
+   components/seller/SellerDetailsOverlay.tsx
+     - #spDetailsBox (the modal's own scrollable box) marked
+       data-scroll-lock-exempt.
+   components/billing/PlansModal.tsx
+     - #srfPlansBody marked data-scroll-lock-exempt.
 
-3. Legal & support pages — all rewritten to match the real model
-   app/terms/page.tsx
-     - Full rewrite: PayPal-holds-the-money model, wallet boost-only
-       disclosure, added prohibited-listings section, chargeback/
-       dispute interplay, licensing disclaimer.
-   app/privacy/page.tsx
-     - Full rewrite: accurate PayPal role (authorization/capture, not
-       deposits), expanded cookies section (essential/preference/
-       payment), PayPal's own fraud/risk data use disclosed, age
-       requirement added to children's privacy section.
-   app/escrow/page.tsx
-     - Rewrote the section that described wallet-funded deals; now
-       explains PayPal authorization/hold/capture, added a "Getting
-       paid as a seller" section for the payout flow.
-   app/buyer-protection/page.tsx
-     - Clarified funds are held by PayPal and buyers never need to
-       link/share anything with a seller's PayPal account.
-   app/help/HelpContent.tsx
-     - Rewrote FAQ answers describing the old wallet-deposit model;
-       added new FAQs: "Does Siterifty hold my money?", "What is the
-       wallet actually used for?", "Can I send money / donate?" (says
-       plainly these are paused pending licensing).
+   RateOverlay.tsx and ThemeModalProvider.tsx needed no changes — they
+   already call useScrollLock, so they inherit the iOS fix
+   automatically from lib/useScrollLock.ts.
 
-NOTHING WAS DELETED
---------------------
-Every disabled feature's original implementation is still in the
-codebase, just gated behind a stub/placeholder, with a comment
-explaining exactly what to remove to bring it back. Withdraw (payout
-of money already earned) and Boost (spending wallet balance on your
-own listing) were left completely alone — neither is a licensing
-concern.
+NOTHING ELSE WAS TOUCHED
+-------------------------
+No payment/escrow logic, no Firestore writes, no unrelated components.
