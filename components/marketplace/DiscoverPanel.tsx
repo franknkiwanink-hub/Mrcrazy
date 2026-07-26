@@ -177,7 +177,7 @@ export default function DiscoverPanel({
         </div>
       </div>
 
-      <div className="disc-scroll">
+      <div className="disc-scroll" data-scroll-lock-exempt>
         {status === "loading" && !blogs.length && !listings.length && !sellers.length ? (
           <ChatLoadingState label="Finding things for you…" />
         ) : status === "error" ? (
