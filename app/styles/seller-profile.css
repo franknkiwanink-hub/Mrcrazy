@@ -303,12 +303,32 @@
                #spModalActions { width: 100%; }
                }
 
-.sp-skel {
-               background: #111114; border-radius: 8px;
-               animation: spSkelPulse 1.3s ease-in-out infinite;
+/* Real sweep — spSkelPulse (opacity 0.55→1) paired with a
+                  background-size:400% gradient never actually moved the
+                  gradient position, and #111114 on #111114/#000 barely
+                  differs even while pulsing, so the shimmer was
+                  effectively invisible against the page's dark
+                  background. This animates background-position instead,
+                  same technique as the visible .skel-block shimmer used
+                  on the donate/upgrade skeletons, so all three read as
+                  the same shimmer language. */
+@keyframes sp-shimmer-sweep {
+               0%   { background-position: -400px 0; }
+               100% { background-position: 400px 0; }
                }
 
-#spModal.sp-loading #spModalAv { background: #111114; animation: spSkelPulse 1.3s ease-in-out infinite; }
+.sp-skel {
+               background: linear-gradient(90deg, #141418 25%, #26262c 50%, #141418 75%);
+               background-size: 800px 100%;
+               border-radius: 8px;
+               animation: sp-shimmer-sweep 1.5s ease-in-out infinite;
+               }
+
+#spModal.sp-loading #spModalAv {
+               background: linear-gradient(90deg, #141418 25%, #26262c 50%, #141418 75%);
+               background-size: 800px 100%;
+               animation: sp-shimmer-sweep 1.5s ease-in-out infinite;
+               }
 
 #spModal.sp-loading #spModalAv::after { content: ''; }
 
@@ -324,6 +344,9 @@
 
 .sp-skel-stat {
                display: none; position: absolute; inset: 6px; border-radius: 10px;
+               background: linear-gradient(90deg, #141418 25%, #26262c 50%, #141418 75%);
+               background-size: 800px 100%;
+               animation: sp-shimmer-sweep 1.5s ease-in-out infinite;
                }
 
 .sp-skel-card { height: 148px; border-radius: 14px; }
@@ -491,8 +514,9 @@
 
 .sp-dstat.sp-skel-stat2::after {
                content: ''; position: absolute; inset: 8px;
-               background: #1a1a1a; border-radius: 8px;
-               animation: spSkelPulse 1.3s ease-in-out infinite;
+               background: linear-gradient(90deg, #141418 25%, #26262c 50%, #141418 75%);
+               background-size: 800px 100%; border-radius: 8px;
+               animation: sp-shimmer-sweep 1.5s ease-in-out infinite;
                }
 
 /* ── Rate modal overlay ── */
@@ -507,7 +531,7 @@
 #spRateOverlay.active { display: flex; }
 
 #spRateBox {
-               background: #0c0c14; border: 1px solid rgba(255,255,255,.12);
+               background: #0c0c14; border: 1px solid rgba(163,230,53,.14);
                border-radius: 20px; width: min(380px, 92vw);
                padding: 26px 24px 22px;
                display: flex; flex-direction: column; gap: 18px;
@@ -536,7 +560,7 @@
 
 .sp-rate-star polygon { fill: rgba(255,255,255,.1); transition: fill .18s; }
 
-.sp-rate-star.lit polygon { fill: #f59e0b; }
+.sp-rate-star.lit polygon { fill: #a3e635; }
 
 /* Review textarea */
 #spRateTextarea {
@@ -550,7 +574,7 @@
 
 #spRateTextarea::placeholder { color: rgba(255,255,255,.25); }
 
-#spRateTextarea:focus { border-color: rgba(245,158,11,.45); }
+#spRateTextarea:focus { border-color: rgba(163,230,53,.45); }
 
 /* Action row */
 #spRateActions { display: flex; gap: 8px; }
@@ -566,15 +590,15 @@
 
 #spRateSubmitBtn {
                flex: 2; padding: 11px; border-radius: 11px;
-               background: linear-gradient(135deg, #f59e0b, #d97706);
-               border: none; color: #fff; font-size: 13px; font-weight: 800;
+               background: #a3e635;
+               border: none; color: #0a0a0a; font-size: 13px; font-weight: 800;
                cursor: pointer; font-family: inherit; transition: filter .18s;
                display: flex; align-items: center; justify-content: center; gap: 6px;
                }
 
 #spRateSubmitBtn:disabled { opacity: .45; cursor: not-allowed; }
 
-#spRateSubmitBtn:not(:disabled):hover { filter: brightness(1.1); }
+#spRateSubmitBtn:not(:disabled):hover { filter: brightness(1.08); }
 
 #spRateErr {
                font-size: 12px; color: #f87171; font-weight: 600;
@@ -582,7 +606,7 @@
                }
 
 #spRateSuccess {
-               font-size: 13px; color: #4ade80; font-weight: 700;
+               font-size: 13px; color: #a3e635; font-weight: 700;
                display: none; text-align: center; padding: 6px 0;
                }
 
@@ -727,8 +751,8 @@
 
 .sp-donate-skel {
                height: 50px; border-radius: 12px;
-               background: linear-gradient(90deg, rgba(255,255,255,.03) 25%, rgba(255,255,255,.06) 37%, rgba(255,255,255,.03) 63%);
-               background-size: 400% 100%; animation: spSkelPulse 1.3s ease-in-out infinite;
+               background: linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.13) 50%, rgba(255,255,255,.05) 75%);
+               background-size: 800px 100%; animation: sp-shimmer-sweep 1.5s ease-in-out infinite;
                }
 
 #spDonateRecentEmpty {
@@ -908,8 +932,8 @@
 
 .dnp-skel {
                height: 58px; border-radius: 14px;
-               background: linear-gradient(90deg, rgba(255,255,255,.03) 25%, rgba(255,255,255,.06) 37%, rgba(255,255,255,.03) 63%);
-               background-size: 400% 100%; animation: spSkelPulse 1.3s ease-in-out infinite;
+               background: linear-gradient(90deg, rgba(255,255,255,.05) 25%, rgba(255,255,255,.13) 50%, rgba(255,255,255,.05) 75%);
+               background-size: 800px 100%; animation: sp-shimmer-sweep 1.5s ease-in-out infinite;
                }
 
 .dnp-recent-empty {
@@ -924,5 +948,133 @@
 @media (max-width: 480px) {
                .dnp-page { padding: 90px 16px 60px; }
                .dnp-hero-title { font-size: 1.4rem; }
+               }
+
+/* ══════════════════════════════════
+               FULL-SCREEN SELLER STATES
+               (not found / private) — shared between
+               /seller/[id] and /donate/[id]
+               ══════════════════════════════════ */
+.sps-screen {
+               min-height: 100vh;
+               display: flex; flex-direction: column; align-items: center; justify-content: center;
+               text-align: center; padding: 120px 20px 80px;
+               background: #000; color: #fff;
+               }
+
+.sps-illo { margin-bottom: 1.6rem; overflow: visible; }
+
+.sps-illo-ring {
+               fill: none; stroke: rgba(163,230,53,0.14); stroke-width: 1.5;
+               animation: sps-ring-pulse 2.6s ease-in-out infinite;
+               transform-origin: 75px 75px;
+               }
+
+.sps-illo-ring-locked { stroke: rgba(163,230,53,0.14); }
+
+.sps-illo-float { animation: sps-float 3.2s ease-in-out infinite; transform-origin: 75px 75px; }
+
+.sps-illo-body { fill: #111114; stroke: rgba(163,230,53,0.4); stroke-width: 2; stroke-linejoin: round; }
+
+.sps-illo-eye { fill: rgba(255,255,255,0.6); }
+
+.sps-illo-mouth { fill: none; stroke: rgba(255,255,255,0.35); stroke-width: 2.2; stroke-linecap: round; }
+
+.sps-illo-lockbody { fill: #111114; stroke: #a3e635; stroke-width: 2; }
+
+.sps-illo-lockshackle { fill: none; stroke: #a3e635; stroke-width: 4.5; stroke-linecap: round; }
+
+.sps-illo-lockhole { fill: rgba(163,230,53,0.55); }
+
+.sps-illo-shard { animation: sps-shard-drift 3.8s ease-in-out infinite; }
+
+.sps-illo-shard-bg { fill: #0d0d0d; stroke: rgba(255,255,255,0.1); stroke-width: 1.5; }
+
+.sps-illo-shard-bg-lock { stroke: rgba(163,230,53,0.35); }
+
+.sps-illo-shard-txt { fill: rgba(255,255,255,0.55); font-size: 13px; font-weight: 800; font-family: inherit; }
+
+.sps-illo-shard-check { stroke: #a3e635; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+
+@keyframes sps-ring-pulse {
+               0%, 100% { opacity: 0.5; transform: scale(1); }
+               50%      { opacity: 1;   transform: scale(1.04); }
+               }
+
+@keyframes sps-float {
+               0%, 100% { transform: translateY(0); }
+               50%      { transform: translateY(-6px); }
+               }
+
+@keyframes sps-shard-drift {
+               0%, 100% { transform: translate(0, 0) rotate(0deg); }
+               50%      { transform: translate(-3px, 5px) rotate(-4deg); }
+               }
+
+.sps-eyebrow {
+               font-size: 12px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase;
+               color: #a3e635; margin-bottom: 0.6rem;
+               }
+
+.sps-title {
+               font-size: clamp(20px, 4.4vw, 27px); font-weight: 800; letter-spacing: -0.01em;
+               margin: 0 0 0.6rem; max-width: 460px; line-height: 1.3;
+               }
+
+.sps-sub {
+               font-size: 14.5px; line-height: 1.6; color: rgba(255,255,255,0.5);
+               max-width: 400px; margin: 0 0 1.8rem;
+               }
+
+.sps-safety-card {
+               display: flex; align-items: flex-start; gap: 10px; text-align: left;
+               max-width: 440px; width: 100%;
+               background: rgba(163,230,53,0.05); border: 1px solid rgba(163,230,53,0.14);
+               border-radius: 14px; padding: 14px 16px; margin-bottom: 1.8rem;
+               font-size: 12.5px; line-height: 1.55; color: rgba(255,255,255,0.6);
+               }
+
+.sps-safety-card svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; stroke: #a3e635; }
+
+.sps-safety-card b { color: #ddd; font-weight: 700; }
+
+.sps-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+
+.sps-btn {
+               display: inline-flex; align-items: center; gap: 7px;
+               padding: 11px 22px; border-radius: 999px;
+               font-size: 13.5px; font-weight: 700; text-decoration: none;
+               border: none; cursor: pointer; font-family: inherit;
+               transition: filter 0.15s ease, background 0.15s ease, color 0.15s ease;
+               }
+
+.sps-btn-primary { background: #a3e635; color: #0a0a0a; }
+
+.sps-btn-primary:hover { filter: brightness(1.08); }
+
+.sps-btn-ghost {
+               background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+               color: rgba(255,255,255,0.85);
+               }
+
+.sps-btn-ghost:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+.sps-btn-report {
+               background: rgba(163,230,53,0.1); border: 1px solid rgba(163,230,53,0.3);
+               color: #a3e635;
+               }
+
+.sps-btn-report:hover:not(:disabled) { background: rgba(163,230,53,0.16); }
+
+.sps-btn-report:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.sps-report-done {
+               font-size: 13px; font-weight: 700; color: #a3e635;
+               display: flex; align-items: center; padding: 11px 6px;
+               }
+
+@media (max-width: 480px) {
+               .sps-screen { padding: 100px 16px 60px; }
+               .sps-safety-card { padding: 12px 14px; }
                }
 
