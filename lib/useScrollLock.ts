@@ -20,12 +20,21 @@ import { useEffect } from "react";
 // one is still open. Counting locks means scroll only actually restores
 // once every open modal has released its lock.
 let lockCount = 0;
-let previousOverflow = "";
+let previousBodyOverflow = "";
+let previousHtmlOverflow = "";
 
 function lock() {
   if (lockCount === 0) {
-    previousOverflow = document.body.style.overflow;
+    previousBodyOverflow = document.body.style.overflow;
+    previousHtmlOverflow = document.documentElement.style.overflow;
     document.body.style.overflow = "hidden";
+    // body-only overflow:hidden stops the body element's own scrollbox,
+    // but on many pages the actual scrollable box is the <html> root
+    // (whichever one has the taller content ends up being the one that
+    // scrolls) — so a mouse-wheel scroll over the page could still move
+    // html underneath a "locked" body. Lock both, same as the existing
+    // html.mnt-mode / html.mnt-mode body pairing in base.css.
+    document.documentElement.style.overflow = "hidden";
   }
   lockCount += 1;
 }
@@ -33,7 +42,8 @@ function lock() {
 function unlock() {
   lockCount = Math.max(0, lockCount - 1);
   if (lockCount === 0) {
-    document.body.style.overflow = previousOverflow;
+    document.body.style.overflow = previousBodyOverflow;
+    document.documentElement.style.overflow = previousHtmlOverflow;
   }
 }
 
@@ -72,8 +82,9 @@ function unlockTouch() {
 }
 
 /**
- * Locks page scroll (both wheel/keyboard via body overflow, and iOS touch
- * drag via a document-level touchmove blocker) while `active` is true.
+ * Locks page scroll (wheel/keyboard via html + body overflow, and iOS
+ * touch drag via a document-level touchmove blocker) while `active` is
+ * true.
  * Safe to use in many components at once — scroll is only restored once
  * every component that locked it has released (unmounted or flipped
  * `active` to false).
