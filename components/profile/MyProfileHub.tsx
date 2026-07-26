@@ -20,8 +20,10 @@ import { buildListingSlug } from "@/lib/slug";
 import { useCurrency } from "@/lib/CurrencyContext";
 import { useNavigating } from "@/lib/useNavigating";
 import NavSpinnerIcon from "@/components/shared/NavSpinnerIcon";
+import ChatLoadingState from "@/components/shared/ChatLoadingState";
 import PanelHeader from "@/components/shared/PanelHeader";
 import PmHeaderBannerRotator from "@/components/profile/PmHeaderBannerRotator";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the PROFILE MODAL from Js/profile.js + Js/profile-early.js
 // (index.html lines 12099-12279 and 17189-18238) as a real routed page at
@@ -96,6 +98,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   const { confirm, ConfirmHost } = useConfirm();
   const { show: toast } = useSrToast();
   const { limits } = useLimits();
+  useScrollLock(true);
 
   const {
     profile,
@@ -307,7 +310,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   return (
     <div id="profileModal">
       <div className="pm-modal">
-        <PanelHeader onBack={() => router.back()} />
+        <PanelHeader onBack={() => router.push("/")} />
         <div className="pm-modal-header pm-modal-header-banner">
           <PmHeaderBannerRotator
             banners={[
@@ -692,7 +695,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
             <div className="pm-parent-content active" style={{ position: "relative", zIndex: 1 }}>
               <div style={{ width: "100%" }}>
                 {listingsLoading ? (
-                  <div style={{ textAlign: "center", padding: "2rem", color: "var(--mp-text-muted)", fontSize: "0.9rem" }}>Loading your listings…</div>
+                  <ChatLoadingState label="Loading your listings…" compact />
                 ) : listingsError ? (
                   <div style={{ textAlign: "center", padding: "2rem", color: "#555", fontSize: "0.88rem" }}>{listingsError}</div>
                 ) : listings.length === 0 ? (
@@ -782,7 +785,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
             <div className="pm-parent-content active" style={{ position: "relative", zIndex: 1 }}>
               <div style={{ width: "100%" }}>
                 {favoritesLoading ? (
-                  <div style={{ textAlign: "center", padding: "2rem", color: "var(--mp-text-muted)", fontSize: "0.9rem" }}>Loading your favorites…</div>
+                  <ChatLoadingState label="Loading your favorites…" compact />
                 ) : favorites.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "2.5rem 1rem", color: "#555", fontSize: "0.88rem" }}>
                     You have not saved any listings yet. Tap the heart on a listing to save it here.
@@ -852,7 +855,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
             <div className="pm-parent-content active" style={{ position: "relative", zIndex: 1 }}>
               <div style={{ width: "100%" }}>
                 {followingLoading ? (
-                  <div style={{ textAlign: "center", padding: "2rem", color: "var(--mp-text-muted)", fontSize: "0.9rem" }}>Loading who you follow…</div>
+                  <ChatLoadingState label="Loading who you follow…" compact />
                 ) : following.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "2.5rem 1rem", color: "#555", fontSize: "0.88rem" }}>
                     You are not following anyone yet. Follow a seller from their profile to see them here.
