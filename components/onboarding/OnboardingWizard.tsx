@@ -361,17 +361,17 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
                     <div className="ob-plan-card" style={{ ["--plan-color" as string]: "#71717a" }}>
                       <div className="ob-plan-name">Free</div>
                       <div className="ob-plan-fee">20% fee</div>
-                      <div className="ob-plan-limit">5 listings / week</div>
+                      <div className="ob-plan-limit">5 listings per week</div>
                     </div>
                     <div className="ob-plan-card" style={{ ["--plan-color" as string]: "#60a5fa" }}>
                       <div className="ob-plan-name">Starter</div>
                       <div className="ob-plan-fee">15% fee</div>
-                      <div className="ob-plan-limit">15 listings / week</div>
+                      <div className="ob-plan-limit">15 listings per week</div>
                     </div>
                     <div className="ob-plan-card" style={{ ["--plan-color" as string]: "#a3e635" }}>
                       <div className="ob-plan-name">Growth</div>
                       <div className="ob-plan-fee">10% fee</div>
-                      <div className="ob-plan-limit">30 listings / week</div>
+                      <div className="ob-plan-limit">30 listings per week</div>
                     </div>
                     <div className="ob-plan-card" style={{ ["--plan-color" as string]: "#d8b4fe" }}>
                       <div className="ob-plan-name">Pro</div>
@@ -443,8 +443,7 @@ export default function OnboardingWizard({ open, username, onFinish }: Onboardin
                   <path d="M5 12h14M13 5l7 7-7 7" />
                 </svg>
               </button>
-          </div>
-        </div>
+            </div>
       </div>
     </div>
   );
