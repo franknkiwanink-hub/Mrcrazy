@@ -234,7 +234,7 @@ export default function DonateOverlay({
           </div>
         </div>
 
-        <div id="spDonateScroll">
+        <div id="spDonateScroll" data-scroll-lock-exempt>
         <div id="spDonateSummary">
           <div className="sp-donate-summary-stat">
             <div className="sp-donate-summary-val" id="spDonateTotalVal">
