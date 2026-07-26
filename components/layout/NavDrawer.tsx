@@ -169,7 +169,7 @@ export default function NavDrawer() {
           &times;
         </button>
       </div>
-      <div id="navScrollBody" ref={scrollBodyRef}>
+      <div id="navScrollBody" ref={scrollBodyRef} data-scroll-lock-exempt>
         {/* Logged-out: locked account preview */}
         {!isLoggedIn && (
         <div className="nav-section" id="navAccountLoggedOut">
