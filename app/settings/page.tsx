@@ -79,8 +79,14 @@ function SettingsPageInner() {
   // whatever the scroll position happened to land on, making the panel
   // look header-less instead of merely scrolled.
   useEffect(() => {
-    document.getElementById("detailPanel")?.scrollTo({ top: 0 });
-  }, [activePanel]);
+    const raf = requestAnimationFrame(() => {
+      document.getElementById("detailPanel")?.scrollTo({ top: 0 });
+      if (mobileView === "list") {
+        document.getElementById("settingsSidebar")?.scrollTo({ top: 0 });
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [activePanel, mobileView]);
 
   function renderPanel() {
     if (loading) {
