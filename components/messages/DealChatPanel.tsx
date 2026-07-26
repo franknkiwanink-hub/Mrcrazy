@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/AuthContext";
 import { useConfirm } from "@/lib/useConfirm";
@@ -62,9 +62,17 @@ function priceLabel(escrowAmount: number | null, listingPrice: number | null): s
 
 export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
   const chat = useDealChat(chatRoomId);
   const { confirm, prompt, alert, ConfirmHost } = useConfirm();
+
+  // Which inbox tab this chat was opened from — set by InboxShell via
+  // ?from= when navigating here from a Chats/Deals row, so Back can
+  // return to that exact tab instead of guessing from browser history
+  // (see closeChat below). Defaults to "deals" for entry points that
+  // don't set it (e.g. DealPopup, notifications, direct links).
+  const originTab = searchParams.get("from") === "chats" ? "chats" : "deals";
 
   const [input, setInput] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
@@ -241,7 +249,7 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
           } catch (e) {
             console.warn("auto-delete cancelled chat", e);
           }
-          router.push("/messages?tab=deals");
+          router.push(`/messages?tab=${originTab}`);
         })();
         return;
       }
@@ -252,8 +260,20 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
     return () => clearInterval(id);
   }, [deleteAfterCancel, chatRoomId, chat.room, router]);
 
+  // Back/Exit should return the user to wherever they actually came from
+  // (the "chats" tab, the "deals" tab, a listing page, a notification,
+  // etc.) — previously this always hardcoded /messages?tab=deals, so
+  // opening a deal chat from anywhere else and tapping Back silently
+  // dropped the user onto the Deals tab instead of retracing their own
+  // steps, which reads as broken/disorienting navigation. router.back()
+  // is the correct primitive here since this panel is a real routed page
+  // (pushed via router.push, not a modal) — same convention already used
+  // elsewhere in this app (see MyProfileHub's PanelHeader onBack). Falls
+  // back to /messages?tab=deals only when there's no in-app history to
+  // go back to (e.g. the chat was opened via a deep link / new tab),
+  // rather than assuming history always exists.
   function closeChat() {
-    router.push("/messages?tab=deals");
+    router.push(`/messages?tab=${originTab}`);
   }
 
   async function handleSend() {
