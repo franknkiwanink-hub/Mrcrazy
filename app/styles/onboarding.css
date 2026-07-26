@@ -13,11 +13,62 @@
     transition: opacity 0.4s ease, transform 0.4s ease;
 }
 
-/* .ob-intro / .ob-intro-image / .ob-intro-bottom / .ob-intro-cta removed —
-   the intro splash screen (full-bleed remote marketing image + "GET
-   STARTED" gate) was removed from OnboardingWizard.tsx. It forced a
-   network-dependent image load before a brand-new signup could see
-   anything, with no functional purpose beyond gating step 1. */
+/* Restored — OnboardingWizard.tsx still renders showIntro/.ob-intro (the
+   "GET STARTED" splash) via useState(true) as its default first screen.
+   A prior split of this file dropped these rules on the assumption the
+   intro had been removed from the component, but it hadn't — so the
+   splash was mounting unstyled (no position/inset/z-index/background),
+   which is why onboarding appeared to "never show" after signup: it was
+   rendering, just invisible/zero-effect underneath the page behind it. */
+.ob-intro {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: #0a0a0c;
+    display: flex;
+    flex-direction: column;
+    overscroll-behavior: none;
+    touch-action: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.ob-intro-image {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #050506;
+}
+.ob-intro-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.ob-intro-bottom {
+    flex-shrink: 0;
+    padding: 18px 20px calc(18px + env(safe-area-inset-bottom, 0px));
+    display: flex;
+    justify-content: center;
+    background: #0a0a0c;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ob-intro-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 32px;
+    background: #a3e635;
+    color: #0a0a0a;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+    font-family: inherit;
+}
 .ob-container {
     width: 100%;
     height: 100%;
