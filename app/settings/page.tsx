@@ -58,6 +58,19 @@ function SettingsPageInner() {
   const { state, setState, loading } = useSettingsState();
   const { openDisputePicker } = useDisputePicker();
 
+  // Only matters ≤640px (see settings.css's max-width:640px block) —
+  // above that both panes show side by side regardless and this is
+  // ignored. "list" = sidebar full-width, panel hidden. "panel" =
+  // sidebar hidden, panel full-width with a back button at the top.
+  const [mobileView, setMobileView] = useState<"list" | "panel">(
+    initialPanel && VALID_PANELS.has(initialPanel) ? "panel" : "list"
+  );
+
+  function handleSelectPanel(panel: SettingsPanelId) {
+    setActivePanel(panel);
+    setMobileView("panel");
+  }
+
   // Each panel renders its own header (icon + title + description, see
   // e.g. AccountPanel's .detail-panel-header) at the very top of
   // .detail-panel. Without this, switching panels while scrolled down
@@ -68,16 +81,6 @@ function SettingsPageInner() {
   useEffect(() => {
     document.getElementById("detailPanel")?.scrollTo({ top: 0 });
   }, [activePanel]);
-
-  // <main> has min-height:100vh globally, so a hard height on this page's
-  // own wrapper (rather than the min-height it had) plus marginTop:92 —
-  // matching every other real page's clearance for the fixed Header +
-  // AnnouncementBar — keeps this route exactly one viewport tall, same
-  // as the original fixed-overlay version, without needing to lock
-  // document scroll to fake that. Only .settings-sidebar / .detail-panel
-  // (each their own overflow-y:auto box) scroll internally; the document
-  // itself doesn't need to move at all since this wrapper is already
-  // exactly the remaining viewport height.
 
   function renderPanel() {
     if (loading) {
@@ -164,13 +167,19 @@ function SettingsPageInner() {
         // root layout) behind it, same bug fixed on /myprofile's
         // #profileModal. marginTop:92 clears the real fixed Header (52px)
         // + AnnouncementBar (40px) — same 92px convention every other
-        // real page uses — and height (not min-height) locks this
-        // wrapper to exactly the remaining viewport, so .main-content's
-        // flex:1 + .detail-panel's overflow-y:auto keep working as a
-        // real two-pane scroll UI without needing document scroll locked
-        // to fake it.
+        // real page uses.
+        //
+        // NOTE: this wrapper no longer uses height:calc(100dvh - 92px).
+        // That locked the wrapper to exactly the remaining viewport with
+        // no document scroll past it, which meant <Footer/> — still
+        // rendered right after <main> in the root layout — was reachable
+        // in the DOM but never visible or scrollable-to. minHeight (not
+        // height) means this wrapper fills at least the remaining
+        // viewport but grows if content needs more, and document scroll
+        // stays live so the real Footer below it is reachable, same as
+        // every other page.
         marginTop: 92,
-        height: "calc(100dvh - 92px)",
+        minHeight: "calc(100dvh - 92px)",
         display: "flex",
         flexDirection: "column",
         background: "var(--mp-bg, #050508)",
@@ -181,13 +190,39 @@ function SettingsPageInner() {
           Upgrade/Manage-Plan button for a Back button on this route
           (see AnnouncementBar.tsx's onBackRoute). No page-local header
           needed. */}
-      <div className="main-content" style={{ flex: 1, minHeight: 0 }}>
+      <div
+        className="main-content"
+        data-mobile-view={mobileView}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          // Fixed height (not flex-grow into an unbounded parent) so the
+          // sidebar + detail-panel two-pane layout keeps its own internal
+          // overflow-y:auto scrolling exactly as before — only the outer
+          // page wrapper became scrollable, this inner pane didn't change.
+          height: "calc(100dvh - 92px)",
+        }}
+      >
         <SettingsSidebar
           activePanel={activePanel}
-          onSelectPanel={setActivePanel}
+          onSelectPanel={handleSelectPanel}
           onRaiseDispute={openDisputePicker}
         />
         <div className="detail-panel" id="detailPanel">
+          {/* Only visible ≤640px (settings.css hides it above that) —
+              returns to the full-width sidebar list instead of the
+              panel. Both panes stay mounted; this just flips
+              data-mobile-view back to "list". */}
+          <button
+            type="button"
+            className="settings-mobile-back-btn"
+            onClick={() => setMobileView("list")}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            Settings
+          </button>
           {renderPanel()}
         </div>
       </div>
