@@ -917,33 +917,12 @@
    ═══════════════════════════════════════ */
 .upg-page {
   max-width: 980px; margin: 0 auto;
-  padding: 0 24px 80px;
+  padding: 110px 24px 80px;
   font-family: 'Inter', sans-serif;
   color: #eee;
 }
 
-/* Sticky sub-header bar docked under the fixed header (52px) +
-   announcement bar (40px) = 92px stack — same treatment as the donate
-   page's .dnp-back-bar, instead of a pill floating loose in padding. */
-.upg-back-bar {
-  position: sticky; top: 92px; z-index: 20;
-  margin: 0 -24px 1.6rem; padding: 0.7rem 24px;
-  background: rgba(10,10,14,0.85);
-  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-}
-
-.upg-back {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-  color: #ccc; font-size: 0.8rem; font-weight: 600;
-  padding: 0.5rem 0.9rem; border-radius: 50px; cursor: pointer;
-  font-family: inherit; transition: background 0.2s, color 0.2s;
-}
-
-.upg-back:hover { background: rgba(255,255,255,0.1); color: #fff; }
-
-.upg-hero { text-align: center; margin-bottom: 2.8rem; padding-top: 1.6rem; }
+.upg-hero { text-align: center; margin-bottom: 2.8rem; }
 
 .upg-hero-icon {
   width: 56px; height: 56px; margin: 0 auto 1rem;
@@ -1176,8 +1155,7 @@
 }
 
 @media (max-width: 560px) {
-  .upg-page { padding: 0 16px 60px; }
-  .upg-back-bar { margin: 0 -16px 1.6rem; padding: 0.7rem 16px; }
+  .upg-page { padding: 90px 16px 60px; }
   .upg-hero-title { font-size: 1.6rem; }
   .upg-compare-table th, .upg-compare-table td { padding: 0.7rem 0.6rem; font-size: 0.78rem; }
 }
