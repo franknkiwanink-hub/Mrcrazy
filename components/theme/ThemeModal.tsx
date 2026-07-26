@@ -189,7 +189,7 @@ export default function ThemeModal({
             <CloseIcon />
           </button>
         </div>
-        <div className="theme-card-scroll">
+        <div className="theme-card-scroll" data-scroll-lock-exempt>
         <div className="theme-sub">Tap any theme to apply it instantly. Syncs across all your devices.</div>
         <div className="theme-divider" />
         <div className="theme-grid" id="themeGrid">
