@@ -168,26 +168,29 @@ function SettingsPageInner() {
   return (
     <div
       style={{
-        // Was position:fixed;inset:0 — that covered the entire viewport,
-        // which also hid <Footer/> (rendered right after <main> in the
-        // root layout) behind it, same bug fixed on /myprofile's
-        // #profileModal. marginTop:92 clears the real fixed Header (52px)
-        // + AnnouncementBar (40px) — same 92px convention every other
-        // real page uses.
-        //
-        // NOTE: this wrapper no longer uses height:calc(100dvh - 92px).
-        // That locked the wrapper to exactly the remaining viewport with
-        // no document scroll past it, which meant <Footer/> — still
-        // rendered right after <main> in the root layout — was reachable
-        // in the DOM but never visible or scrollable-to. minHeight (not
-        // height) means this wrapper fills at least the remaining
-        // viewport but grows if content needs more, and document scroll
-        // stays live so the real Footer below it is reachable, same as
-        // every other page.
+        // Fixed-height contained view, same as the pre-existing pattern
+        // used by every other two-pane app-shell page. marginTop:92
+        // clears the real fixed Header (52px) + AnnouncementBar (40px) —
+        // same 92px convention every other real page uses. height (not
+        // minHeight) locks this wrapper to exactly the remaining
+        // viewport: .main-content's flex:1 + .settings-sidebar's and
+        // .detail-panel's own overflow-y:auto are what actually scroll,
+        // not the document. The site-wide <Footer/> below this in the
+        // root layout is not reachable from /settings — that's
+        // intentional, not a bug: a two-pane sidebar+panel layout needs
+        // a genuinely fixed viewport height for its internal scroll
+        // regions to work at all. Letting the document scroll instead
+        // (as a previous version of this file tried, to reach the
+        // footer) breaks that: nothing then forces .main-content to stay
+        // clipped at its intended height, so the whole page — including
+        // the footer below it — grows and scrolls together as one long
+        // document, which is exactly the "whole body scrolls / footer
+        // shows up mid-panel" bug reported on mobile and desktop.
         marginTop: 92,
-        minHeight: "calc(100dvh - 92px)",
+        height: "calc(100dvh - 92px)",
         display: "flex",
         flexDirection: "column",
+        overflow: "hidden",
         background: "var(--mp-bg, #050508)",
       }}
     >
@@ -202,11 +205,6 @@ function SettingsPageInner() {
         style={{
           flex: 1,
           minHeight: 0,
-          // Fixed height (not flex-grow into an unbounded parent) so the
-          // sidebar + detail-panel two-pane layout keeps its own internal
-          // overflow-y:auto scrolling exactly as before — only the outer
-          // page wrapper became scrollable, this inner pane didn't change.
-          height: "calc(100dvh - 92px)",
         }}
       >
         <SettingsSidebar
