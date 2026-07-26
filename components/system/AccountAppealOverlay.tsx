@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { uploadAppealScreenshot, submitAppeal, type AppealAttachment } from "@/lib/accountAppeal";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports #acctAppealOverlay — text description + up to 3 image
 // attachments, uploaded to Imgur (not /api/storage, matching how
@@ -19,6 +20,7 @@ export default function AccountAppealOverlay({ onCancel }: { onCancel: () => voi
   const [status, setStatus] = useState<"idle" | "uploading" | "submitting" | "ok" | "error">("idle");
   const [statusMsg, setStatusMsg] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  useScrollLock(true);
 
   function addFiles(picked: FileList | null) {
     if (!picked) return;
