@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Full-screen takeover shown while the seller's "Request Payment" send is
 // in flight. Spins for a fixed 3s (matches the requested UX beat — long
@@ -18,6 +19,7 @@ const AUTO_CLOSE_MS = 1400; // how long the checkmark stays up before onDone
 
 export default function RequestPaymentOverlay({ onDone }: { onDone: () => void }) {
   const [sent, setSent] = useState(false);
+  useScrollLock(true);
 
   useEffect(() => {
     const sendTimer = setTimeout(() => setSent(true), SEND_DELAY_MS);
