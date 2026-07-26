@@ -299,6 +299,39 @@
          line-height: 1.4;
          }
 
+.settings-mobile-back-btn {
+         /* Hidden by default (desktop and any width outside the ≤640px
+            mobile block below) — this MUST be an unconditional, un-
+            media-queried rule. It previously only had display:none
+            inside the @media(max-width:640px) block, so outside that
+            breakpoint there was no display rule at all: the button fell
+            back to its default display with an unstyled, unsized <svg>
+            child rendering at the browser's large intrinsic default
+            size — the giant black arrow covering the whole desktop
+            screen. */
+         display: none;
+         align-items: center;
+         gap: 0.4rem;
+         background: transparent;
+         border: 1px solid var(--mp-border, rgba(255,255,255,0.12));
+         color: var(--mp-text-sec, rgba(255,255,255,0.7));
+         padding: 0.5rem 1.1rem;
+         border-radius: 50px;
+         font-weight: 600;
+         font-size: 0.82rem;
+         font-family: inherit;
+         cursor: pointer;
+         white-space: nowrap;
+         margin-bottom: 0.6rem;
+         }
+.settings-mobile-back-btn svg {
+         width: 15px;
+         height: 15px;
+         stroke: currentColor;
+         fill: none;
+         flex-shrink: 0;
+         }
+
 /* ── Responsive ────────────────── */
 /* 641–700px: sidebar shrinks a little but stays a genuine two-pane
    layout — there's enough width here for both columns to still be
@@ -397,35 +430,10 @@
          justify-content: center;
          }
 
-         /* Back-to-list control, only shown on this breakpoint's panel
-            view — see settings/page.tsx. Deliberately its own class,
-            not a reuse of .panel-back-btn (that one's PanelHeader's
-            shared always-visible back button used on other full-screen
-            overlay routes like My Profile — scoping this separately
-            avoids a display:none here leaking into those). */
-         .settings-mobile-back-btn {
-         display: none;
-         align-items: center;
-         gap: 0.4rem;
-         background: transparent;
-         border: 1px solid var(--mp-border, rgba(255,255,255,0.12));
-         color: var(--mp-text-sec, rgba(255,255,255,0.7));
-         padding: 0.5rem 1.1rem;
-         border-radius: 50px;
-         font-weight: 600;
-         font-size: 0.82rem;
-         font-family: inherit;
-         cursor: pointer;
-         white-space: nowrap;
-         margin-bottom: 0.6rem;
-         }
-         .settings-mobile-back-btn svg {
-         width: 15px;
-         height: 15px;
-         stroke: currentColor;
-         fill: none;
-         flex-shrink: 0;
-         }
+         /* Back-to-list control's "show it" override — the hide-by-
+            default base rule lives outside this media query (applies at
+            every width unconditionally); this just flips it visible
+            once both ≤640px AND panel view are true. */
          .main-content[data-mobile-view="panel"] .settings-mobile-back-btn {
          display: flex;
          }
