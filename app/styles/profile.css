@@ -46,6 +46,49 @@
     flex-shrink: 0;
   }
 
+/* Rotating CTA banner strip that replaced the static "My Profile" title.
+   Header keeps its sticky position/backdrop; just drop the side padding
+   and centering so the banner image can run edge-to-edge. */
+.pm-modal-header-banner {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+    overflow: hidden;
+  }
+
+.pm-banner-rotator {
+    position: relative;
+    width: 100%;
+    height: 50px;
+  }
+
+.pm-banner-slide {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 50px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.5s ease;
+  }
+
+.pm-banner-slide[data-active="true"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+.pm-banner-slide img {
+    display: block;
+    width: 100%;
+    height: 50px;
+    object-fit: cover;
+  }
+
 .pm-left-title {
     display: flex;
     align-items: center;
