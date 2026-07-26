@@ -43,8 +43,8 @@ const STEPS = [
   },
   {
     n: "3",
-    title: "Fund escrow",
-    body: "Once accepted, the buyer pays from their Siterifty wallet. That payment goes into escrow — held by Siterifty, not sent straight to the seller — so the seller has a real, committed payment waiting, and the buyer knows it can't be released until they confirm delivery.",
+    title: "Fund escrow at checkout",
+    body: "Once accepted, the buyer heads to a dedicated checkout page to review the order and pay — this isn't a wallet balance debit. Payment is held in escrow until delivery is confirmed, so the seller has a real, committed payment waiting, and the buyer knows it can't be released until they confirm receipt.",
   },
   {
     n: "4",
