@@ -126,16 +126,6 @@ export default function ThemeModal({
     };
   }, []);
 
-  // Lock page scroll while open, same as the other modals in the app.
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
-
   function showUpgradeNudge() {
     setNudge(true);
     nudgeTimers.current.forEach(clearTimeout);
