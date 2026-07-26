@@ -19,6 +19,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import MarketplaceGrid from "@/components/marketplace/MarketplaceGrid";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 export default function MarketplaceModal({
   open,
@@ -32,14 +33,7 @@ export default function MarketplaceModal({
     setMounted(true);
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
+  useScrollLock(open);
 
   useEffect(() => {
     if (!open) return;
