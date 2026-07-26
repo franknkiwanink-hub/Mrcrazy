@@ -117,8 +117,20 @@ export default function NavDrawer() {
   }
 
   useEffect(() => {
-    if (typeof Notification === "undefined") {
-      setPushStatus("Notifications not supported.");
+    if (!pushCapable) {
+      // Matches the same isPushSupported() check the toggle's disabled/
+      // dimmed state uses below — previously this only checked
+      // `typeof Notification === "undefined"`, which is narrower than
+      // isPushSupported() (also requires serviceWorker + PushManager).
+      // That gap meant a browser/context missing just serviceWorker or
+      // PushManager (some in-app/webview browsers, or a non-https
+      // preview domain) showed the row dimmed and inert with no status
+      // text at all explaining why.
+      setPushStatus(
+        typeof Notification === "undefined"
+          ? "Notifications not supported."
+          : "Push isn't supported in this browser — try opening the site in Chrome or Safari directly."
+      );
       return;
     }
     syncPushToggleState();
