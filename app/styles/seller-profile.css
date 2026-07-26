@@ -741,8 +741,20 @@
    ═══════════════════════════════════════ */
 .dnp-page {
                max-width: 760px; margin: 0 auto;
-               padding: 110px 24px 80px;
+               padding: 0 24px 80px;
                font-family: inherit; color: #eee;
+               }
+
+/* Sticky sub-header bar, docked directly under the fixed header (52px)
+   + announcement bar (40px) = 92px stack, instead of floating loose in
+   the page's own top padding. Full-bleed so it reads as a deliberate
+   row, not a pill dropped in empty space. */
+.dnp-back-bar {
+               position: sticky; top: 92px; z-index: 20;
+               margin: 0 -24px 1.6rem; padding: 0.7rem 24px;
+               background: rgba(10,10,14,0.85);
+               backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+               border-bottom: 1px solid rgba(255,255,255,0.06);
                }
 
 .dnp-back {
@@ -750,12 +762,12 @@
                background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
                color: #ccc; font-size: 0.8rem; font-weight: 600;
                padding: 0.5rem 0.9rem; border-radius: 50px; cursor: pointer;
-               font-family: inherit; margin-bottom: 2rem; transition: background .16s, color .16s;
+               font-family: inherit; transition: background .16s, color .16s;
                }
 
 .dnp-back:hover { background: rgba(255,255,255,0.1); color: #fff; }
 
-.dnp-hero { text-align: center; margin-bottom: 1.8rem; position: relative; }
+.dnp-hero { text-align: center; margin-bottom: 1.8rem; position: relative; padding-top: 1.6rem; }
 
 .dnp-hero-av {
                width: 76px; height: 76px; border-radius: 50%; margin: 0 auto 1rem;
@@ -932,7 +944,8 @@
                }
 
 @media (max-width: 480px) {
-               .dnp-page { padding: 90px 16px 60px; }
+               .dnp-page { padding: 0 16px 60px; }
+               .dnp-back-bar { margin: 0 -16px 1.6rem; padding: 0.7rem 16px; }
                .dnp-hero-title { font-size: 1.4rem; }
                }
 
