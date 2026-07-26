@@ -124,7 +124,7 @@ export default function BillingPanel({
               {/* Ports data-paypal-plan upgrade buttons — the original wires
                   these through a separate standalone Plans modal
                   (window.__openPlansModal) via document-level delegation.
-                  Now that PlansModal is built, this calls it directly
+                  Now that /upgrade is a full page, this navigates there
                   with this card's plan preselected. */}
               <button
                 className="save-btn"
