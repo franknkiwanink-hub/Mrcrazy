@@ -81,6 +81,13 @@ export async function getSellerSeoProfile(segment: string): Promise<SellerSeoPro
     snap = q.docs[0];
   }
   const uid = snap.id;
+  // At this point snap is guaranteed to exist (either the direct doc-id
+  // lookup above hit, or the usernameLower query returned a real doc) —
+  // `d` is never the fallback `{}` a deleted/non-existent seller would
+  // produce, so username/etc. below never need an "Anonymous" fallback
+  // for a missing account. Kept as `|| {}` only as a defensive guard
+  // against a doc existing with no data at all, not a stand-in for a
+  // missing seller.
   const d = snap.data() || {};
 
   // Cheap count-only query — mirrors the `active` status filter used
