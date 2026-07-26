@@ -216,6 +216,17 @@ header {
 
 .plan-pro     { background: linear-gradient(135deg, rgba(168,85,247,0.18), rgba(236,72,153,0.18)); border: 1px solid rgba(168,85,247,0.35); color: #d8b4fe; }
 
+.ab-back {
+         display: inline-flex; align-items: center; gap: 5px;
+         background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14);
+         border-radius: 9px; padding: 5px 12px 5px 10px;
+         font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+         color: rgba(255,255,255,0.75); cursor: pointer;
+         font-family: inherit; transition: background 0.15s, color 0.15s, border-color 0.15s;
+         }
+
+.ab-back:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.22); color: #fff; }
+
 .btn-upgrade {
          position: relative; overflow: hidden;
          display: inline-flex; align-items: center; gap: 6px;
