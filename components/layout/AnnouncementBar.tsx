@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
 
@@ -20,6 +20,7 @@ export default function AnnouncementBar() {
   const { user, profile } = useAuth();
   const { openPlansModal } = usePlansModal();
   const pathname = usePathname();
+  const router = useRouter();
 
   const displayName = user
     ? profile?.username || user.email?.split("@")[0] || "User"
@@ -27,12 +28,13 @@ export default function AnnouncementBar() {
   const plan = profile?.plan || "free";
   const meta = PLAN_META[plan] || PLAN_META.free;
 
-  // On /upgrade and /donate/[id] the action button here would just
-  // duplicate a CTA already on the page itself (the plan cards on
-  // /upgrade, the donate form on /donate) — so it's suppressed on those
-  // two routes. Username/plan badge stay visible everywhere, including
-  // there, since they're just identity context, not a redundant action.
-  const suppressAction = pathname === "/upgrade" || pathname?.startsWith("/donate/");
+  // On /upgrade and /donate/[id] the Upgrade/Manage Plan button here
+  // would just duplicate a CTA already on the page itself (the plan
+  // cards on /upgrade, the donate form on /donate). Rather than leave
+  // that slot empty, it's swapped for a Back button in the exact same
+  // spot — so those pages get in-flow back navigation instead of it
+  // floating loose in the page body.
+  const onBackRoute = pathname === "/upgrade" || pathname?.startsWith("/donate/");
 
   return (
     <div id="announcement-bar" data-plan={plan}>
@@ -46,38 +48,43 @@ export default function AnnouncementBar() {
       </div>
       {/* Unread-messages / notifications action slot, driven by Js/inbox.js
           originally — wired up in a later step. */}
-      {!suppressAction && (
-        <div id="ab-action">
-          {plan === "free" ? (
-            <div className="btn-upgrade-wrap">
-              <button className="btn-upgrade" onClick={() => openPlansModal()}>
-                <svg
-                  className="upgrade-icon"
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path
-                    className="star"
-                    d="M12 2.5l2.6 5.3 5.9.86-4.25 4.14 1 5.88L12 16.1l-5.25 2.58 1-5.88L3.5 8.66l5.9-.86z"
-                    fill="rgba(216,180,254,0.95)"
-                    stroke="rgba(167,139,250,0.5)"
-                    strokeWidth="0.5"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                Upgrade
-              </button>
-            </div>
-          ) : (
-            <button className="btn-manage" onClick={() => openPlansModal()}>
-              Manage Plan
+      <div id="ab-action">
+        {onBackRoute ? (
+          <button className="ab-back" onClick={() => router.back()} aria-label="Go back">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+            Back
+          </button>
+        ) : plan === "free" ? (
+          <div className="btn-upgrade-wrap">
+            <button className="btn-upgrade" onClick={() => openPlansModal()}>
+              <svg
+                className="upgrade-icon"
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  className="star"
+                  d="M12 2.5l2.6 5.3 5.9.86-4.25 4.14 1 5.88L12 16.1l-5.25 2.58 1-5.88L3.5 8.66l5.9-.86z"
+                  fill="rgba(216,180,254,0.95)"
+                  stroke="rgba(167,139,250,0.5)"
+                  strokeWidth="0.5"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              Upgrade
             </button>
-          )}
-        </div>
-      )}
+          </div>
+        ) : (
+          <button className="btn-manage" onClick={() => openPlansModal()}>
+            Manage Plan
+          </button>
+        )}
+      </div>
     </div>
   );
 }
