@@ -8,6 +8,7 @@ import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { loadPaypalSdk } from "@/lib/paypalSdk";
 import { useLimits } from "@/lib/useLimits";
 import { useCurrency } from "@/lib/CurrencyContext";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 // Full-page version of the old PlansModal (billing/PlansModal.tsx) —
 // previously a centered popup opened from anywhere via
@@ -189,6 +190,10 @@ export default function UpgradePageClient() {
   // instead of rendering inline further down the page, so the Subscribe
   // button + PayPal button are visible immediately without scrolling.
   const [showPayModal, setShowPayModal] = useState(false);
+  // Same shared reference-counted lock every other modal/overlay uses —
+  // see lib/useScrollLock.ts. Without this, the /upgrade page behind the
+  // modal kept scrolling while the payment modal was open.
+  useScrollLock(showPayModal);
 
   const paypalContainerRef = useRef<HTMLDivElement>(null);
   const buttonsRef = useRef<any>(null);
@@ -497,7 +502,7 @@ export default function UpgradePageClient() {
 
       {showPayModal && (
         <div className="upg-modal-overlay" onClick={closePayModal}>
-          <div className="upg-modal-box" onClick={(e) => e.stopPropagation()}>
+          <div className="upg-modal-box" data-scroll-lock-exempt onClick={(e) => e.stopPropagation()}>
             <button className="upg-modal-close" onClick={closePayModal} aria-label="Close">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" />
