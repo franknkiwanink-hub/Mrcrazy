@@ -268,6 +268,7 @@ export default function AiSupportChatPanel({
         {/* Messages */}
         <div
           ref={messagesRef}
+          data-scroll-lock-exempt
           style={{
             flex: 1,
             overflowY: "auto",
