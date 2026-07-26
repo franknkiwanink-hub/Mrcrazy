@@ -1,99 +1,88 @@
-FIXES ONLY — drop these into your project at the same paths, overwriting
-the existing files, except where noted as NEW.
+FIXES ONLY — round 2 (scroll dead on Profile/Settings/Wallet, banner
+hidden under header, Back button). Drop these into your project at the
+same paths, overwriting the existing files.
 
-1) HAMBURGER/DRAWER SCROLL LOCK DIDN'T STOP BACKGROUND SCROLL
-   lib/useScrollLock.ts
-   - Was only setting document.body.style.overflow = "hidden". On pages
-     where <html> (not <body>) was the element that actually scrolled,
-     wheel/keyboard scroll could still move the page behind an open
-     drawer/modal. Now locks both html and body overflow together (same
-     pairing already used for html.mnt-mode in base.css), reference-
-     counted the same way as before.
-
-2) PROFILE PAGE (AND SETTINGS) HID THE FOOTER
-   app/styles/profile.css
+1) SCROLL COMPLETELY DEAD ON /myprofile AND /settings
    components/profile/MyProfileHub.tsx
    app/settings/page.tsx
-   app/settings/loading.tsx (NEW)
-   - Root cause: #profileModal (and Settings' equivalent wrapper) used
-     position:fixed; inset:0 — correct for their original design as
-     overlays-over-the-marketplace, but both are now real routed pages
-     (/myprofile, /settings) rendered inside <main>, above the site-wide
-     <Footer/> in normal document flow. Fixed+inset:0 covered the whole
-     viewport, hiding the footer behind it (it was still rendering, just
-     never visible). Switched both to min-height:100dvh so they flow
-     normally and the footer shows once the page is scrolled past.
-     Settings' internal sidebar+detail-panel split-scroll UI is
-     unaffected — that still works exactly as before.
-   - NOT changed: the onboarding wizard (.ob-wizard) — that's a
-     deliberate full-screen, no-dismiss signup takeover, not a content
-     page, so it correctly stays fixed+no-footer.
+   - Root cause: both pages had a permanent, unconditional scroll lock
+     left over from when they were fixed-viewport overlays —
+     MyProfileHub called useScrollLock(true) (always on, for the entire
+     time the component was mounted), and Settings called
+     useScrollLock(!!user) (on for as long as you were signed in). That
+     locks html+body scroll globally — not just "while a modal is open
+     over this page," but literally the whole page, permanently. Removed
+     both. Settings' internal sidebar+detail-panel two-pane scroll still
+     works — it never needed the document-level lock to begin with, that
+     was solving a self-inflicted layout problem (see next item).
 
-3) 28 ROUTES HAD NO LOADING STATE — BLANK SCREEN ON NAVIGATION
-   app/{about,buyer-protection,escrow,how-it-works,privacy,terms,contact,
-   help,gallery,aitools,dashboard,sellers,leaderboard,onboarding,blog,
-   blog/[id],settings,myprofile,marketplace,marketplace/[type],
-   marketplace/[type]/[bracket],sell,sell/app,sell/game,sell/website,
-   sell/template,sell/3d-assets}/loading.tsx (all NEW)
-   components/layout/StaticPageSkeleton.tsx (NEW — shared shape for
-     every page built on components/layout/StaticPage)
-   components/listing/SellFormSkeleton.tsx (NEW — shared shape for the
-     5 /sell/* listing-type forms)
-   - None of these routes had their own loading.tsx, so Next fell back
-     to either nothing or the generic marketplace-grid-shaped
-     app/loading.tsx, which looked wrong on non-marketplace pages. Each
-     now has a loading.tsx shaped like its own real content (support
-     pages get StaticPageSkeleton, marketplace routes reuse the already-
-     correct SiteriftyLoader, settings/myprofile/dashboard/sellers/
-     leaderboard get bespoke skeletons matching their real layout).
-   - messages/deal/[id] and messages/group/[id] were already covered by
-     the existing app/messages/loading.tsx (Next applies a parent
-     segment's loading.tsx to any nested route that doesn't define its
-     own more specific one) — no new file needed there, so it's not
-     included in this zip.
+2) PROFILE BANNER RENDERING UNDERNEATH THE REAL HEADER
+   app/styles/profile.css
+   app/settings/page.tsx
+   - Root cause: #profileModal (and Settings' wrapper) never got the
+     marginTop:92 every other real page uses to clear the real site
+     Header (52px, position:fixed) + AnnouncementBar (40px,
+     position:fixed) stacked above it. They used to get that clearance
+     for free from their own PanelHeader (now removed, see #3), which
+     occupied roughly that space itself. Added margin-top:92px to
+     #profileModal, corrected .pm-modal-header's sticky offset from
+     52px to 92px to match (it was sticking underneath/overlapping the
+     announcement bar), and gave Settings' wrapper the same marginTop:92
+     + a proper calc(100dvh - 92px) height instead of min-height:100dvh
+     with no top offset.
 
-4) REDIRECT PAGES SHOWED A BLANK SCREEN WHILE REDIRECTING
-   app/aiagent/page.tsx
-   app/profile/loading.tsx (NEW)
-   app/r/[username]/loading.tsx (NEW)
-   - /aiagent (client-side redirect after opening the agent modal),
-     /profile, and /r/[username] (both server-side redirect()) all had a
-     moment of nothing on screen before landing on their real
-     destination — same "silence reads as broken" problem
-     lib/useNavigating.ts already documents for the outbound side of a
-     nav. /aiagent now renders a centered NavSpinnerIcon for the instant
-     before its redirect fires; /profile and /r/[username] get a
-     loading.tsx with the same spinner, shown immediately while their
-     server-side redirect resolves.
+3) BACK BUTTON — REAL HEADER NOW HANDLES IT, PanelHeader REMOVED
+   components/layout/AnnouncementBar.tsx
+   components/profile/MyProfileHub.tsx
+   app/settings/page.tsx
+   - AnnouncementBar already swapped its Upgrade/Manage-Plan button for
+     a Back button on /upgrade and /donate/[id]. Extended that same
+     mechanism to /myprofile and /settings, and removed both pages' own
+     PanelHeader (a duplicate hamburger+logo+back row that never
+     accounted for the announcement bar's height — the actual source of
+     item #2). /myprofile's Back button always goes to "/" (Home) — it
+     can be reached from many different places (a listing's seller
+     avatar, a notification, a deep link), so router.back() there could
+     land anywhere including an empty history stack; Home is the one
+     predictable destination. /settings and /upgrade/donate keep normal
+     router.back() (go to wherever you came from), since those are
+     reached from a small, predictable set of places.
 
-5) DISCOVER HAD NO REAL URL — NO META TAGS / PREVIEW IMAGE POSSIBLE
-   app/discover/page.tsx (NEW)
-   app/discover/DiscoverPageClient.tsx (NEW)
-   components/marketplace/MarketplaceFilterBar.tsx
-   - Discover was only an in-page takeover panel (DiscoverPanel.tsx,
-     opened over the marketplace) with no URL of its own, so there was
-     nowhere to attach a title/description/preview image — sharing "the
-     Discover page" had no real page behind it. Added a real /discover
-     route with its own generateMetadata, reusing the exact same
-     MARKETPLACE_OG_IMAGE the root layout and /marketplace already use
-     (lib/og/staticOgImage.ts) as its preview image. DiscoverPageClient
-     is a standalone version of the same panel content (identical
-     markup/classnames/data source), flowing as a normal page (so the
-     footer shows below it, same fix as #2) instead of a fixed portal
-     takeover. The marketplace's own "Discover" button now navigates to
-     this real route instead of opening the old in-page panel, so
-     there's one implementation instead of two that could drift apart.
-     (DiscoverPanel.tsx itself is unchanged and still in use — it still
-     exports the DiscoverButton trigger — so it's not included here.)
+4) TOUCH-SCROLL DEAD INSIDE SEVERAL MODALS' OWN CONTENT
+   components/wallet/WalletModal.tsx (#walletModalBody)
+   components/listing/EditListingModal.tsx (.el-body)
+   components/auth/AuthModal.tsx (.am-body)
+   components/marketplace/SearchOverlay.tsx (.mp-so-body)
+   components/marketplace/MarketplaceModal.tsx (modal root itself)
+   components/boost/BoostModal.tsx (inline overflowY:auto body)
+   components/dispute/DisputePicker.tsx (#srfDisputeBody)
+   components/messages/TransferDealModal.tsx (.tdm-checklist-main, both
+     the loading and real-content occurrences)
+   components/support/AiSupportChatPanel.tsx (message list)
+   - Same root cause as the earlier NavDrawer scroll fix: the shared
+     scroll lock (lib/useScrollLock.ts) blocks touchmove everywhere on
+     the page while any modal is open, except on elements marked
+     data-scroll-lock-exempt. Each of the 9 files above has its own
+     internal overflow-y:auto scroll area that was never given that
+     exemption, so on touch devices none of these could be
+     drag-scrolled at all while open — audited every component in the
+     codebase that calls useScrollLock and checked each one's actual
+     scroll container; these were the ones still missing it.
+   - AuthModal specifically still had a *stale* attribute name,
+     data-sr-modal-scroll, left over from before the shared
+     useScrollLock hook existed — the current hook's touch blocker only
+     recognizes data-scroll-lock-exempt, so that old attribute was
+     silently doing nothing. Fixed to the current attribute name.
+   - Checked and confirmed already correct / no fix needed: RateOverlay
+     (no internal scroll), ThemeModal, AgentModal, DiscoverPanel,
+     NavDrawer, OnboardingWizard, DealChatPanel, LogoutModal,
+     FeedbackWidget, RequestPaymentOverlay, and the 3 system takeover
+     overlays (Maintenance/AccountAppeal/AccountStatus — none of these
+     have an internal scrollbox to begin with).
 
 HOW TO APPLY
 ============
 Extract this zip into the ROOT of your project (the folder containing
 your app/, components/, and lib/ folders) — paths mirror your project
-structure exactly. Then:
-
-  1. Overwrite every existing file at its matching path.
-  2. Every loading.tsx, StaticPageSkeleton.tsx, SellFormSkeleton.tsx,
-     and everything under app/discover/ is brand new — just make sure
-     it lands in the exact folder shown (none of these overwrite
-     anything).
+structure exactly. Every file here overwrites an existing file; nothing
+in this zip is new.
