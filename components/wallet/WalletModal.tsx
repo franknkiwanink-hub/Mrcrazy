@@ -81,7 +81,7 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
           </button>
         </div>
 
-        <div id="walletModalBody">
+        <div id="walletModalBody" data-scroll-lock-exempt>
           {/* Balance hero */}
           <div id="walletBalanceCard">
             <img
