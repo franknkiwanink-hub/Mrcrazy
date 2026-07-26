@@ -21,9 +21,7 @@ import { useCurrency } from "@/lib/CurrencyContext";
 import { useNavigating } from "@/lib/useNavigating";
 import NavSpinnerIcon from "@/components/shared/NavSpinnerIcon";
 import ChatLoadingState from "@/components/shared/ChatLoadingState";
-import PanelHeader from "@/components/shared/PanelHeader";
 import PmHeaderBannerRotator from "@/components/profile/PmHeaderBannerRotator";
-import { useScrollLock } from "@/lib/useScrollLock";
 
 // Ports the PROFILE MODAL from Js/profile.js + Js/profile-early.js
 // (index.html lines 12099-12279 and 17189-18238) as a real routed page at
@@ -98,7 +96,6 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   const { confirm, ConfirmHost } = useConfirm();
   const { show: toast } = useSrToast();
   const { limits } = useLimits();
-  useScrollLock(true);
 
   const {
     profile,
@@ -310,7 +307,11 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   return (
     <div id="profileModal">
       <div className="pm-modal">
-        <PanelHeader onBack={() => router.push("/")} />
+        {/* Real site Header + AnnouncementBar (both fixed, 92px total)
+            already provide navigation here — AnnouncementBar swaps its
+            Upgrade/Manage-Plan button for a Back-to-home button on this
+            route (see AnnouncementBar.tsx's onBackRoute). No page-local
+            header needed. */}
         <div className="pm-modal-header pm-modal-header-banner">
           <PmHeaderBannerRotator
             banners={[
