@@ -207,12 +207,14 @@ export default function DonatePageClient({ sellerUid }: { sellerUid: string }) {
 
   return (
     <div className="dnp-page">
-      <button className="dnp-back" onClick={() => router.back()} aria-label="Go back">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M15 18l-6-6 6-6" />
-        </svg>
-        Back
-      </button>
+      <div className="dnp-back-bar">
+        <button className="dnp-back" onClick={() => router.back()} aria-label="Go back">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+          Back
+        </button>
+      </div>
 
       <div className="dnp-hero">
         <div className="dnp-hero-av">
