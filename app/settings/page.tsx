@@ -7,6 +7,7 @@ import PanelHeader from "@/components/shared/PanelHeader";
 import SettingsSidebar, { type SettingsPanelId } from "@/components/settings/SettingsSidebar";
 import { useSettingsState } from "@/lib/useSettingsState";
 import { useAuth } from "@/lib/AuthContext";
+import { useScrollLock } from "@/lib/useScrollLock";
 import SignInRequired from "@/components/auth/SignInRequired";
 import AccountPanel from "@/components/settings/panels/AccountPanel";
 import SecurityPanel from "@/components/settings/panels/SecurityPanel";
@@ -87,26 +88,24 @@ function SettingsPageInner() {
   // of the fixed sidebar+panel layout this lock exists for, and locking
   // document scroll under a plain centered sign-in message would trap
   // them on a page they can't scroll away from for no reason.
+  useScrollLock(!!user);
+
   useEffect(() => {
     if (!user) return;
     const html = document.documentElement;
-    const { body } = document;
     const prevHtmlOverflow = html.style.overflow;
     const prevHtmlHeight = html.style.height;
-    const prevBodyOverflow = body.style.overflow;
     const prevOverscroll = (html.style as any).overscrollBehavior;
     const prevTouchAction = (html.style as any).touchAction;
 
     html.style.overflow = "hidden";
     html.style.height = "100%";
-    body.style.overflow = "hidden";
     (html.style as any).overscrollBehavior = "none";
     (html.style as any).touchAction = "none";
 
     return () => {
       html.style.overflow = prevHtmlOverflow;
       html.style.height = prevHtmlHeight;
-      body.style.overflow = prevBodyOverflow;
       (html.style as any).overscrollBehavior = prevOverscroll;
       (html.style as any).touchAction = prevTouchAction;
     };
