@@ -252,24 +252,8 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
     return () => clearInterval(id);
   }, [deleteAfterCancel, chatRoomId, chat.room, router]);
 
-  // Back/Exit should return the user to wherever they actually came from
-  // (the "chats" tab, the "deals" tab, a listing page, a notification,
-  // etc.) — previously this always hardcoded /messages?tab=deals, so
-  // opening a deal chat from anywhere else and tapping Back silently
-  // dropped the user onto the Deals tab instead of retracing their own
-  // steps, which reads as broken/disorienting navigation. router.back()
-  // is the correct primitive here since this panel is a real routed page
-  // (pushed via router.push, not a modal) — same convention already used
-  // elsewhere in this app (see MyProfileHub's PanelHeader onBack). Falls
-  // back to /messages?tab=deals only when there's no in-app history to
-  // go back to (e.g. the chat was opened via a deep link / new tab),
-  // rather than assuming history always exists.
   function closeChat() {
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      router.back();
-    } else {
-      router.push("/messages?tab=deals");
-    }
+    router.push("/messages?tab=deals");
   }
 
   async function handleSend() {
