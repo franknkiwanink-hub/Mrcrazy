@@ -21,6 +21,7 @@ import { useCurrency } from "@/lib/CurrencyContext";
 import { useNavigating } from "@/lib/useNavigating";
 import NavSpinnerIcon from "@/components/shared/NavSpinnerIcon";
 import PanelHeader from "@/components/shared/PanelHeader";
+import PmHeaderBannerRotator from "@/components/profile/PmHeaderBannerRotator";
 
 // Ports the PROFILE MODAL from Js/profile.js + Js/profile-early.js
 // (index.html lines 12099-12279 and 17189-18238) as a real routed page at
@@ -307,14 +308,31 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
     <div id="profileModal">
       <div className="pm-modal">
         <PanelHeader onBack={() => router.back()} />
-        <div className="pm-modal-header">
-          <div className="pm-left-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" strokeLinecap="round" strokeLinejoin="round" />
-              <circle cx="12" cy="7" r="4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>My Profile</span>
-          </div>
+        <div className="pm-modal-header pm-modal-header-banner">
+          <PmHeaderBannerRotator
+            banners={[
+              {
+                src: "https://cdn.phototourl.com/member/2026-07-26-c3ef1108-74b7-4ac5-a41e-ec7b30052186.jpg",
+                alt: "Sell digital products, earn big",
+                onClick: () => addListingNav.navigate("/sell"),
+              },
+              {
+                src: "https://cdn.phototourl.com/member/2026-07-26-4d5c8480-eb36-4709-89e7-5e6497b7acca.jpg",
+                alt: "Upgrade to Starter, lower fees, more listings",
+                onClick: () => openPlansModal("starter"),
+              },
+              {
+                src: "https://cdn.phototourl.com/member/2026-07-26-7e7918a4-6bf7-490e-8021-32f4ba35a4ef.jpg",
+                alt: "Upgrade to Starter, only $10 per month",
+                onClick: () => openPlansModal("starter"),
+              },
+              {
+                src: "https://cdn.phototourl.com/member/2026-07-26-5d23c5f3-8044-4e2b-ac78-859dbcf49813.jpg",
+                alt: "Start selling today",
+                onClick: () => addListingNav.navigate("/sell"),
+              },
+            ]}
+          />
         </div>
 
         <div className="pm-modal-content">
