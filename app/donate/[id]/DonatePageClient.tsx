@@ -31,6 +31,53 @@ interface DonationsSummary {
 
 const donateCache = new Map<string, DonationsSummary>();
 
+// Matches the real .dnp-page layout (hero avatar/title, 2-stat row,
+// form+side-panel grid) using the shared .skel-block/.skel-text shimmer
+// utilities from skeletons.css — same pattern as SellerProfileSkeleton
+// and CheckoutRouteSkeleton. Exported so app/donate/[id]/loading.tsx can
+// render it during server-side navigation, instead of falling back to
+// the generic marketplace-grid-shaped app/loading.tsx, which doesn't
+// match this page's layout at all.
+export function DonatePageSkeleton() {
+  return (
+    <div className="dnp-page">
+      <div className="dnp-hero">
+        <div className="skel-block" style={{ width: 76, height: 76, borderRadius: "50%", margin: "0 auto 1rem" }} />
+        <div className="skel-block" style={{ width: 34, height: 34, borderRadius: 10, margin: "-1.6rem auto 0.9rem" }} />
+        <div className="skel-block skel-text lg" style={{ width: 220, height: 24, margin: "0 auto 0.6rem" }} />
+        <div className="skel-block skel-text" style={{ width: 260, margin: "0 auto" }} />
+      </div>
+
+      <div className="dnp-stats-row">
+        <div className="dnp-stat-card">
+          <div className="skel-block skel-text lg" style={{ width: 70, height: 24, margin: "0 auto 8px" }} />
+          <div className="skel-block skel-text" style={{ width: 80, height: 10, margin: "0 auto" }} />
+        </div>
+        <div className="dnp-stat-card">
+          <div className="skel-block skel-text lg" style={{ width: 40, height: 24, margin: "0 auto 8px" }} />
+          <div className="skel-block skel-text" style={{ width: 70, height: 10, margin: "0 auto" }} />
+        </div>
+      </div>
+
+      <div className="dnp-main-grid">
+        <div className="dnp-form-panel">
+          <div className="skel-block skel-text" style={{ width: "50%", marginBottom: 10 }} />
+          <div className="skel-block" style={{ width: "100%", height: 46, borderRadius: 12, marginBottom: 14 }} />
+          <div className="skel-block skel-text" style={{ width: "40%", marginBottom: 10 }} />
+          <div className="skel-block" style={{ width: "100%", height: 42, borderRadius: 12, marginBottom: 18 }} />
+          <div className="skel-block" style={{ width: "100%", height: 46, borderRadius: 50 }} />
+        </div>
+        <div className="dnp-side-panel">
+          <div className="skel-block skel-text" style={{ width: "70%", marginBottom: 14 }} />
+          <div className="skel-block skel-text" style={{ width: "100%", marginBottom: 8 }} />
+          <div className="skel-block skel-text" style={{ width: "100%", marginBottom: 8 }} />
+          <div className="skel-block skel-text" style={{ width: "80%" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DonationRowView({ don }: { don: DonationRow }) {
   const { formatBalance } = useCurrency();
   const name = don.donorName || "Anonymous";
@@ -199,6 +246,10 @@ export default function DonatePageClient({ sellerUid }: { sellerUid: string }) {
         <div className="dnp-notfound">Seller not found.</div>
       </div>
     );
+  }
+
+  if (!seller) {
+    return <DonatePageSkeleton />;
   }
 
   const recent = summary?.recent || [];
