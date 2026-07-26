@@ -432,9 +432,9 @@
 
 #srf-modal-icon.theme-info    svg { stroke: #60a5fa; }
 
-#srf-modal-icon.theme-report  { background: rgba(251,146,60,0.12); }
+#srf-modal-icon.theme-report  { background: rgba(163,230,53,0.12); }
 
-#srf-modal-icon.theme-report  svg { stroke: #fb923c; }
+#srf-modal-icon.theme-report  svg { stroke: #a3e635; }
 
 #srf-modal-icon.theme-input   { background: rgba(139,92,246,0.12); }
 
@@ -504,9 +504,9 @@
 
 .srf-modal-btn.confirm-info:hover    { background: #2563eb; }
 
-.srf-modal-btn.confirm-report  { background: #f97316; color: #fff; }
+.srf-modal-btn.confirm-report  { background: #a3e635; color: #0a0a0a; }
 
-.srf-modal-btn.confirm-report:hover  { background: #ea6c0a; }
+.srf-modal-btn.confirm-report:hover  { filter: brightness(1.08); }
 
 .srf-modal-btn.confirm-input   { background: #8b5cf6; color: #fff; }
 
