@@ -6,8 +6,9 @@ import DonatePageClient from "./DonatePageClient";
 // Same treatment as /onboarding, /upgrade — own explicit metadata so this
 // route doesn't inherit the root layout's site-wide title/description.
 // noindex: this is a signed-in-only action page with no SEO value.
-export function generateMetadata({ params }: { params: { id: string } }): Metadata {
-  const url = `${getPublicBaseUrl()}/donate/${params.id}`;
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params;
+  const url = `${getPublicBaseUrl()}/donate/${id}`;
   return {
     title: "Support a Seller — Siterifty",
     description: "Send a donation directly to a Siterifty seller's wallet.",
@@ -16,10 +17,11 @@ export function generateMetadata({ params }: { params: { id: string } }): Metada
   };
 }
 
-export default function DonatePage({ params }: { params: { id: string } }) {
+export default async function DonatePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   return (
     <Suspense fallback={null}>
-      <DonatePageClient sellerUid={params.id} />
+      <DonatePageClient sellerUid={id} />
     </Suspense>
   );
 }
