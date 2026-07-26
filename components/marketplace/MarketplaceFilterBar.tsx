@@ -15,11 +15,12 @@
 // this replaced.
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 import type { Listing, ListingType } from "@/lib/listings";
 import { FALLBACK_PRICE_CAP, type ActiveTag, type TemplateFilter } from "@/lib/useMarketplaceFilters";
 import { useLimits } from "@/lib/useLimits";
 import MarketplaceSearchBar from "@/components/marketplace/MarketplaceSearchBar";
-import DiscoverPanel, { DiscoverButton } from "@/components/marketplace/DiscoverPanel";
+import { DiscoverButton } from "@/components/marketplace/DiscoverPanel";
 import { useScrollLock } from "@/lib/useScrollLock";
 
 const TYPE_OPTIONS: { value: ListingType | "all"; label: string }[] = [
@@ -67,7 +68,7 @@ export default function MarketplaceFilterBar({
   onExitTakeover?: () => void;
 }) {
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const [discoverOpen, setDiscoverOpen] = useState(false);
+  const router = useRouter();
   const { limits } = useLimits();
   const PRICE_CAP = limits.marketplace.priceCap ?? FALLBACK_PRICE_CAP;
   const [sliderMin, setSliderMin] = useState(priceMin);
@@ -171,14 +172,8 @@ export default function MarketplaceFilterBar({
             autoOpen={autoOpenSearch}
             onExitTakeover={onExitTakeover}
           />
-          <DiscoverButton onClick={() => setDiscoverOpen(true)} />
+          <DiscoverButton onClick={() => router.push("/discover")} />
         </div>
-        <DiscoverPanel
-          onOpen={onOpenListing}
-          onOpenSeller={onOpenSeller}
-          open={discoverOpen}
-          onOpenChange={setDiscoverOpen}
-        />
         <div id="mpChipsRow">
         {TYPE_OPTIONS.map((opt) => (
           <button
