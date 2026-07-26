@@ -5,6 +5,7 @@ import { doc, setDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import ThemeModal from "@/components/theme/ThemeModal";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 export interface SiteTheme {
   id: string;
@@ -87,6 +88,7 @@ export function useThemeModal() {
 export function ThemeModalProvider({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
   const [open, setOpen] = useState(false);
+  useScrollLock(open);
 
   // Restore a previously chosen theme on page load — ports the
   // `_restoreTheme` IIFE in auth-modal.js. localStorage wins on first
