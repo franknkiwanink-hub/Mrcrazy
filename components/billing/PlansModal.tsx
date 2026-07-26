@@ -294,7 +294,7 @@ export default function PlansModal({
           ))}
         </div>
 
-        <div className="srf-plans-body" id="srfPlansBody">
+        <div className="srf-plans-body" id="srfPlansBody" data-scroll-lock-exempt>
           <div className="srf-plan-name">
             {p.name}
             {activePlan === "growth" ? <span className="srf-plan-chip">popular</span> : null}
