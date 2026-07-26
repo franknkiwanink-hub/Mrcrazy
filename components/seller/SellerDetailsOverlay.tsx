@@ -5,6 +5,7 @@ import SellerBadges from "./SellerBadges";
 import { fetchSellerDealStats, type FullSeller, type SellerDealStats } from "@/lib/useSeller";
 import { useAuth } from "@/lib/AuthContext";
 import { useCurrency } from "@/lib/CurrencyContext";
+import { useScrollLock } from "@/lib/useScrollLock";
 
 const SOCIAL_DEFS = [
   {
@@ -58,6 +59,7 @@ export default function SellerDetailsOverlay({
   const { user } = useAuth();
   const isOwn = user?.uid === seller.uid;
   const [stats, setStats] = useState<SellerDealStats | null>(cachedStats);
+  useScrollLock(true);
 
   useEffect(() => {
     if (cachedStats) {
