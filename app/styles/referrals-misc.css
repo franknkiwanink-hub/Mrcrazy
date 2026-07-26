@@ -917,9 +917,20 @@
    ═══════════════════════════════════════ */
 .upg-page {
   max-width: 980px; margin: 0 auto;
-  padding: 110px 24px 80px;
+  padding: 0 24px 80px;
   font-family: 'Inter', sans-serif;
   color: #eee;
+}
+
+/* Sticky sub-header bar docked under the fixed header (52px) +
+   announcement bar (40px) = 92px stack — same treatment as the donate
+   page's .dnp-back-bar, instead of a pill floating loose in padding. */
+.upg-back-bar {
+  position: sticky; top: 92px; z-index: 20;
+  margin: 0 -24px 1.6rem; padding: 0.7rem 24px;
+  background: rgba(10,10,14,0.85);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
 .upg-back {
@@ -927,12 +938,12 @@
   background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
   color: #ccc; font-size: 0.8rem; font-weight: 600;
   padding: 0.5rem 0.9rem; border-radius: 50px; cursor: pointer;
-  font-family: inherit; margin-bottom: 2rem; transition: background 0.2s, color 0.2s;
+  font-family: inherit; transition: background 0.2s, color 0.2s;
 }
 
 .upg-back:hover { background: rgba(255,255,255,0.1); color: #fff; }
 
-.upg-hero { text-align: center; margin-bottom: 2.8rem; }
+.upg-hero { text-align: center; margin-bottom: 2.8rem; padding-top: 1.6rem; }
 
 .upg-hero-icon {
   width: 56px; height: 56px; margin: 0 auto 1rem;
@@ -947,6 +958,26 @@
 }
 
 .upg-hero-sub { font-size: 1rem; color: #999; max-width: 480px; margin: 0 auto; line-height: 1.5; }
+
+/* ── Plans / How it works tabs ── */
+.upg-tabs {
+  display: flex; gap: 0.4rem; margin-bottom: 1.8rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.upg-tab {
+  background: none; border: none; cursor: pointer; font-family: inherit;
+  font-size: 0.9rem; font-weight: 700; color: #888;
+  padding: 0.75rem 0.3rem; margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.upg-tab + .upg-tab { margin-left: 1.2rem; }
+
+.upg-tab:hover { color: #ccc; }
+
+.upg-tab.active { color: #a3e635; border-bottom-color: #a3e635; }
 
 .upg-plan-grid {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
@@ -963,7 +994,7 @@
 
 .upg-plan-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.22); }
 
-.upg-plan-card.active { background: #16161c; }
+.upg-plan-card.is-current { background: #16161c; border-color: rgba(163,230,53,0.35); }
 
 .upg-plan-chip {
   position: absolute; top: -10px; right: 16px;
@@ -971,7 +1002,19 @@
   padding: 0.2rem 0.55rem; border-radius: 20px; letter-spacing: 0.3px;
 }
 
-.upg-detail-panel .upg-plan-chip { position: static; margin-left: 0.5rem; }
+.upg-plan-current-chip {
+  position: absolute; top: -10px; left: 16px;
+  background: #222; color: #a3e635; font-size: 0.6rem; font-weight: 800;
+  padding: 0.2rem 0.55rem; border-radius: 20px; letter-spacing: 0.3px;
+  border: 1px solid rgba(163,230,53,0.35);
+}
+
+.upg-plan-cta {
+  display: flex; align-items: center; gap: 0.3rem;
+  font-size: 0.8rem; font-weight: 700; margin-top: 1.1rem;
+}
+
+.upg-modal-box .upg-plan-chip { position: static; margin-left: 0.5rem; }
 
 .upg-plan-name { font-size: 1.15rem; font-weight: 800; color: #fff; margin-bottom: 0.3rem; }
 
@@ -986,12 +1029,6 @@
 .upg-plan-pill {
   font-size: 0.68rem; font-weight: 700; padding: 0.25rem 0.6rem;
   border-radius: 20px; border: 1px solid; white-space: nowrap;
-}
-
-.upg-detail-panel {
-  display: grid; grid-template-columns: 1.4fr 1fr; gap: 2rem;
-  background: #0e0e14; border: 1px solid rgba(255,255,255,0.08); border-radius: 22px;
-  padding: 2rem; margin-bottom: 3.5rem;
 }
 
 .upg-detail-name {
@@ -1071,13 +1108,76 @@
 
 .upg-faq-a { padding: 0 1.2rem 1.1rem; color: #999; font-size: 0.85rem; line-height: 1.55; }
 
+/* ── How it works tab ── */
+.upg-how-steps { list-style: none; display: flex; flex-direction: column; gap: 0.9rem; }
+
+.upg-how-steps li {
+  display: flex; align-items: flex-start; gap: 0.8rem;
+  font-size: 0.9rem; color: #ccc; line-height: 1.5;
+}
+
+.upg-how-num {
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%;
+  background: rgba(163,230,53,0.1); border: 1px solid rgba(163,230,53,0.3); color: #a3e635;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.72rem; font-weight: 800;
+}
+
+.upg-benefits-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+}
+
+.upg-benefits-card {
+  background: #111116; border: 1px solid rgba(255,255,255,0.1); border-radius: 18px;
+  padding: 1.3rem;
+}
+
+.upg-benefits-name { font-size: 1rem; font-weight: 800; margin-bottom: 0.9rem; }
+
+/* ── Payment modal — opens on plan card tap, replaces the old inline
+   detail panel so Subscribe/PayPal buttons are visible immediately
+   without scrolling down the page. ── */
+.upg-modal-overlay {
+  position: fixed; inset: 0; z-index: 10070;
+  background: rgba(0,0,0,0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 1.2rem;
+}
+
+.upg-modal-box {
+  position: relative; width: 100%; max-width: 420px; max-height: 88vh; overflow-y: auto;
+  background: #0e0e14; border: 1px solid rgba(255,255,255,0.1); border-radius: 22px;
+  padding: 1.8rem 1.6rem 1.6rem;
+}
+
+.upg-modal-close {
+  position: absolute; top: 1rem; right: 1rem;
+  width: 30px; height: 30px; border-radius: 50%;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  color: #ccc; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+
+.upg-modal-close:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+.upg-modal-price {
+  font-size: 2rem; font-weight: 900; margin-bottom: 0.6rem;
+}
+
+.upg-modal-price small { font-size: 0.85rem; font-weight: 500; color: #999; margin-left: 0.2rem; }
+
+.upg-modal-box .upg-feature-list { margin-bottom: 1.4rem; }
+
+.upg-modal-box .upg-detail-right { display: flex; flex-direction: column; }
+
 @media (max-width: 860px) {
   .upg-plan-grid { grid-template-columns: 1fr; }
-  .upg-detail-panel { grid-template-columns: 1fr; }
+  .upg-benefits-grid { grid-template-columns: 1fr; }
+  .upg-modal-box { max-width: 92vw; }
 }
 
 @media (max-width: 560px) {
-  .upg-page { padding: 90px 16px 60px; }
+  .upg-page { padding: 0 16px 60px; }
+  .upg-back-bar { margin: 0 -16px 1.6rem; padding: 0.7rem 16px; }
   .upg-hero-title { font-size: 1.6rem; }
   .upg-compare-table th, .upg-compare-table td { padding: 0.7rem 0.6rem; font-size: 0.78rem; }
 }
