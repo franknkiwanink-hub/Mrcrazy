@@ -1155,7 +1155,12 @@
 }
 
 @media (max-width: 560px) {
-  .upg-page { padding: 90px 16px 60px; }
+  /* 92px (not 90px) matches the site-wide Header(52px)+AnnouncementBar(40px)
+     clearance every other real page uses (see e.g. app/styles/base.css's
+     .sr-blog-page, checkout.css, profile.css) — this page and .dnp-page
+     were the only two pages on 90px, a 2px shortfall under the fixed
+     chrome that showed as the hero icon crowding the header on mobile. */
+  .upg-page { padding: 92px 16px 60px; }
   .upg-hero-title { font-size: 1.6rem; }
   .upg-compare-table th, .upg-compare-table td { padding: 0.7rem 0.6rem; font-size: 0.78rem; }
 }
