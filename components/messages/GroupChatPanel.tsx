@@ -234,7 +234,18 @@ function MessageRow({
   );
 }
 
-export default function GroupChatPanel({ groupId }: { groupId: string }) {
+export default function GroupChatPanel({
+  groupId,
+  embedded = false,
+  onBack,
+}: {
+  groupId: string;
+  // See DealChatPanel's matching props for the full rationale — desktop
+  // split-view (InboxShell.tsx) mounts this as a pane next to the thread
+  // list instead of routing to /messages/group/[id].
+  embedded?: boolean;
+  onBack?: () => void;
+}) {
   const router = useRouter();
   const { user, profile } = useAuth();
   const { openAuthModal } = useAuthModal();
@@ -447,15 +458,19 @@ export default function GroupChatPanel({ groupId }: { groupId: string }) {
   }
 
   function handleClose() {
+    if (onBack) {
+      onBack();
+      return;
+    }
     router.push("/messages?tab=groups");
   }
 
   if (!group) {
     return (
-      <div style={{ marginTop: 92, padding: "40px 24px 80px", textAlign: "center", color: "#fff" }}>
+      <div style={embedded ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#fff" } : { marginTop: 92, padding: "40px 24px 80px", textAlign: "center", color: "#fff" }}>
         <h1>Group not found</h1>
         <p style={{ opacity: 0.6, marginTop: 8 }}>This group doesn&apos;t exist.</p>
-        <button onClick={() => router.push("/messages?tab=groups")} style={{ marginTop: 16, background: "none", border: "1px solid rgba(255,255,255,0.15)", color: "#fff", padding: "10px 20px", borderRadius: 100, cursor: "pointer" }}>
+        <button onClick={handleClose} style={{ marginTop: 16, background: "none", border: "1px solid rgba(255,255,255,0.15)", color: "#fff", padding: "10px 20px", borderRadius: 100, cursor: "pointer" }}>
           Back to groups
         </button>
       </div>
@@ -463,7 +478,11 @@ export default function GroupChatPanel({ groupId }: { groupId: string }) {
   }
 
   return (
-    <div id="groupChatPanel" style={{ position: "fixed", inset: 0, zIndex: 9998, background: "#06060e", display: "flex", flexDirection: "column", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+    <div
+      id={embedded ? undefined : "groupChatPanel"}
+      className={embedded ? "gcp-embedded" : undefined}
+      style={embedded ? { display: "flex", flexDirection: "column", width: "100%", height: "100%", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" } : { position: "fixed", inset: 0, zIndex: 9998, background: "#06060e", display: "flex", flexDirection: "column", fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}
+    >
       <ToastHost />
 
       <div className="gcp-header">
