@@ -9,6 +9,22 @@
 
 #dealChatPanel *, #dealChatPanel *::before, #dealChatPanel *::after { box-sizing: border-box; }
 
+/* Desktop split-view variant (see InboxShell.tsx's wide-viewport layout
+   and DealChatPanel's `embedded` prop) — same visual panel, but as a
+   plain flex-fill pane sitting next to the thread list instead of a
+   fixed, viewport-covering overlay. Reuses every .dcp-* class below
+   unchanged; only the outer wrapper's positioning differs. */
+.dcp-embedded {
+            position: relative;
+            width: 100%; height: 100%;
+            z-index: auto;
+            background: #06060e;
+            display: flex; flex-direction: column;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            }
+
+.dcp-embedded *, .dcp-embedded *::before, .dcp-embedded *::after { box-sizing: border-box; }
+
 .dcp-box {
             background: #06060e; border: none;
             border-radius: 0; width: 100%; height: 100%;
