@@ -33,6 +33,72 @@
            .ibx-box { max-width: 100%; border-left: none; border-right: none; }
          }
 
+/* ── Desktop split-view ──
+     Was hard-capped at max-width:640px with no larger breakpoint, so on
+     a real desktop viewport the inbox sat as a narrow centered column —
+     same "looks like a phone" problem as /sell and /myprofile, and
+     unlike /settings (which already shows its panel list + active panel
+     side by side on desktop), tapping a thread here fully navigated away
+     to its own route instead of opening next to the list.
+     .ibx-list-pane wraps the existing header/tabs/body stack unchanged;
+     .ibx-detail-pane is new and only rendered (by InboxShell.tsx) at
+     wide viewports, holding an embedded DealChatPanel/GroupChatPanel —
+     the same components mobile still routes to full-screen, just mounted
+     inline here instead. Below 1000px nothing here applies: .ibx-box-split
+     is only added by InboxShell in JS when useIsDesktop() is true, so at
+     narrow widths this file's original single-column behavior above is
+     what actually renders. */
+.ibx-box-split {
+           max-width: 1160px;
+           flex-direction: row;
+         }
+
+.ibx-list-pane {
+           width: 380px;
+           min-width: 380px;
+           display: flex;
+           flex-direction: column;
+           overflow: hidden;
+           border-right: 1px solid #111;
+         }
+
+.ibx-detail-pane {
+           flex: 1;
+           min-width: 0;
+           display: flex;
+           flex-direction: column;
+           overflow: hidden;
+           background: #06060e;
+         }
+
+.ibx-detail-empty {
+           flex: 1;
+           display: flex;
+           flex-direction: column;
+           align-items: center;
+           justify-content: center;
+           gap: 0.6rem;
+           text-align: center;
+           padding: 2rem;
+         }
+
+.ibx-detail-empty svg { width: 44px; height: 44px; }
+
+.ibx-detail-empty p { font-size: 0.95rem; font-weight: 700; color: rgba(255,255,255,0.55); margin: 0; }
+
+.ibx-detail-empty span { font-size: 0.8rem; color: rgba(255,255,255,0.35); max-width: 240px; line-height: 1.5; }
+
+/* Selected-row highlight — only meaningful in split-view (selectedId is
+   always null on mobile, see InboxShell.tsx), so this is harmless dead
+   weight at narrow widths rather than something that needs its own media
+   query. */
+.ibx-row.ibx-row-selected,
+.ibx-group-row.ibx-row-selected,
+div.ibx-row-selected > .ibx-deal-row {
+           background: rgba(163,230,53,0.06);
+           box-shadow: inset 3px 0 0 #a3e635;
+         }
+
 /* Header */
 .ibx-header {
            display: flex;
