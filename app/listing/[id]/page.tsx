@@ -128,26 +128,32 @@ export default async function ListingDetailPage({
           in a Server Component. */}
       <ListingViewBeacon listing={listing} />
 
+      {/* Was an inline maxWidth:760/margin:auto single column repeated
+          per type — widened on desktop but never split into columns
+          (see listing-body.css's ".lst-body-wrap" comment for the
+          ≥1024px two-column layout this class now enables). Swapped to
+          a shared class, one edit point for all 4 listing types instead
+          of 4 duplicated inline styles. */}
       {type === "app" && (
-        <div style={{ marginTop: 92, maxWidth: 760, margin: "92px auto 0", padding: "0 0 80px" }}>
+        <div className="lst-body-wrap" style={{ marginTop: 92, padding: "0 0 80px" }}>
           <AppListingBody listing={listing} />
         </div>
       )}
 
       {type === "website" && (
-        <div style={{ marginTop: 92, maxWidth: 760, margin: "92px auto 0", padding: "0 0 80px" }}>
+        <div className="lst-body-wrap" style={{ marginTop: 92, padding: "0 0 80px" }}>
           <WebsiteListingBody listing={listing} />
         </div>
       )}
 
       {type === "game" && (
-        <div style={{ marginTop: 92, maxWidth: 760, margin: "92px auto 0", padding: "0 0 80px" }}>
+        <div className="lst-body-wrap" style={{ marginTop: 92, padding: "0 0 80px" }}>
           <GameListingBody listing={listing} />
         </div>
       )}
 
       {type === "3d" && (
-        <div style={{ marginTop: 92, maxWidth: 760, margin: "92px auto 0", padding: "0 0 80px" }}>
+        <div className="lst-body-wrap" style={{ marginTop: 92, padding: "0 0 80px" }}>
           <AssetListingBody listing={listing} />
         </div>
       )}
