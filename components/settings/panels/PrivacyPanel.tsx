@@ -92,7 +92,7 @@ export default function PrivacyPanel({
           onChange={(e) => setProfileVisibility(e.target.value)}
         >
           <option value="public">Public — Everyone can see</option>
-          <option value="members">Members Only</option>
+          <option value="members">Followers Only</option>
           <option value="private" disabled={!canGoPrivate}>
             Private — Only you{canGoPrivate ? "" : " (paid plans only)"}
           </option>
