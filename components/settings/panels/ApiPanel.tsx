@@ -264,7 +264,7 @@ export default function ApiPanel({
                 Capabilities
               </div>
               <div style={{ fontSize: "0.7rem", color: "#777", lineHeight: 1.6 }}>
-                Auto-accept deals · Group management · Delete/pin messages · Automate workflows
+                Auto-reply to buyers · Auto-accept/reject deals · Smart negotiation · Auto-relist &amp; price drops
               </div>
             </div>
             <button
@@ -289,7 +289,7 @@ export default function ApiPanel({
           onChange={(e) => setKeyLabel(e.target.value)}
           placeholder="e.g. Production Automation"
         />
-        <span className="hint">Keys can auto-accept deals, manage groups, and delete/pin messages.</span>
+        <span className="hint">Keys power your Agent — letting it auto-reply, auto-accept/reject offers, negotiate, and manage listings on your behalf.</span>
       </div>
       <button className="save-btn" onClick={handleGenerate} disabled={generating}>
         <PlusIcon />
@@ -302,8 +302,8 @@ export default function ApiPanel({
         Add External API Key
       </div>
       <p style={{ fontSize: "0.82rem", color: "#777", marginBottom: "0.75rem" }}>
-        Have a key from another service? Add it here and we&apos;ll validate it. Active keys unlock admin commands
-        like pinning messages and moderating groups.
+        Have a key from another service? Add it here and we&apos;ll validate it. Active keys unlock Agent automation
+        commands like auto-accepting deals and negotiating on your behalf.
       </p>
       {externalKeys.map((k, i) => (
         <div key={i} className="kv-row" style={{ background: "rgba(96,165,250,0.04)", border: "1px solid rgba(96,165,250,0.15)", borderRadius: "0.8rem", padding: "0.8rem 1rem", marginBottom: "0.5rem" }}>
@@ -336,7 +336,7 @@ export default function ApiPanel({
         <PlusIcon />
         {validating ? "Checking…" : "Add & Validate"}
       </button>
-      <span className="hint">If the key is active, you&apos;ll get admin commands: delete messages, pin messages, group management.</span>
+      <span className="hint">If the key is active, you&apos;ll get Agent automation commands: auto-reply, auto-accept/reject offers, negotiation, and listing management.</span>
 
       <ConfirmHost />
     </>
