@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { useScrollLock } from "@/lib/useScrollLock";
+import SiteriftyLoader from "@/components/layout/SiteriftyLoader";
 
 // Ports the "BOOT OVERLAY — hidden once, after the first auth resolution
 // + a 1.5s cooldown" block from firebase-init.js, plus the appBootOverlay
@@ -33,11 +34,17 @@ import { useScrollLock } from "@/lib/useScrollLock";
 // since nothing else currently needs to know when the boot splash has
 // fully faded.
 //
-// NOTE: this was redesigned to drop the mascot glyph image and the
-// falling-glitter particle field entirely — both read as unpolished/
-// "sketchy" for a marketplace handling real money, and risked making
-// first-time visitors distrust the product. The mark is now a plain
-// monogram + wordmark on a calm, static background.
+// CONTENT: previously a bespoke monogram/wordmark + spinning progress
+// ring, redesigned once already to drop an even earlier mascot glyph +
+// glitter particle field. Swapped again here for the same skeleton
+// loader (SiteriftyLoader — nav bar / banner / grid shimmer blocks)
+// already used for route-level navigation (app/loading.tsx) and the
+// marketplace feed's own first-page load (MarketplaceGrid.tsx). Same
+// loading treatment everywhere in the app now, rather than a one-off
+// splash screen that only ever appeared here. #appBootOverlay itself
+// (this file's outer shell — fixed/inset:0, z-index:999999, the fade
+// transition, the auth-timing/safety-net logic above) is unchanged;
+// only what renders inside it changed.
 const BOOT_HOLD_MS = 1500;
 const BOOT_FADE_MS = 550;
 const BOOT_SAFETY_NET_MS = 8000;
@@ -52,6 +59,9 @@ export default function BootOverlay() {
   // still in the DOM. `hidden` only starts the fade-out transition —
   // the overlay is still visually on screen during that transition, so
   // the lock stays on until `removed` (fully unmounted), not `hidden`.
+  // SiteriftyLoader below also calls useScrollLock(true) itself — both
+  // calls share the same reference-counted lock (lib/useScrollLock.ts),
+  // so having it locked from two places at once is safe by design.
   useScrollLock(!removed);
 
   // `overflow:hidden` on body stops wheel/keyboard scrolling, but iOS
@@ -100,34 +110,7 @@ export default function BootOverlay() {
 
   return (
     <div id="appBootOverlay" className={hidden ? "boot-hidden" : undefined}>
-      <div className="boot-content">
-        <div className="boot-mark-wrap">
-          <div className="boot-mark-glyph">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <path
-                d="M17 8.5c0-2.2-2-3.5-5-3.5-3.3 0-5 1.4-5 3.4 0 2.1 1.9 2.7 4.6 3.2 3.4.6 6 1.4 6 4.4 0 2.4-2.1 4-5.6 4-3.2 0-5.5-1.3-6-3.7"
-                stroke="#07100a"
-                strokeWidth="2.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </div>
-          <div className="boot-mark">
-            Siterifty<span>.</span>
-          </div>
-          <div className="boot-tagline">Buy, sell &amp; build digital products</div>
-        </div>
-        <div className="boot-status-row">
-          <div className="boot-ring-wrap">
-            <svg viewBox="0 0 56 56">
-              <circle className="boot-ring-track" cx="28" cy="28" r="24" />
-              <circle className="boot-ring-fill" cx="28" cy="28" r="24" />
-            </svg>
-          </div>
-          <div className="boot-status-text">Loading your account</div>
-        </div>
-      </div>
+      <SiteriftyLoader />
     </div>
   );
 }
