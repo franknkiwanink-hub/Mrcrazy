@@ -412,6 +412,26 @@
 
 .lm-item-delete:hover { background:#1a0a10; border-color:#5a2a38; color:#fca5a5; }
 
+/* ─── /sell TYPE PICKER GRID ───
+            Was a single flex column (1-per-row) regardless of viewport,
+            so it looked identical — and wasted all the extra width — on
+            a wide desktop screen. Now a responsive grid: still 1 column
+            on phones, opens up to 2/3 columns as space allows. */
+.sell-type-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+            text-align: left;
+         }
+
+@media (min-width: 640px) {
+            .sell-type-grid { grid-template-columns: repeat(2, 1fr); }
+         }
+
+@media (min-width: 980px) {
+            .sell-type-grid { grid-template-columns: repeat(3, 1fr); }
+         }
+
 /* ─── RESPONSIVE ─── */
 @media (max-width: 700px) {
             .lm-app { padding: 0 16px 22px; }
