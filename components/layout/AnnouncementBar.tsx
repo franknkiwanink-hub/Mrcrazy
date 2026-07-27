@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
+import NotificationBellButton from "@/components/notifications/NotificationBellButton";
 
 // Ports the announcement-bar half of announcement-settings.js (index.html
 // lines 3-28): plan badge label/class + the Upgrade (free plan) or
@@ -62,6 +63,7 @@ export default function AnnouncementBar() {
   return (
     <div id="announcement-bar" data-plan={plan}>
       <div className="ab-left">
+        <NotificationBellButton uid={user?.uid} />
         <span className="ab-username" id="ab-user">
           {displayName}
         </span>
