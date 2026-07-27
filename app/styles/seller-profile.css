@@ -32,6 +32,45 @@
                  #spModalClose { position: absolute; top: 1.25rem; right: 1.25rem; }
                }
 
+/* ── Wide desktop (≥1024px): #spModalInner is always
+                  flex-direction:column, so cover → avatar/name/bio/actions
+                  → listings grid render as one long stacked column that
+                  just got wider at the 900px tier above — same layout as
+                  mobile, only bigger (see screenshot). This turns
+                  #spModalInner into a grid once there's room: the cover
+                  banner stays full-width across the top, then
+                  #spModalMain (identity, bio, stats, actions — rendered
+                  by SellerProfileHeader) becomes a pinned left column
+                  and #spModalListingsSection (SellerListingsGrid)
+                  becomes the scrolling right column. Below 1024px,
+                  #spModalInner is untouched flex-column, same as always. ── */
+@media (min-width: 1024px) {
+                 #spModalInner {
+                   max-width: 1040px;
+                   display: grid;
+                   grid-template-columns: 320px minmax(0, 1fr);
+                   grid-template-rows: auto 1fr;
+                   align-items: start;
+                 }
+                 #spModalCover {
+                   grid-column: 1 / -1;
+                   grid-row: 1;
+                 }
+                 #spModalMain {
+                   grid-column: 1;
+                   grid-row: 2;
+                   position: sticky;
+                   top: 0;
+                 }
+                 #spModalListingsSection {
+                   grid-column: 2;
+                   grid-row: 2;
+                   padding-left: 28px;
+                   border-left: 1px solid rgba(255,255,255,.08);
+                 }
+                 #spModalListingsGrid { grid-template-columns: repeat(3, 1fr); }
+               }
+
 #spModalClose {
                position: fixed; top: 1.25rem; right: 1.25rem; z-index: 10;
                width: 38px; height: 38px; border-radius: 50%;
