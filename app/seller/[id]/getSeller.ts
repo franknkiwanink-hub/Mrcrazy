@@ -161,7 +161,7 @@ export async function getSellerSeoProfile(segment: string): Promise<SellerSeoPro
 //
 // PRIVACY: same profileVisibility/showBio/showEmail/showSocial gates as
 // generateMetadata and the client page's own visibility checks. A
-// private or members-only profile must never have its real bio/listings/
+// private or followers-only ("members") profile must never have its real bio/listings/
 // contact fields land in server-rendered HTML for a signed-out crawler —
 // this returns a minimal, already-gated shape, not the raw doc, so
 // SellerProfileClient can render it directly without re-deriving the
