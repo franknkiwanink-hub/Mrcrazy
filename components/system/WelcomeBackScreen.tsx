@@ -255,6 +255,15 @@ export default function WelcomeBackScreen() {
             </div>
           </div>
 
+          <div className="wb-right-pane">
+          {/* Duplicate of .wb-obj-header above, shown only at ≥1024px once
+              the left pane is pinned and this becomes its own scrolling
+              column with its own heading (see welcome-back.css). */}
+          <div className="wb-right-header">
+            <div className="wb-obj-title">Today&apos;s Objectives</div>
+            <div className="wb-obj-sub">Complete tasks to earn wallet rewards</div>
+          </div>
+
           <div className="wb-obj-scroll">
             <div className="wb-obj-list" id="wbObjList">
               {objState === "loading" && (
@@ -399,6 +408,7 @@ export default function WelcomeBackScreen() {
                 <path d="M5 12h14M13 5l7 7-7 7" />
               </svg>
             </button>
+          </div>
           </div>
         </div>
       </div>
