@@ -7,6 +7,9 @@ import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import SignInRequired from "@/components/auth/SignInRequired";
 import { useAiSupportChatModal } from "@/components/support/AiSupportChatModalProvider";
 import { useCurrency } from "@/lib/CurrencyContext";
+import { useIsDesktop } from "@/lib/useIsDesktop";
+import DealChatPanel from "./DealChatPanel";
+import GroupChatPanel from "./GroupChatPanel";
 import {
   useInbox,
   relTime,
@@ -132,6 +135,7 @@ export default function InboxShell() {
   const { openAuthModal } = useAuthModal();
   const { openAiSupportChat } = useAiSupportChatModal();
   const inbox = useInbox();
+  const isDesktop = useIsDesktop();
 
   // Deep-link: /messages?tab=deals lands directly on that tab.
   const didApplyParam = useRef(false);
@@ -165,85 +169,179 @@ export default function InboxShell() {
   // a slow connection looked exactly like a tap that missed or a site
   // that's frozen. This flags the specific row that was tapped (not the
   // whole list) so the rest of the inbox stays interactive-looking while
-  // that one row shows it registered.
+  // that one row shows it registered. Still used on mobile (route
+  // navigation has a real loading gap); on desktop the embedded panel
+  // mounts immediately so this stays null there.
   const [openingRowId, setOpeningRowId] = useState<string | null>(null);
 
+  // ── Desktop split-view selection ──
+  // On a wide viewport, rows no longer navigate to /messages/deal/[id]
+  // or /messages/group/[id] — they select a thread that renders as an
+  // embedded pane on the right, list staying visible on the left, same
+  // pattern as /settings. Mobile is untouched: rows still push a real
+  // route and DealChatPanel/GroupChatPanel still render full-screen
+  // exactly as before.
+  const [selected, setSelected] = useState<{ kind: "deal" | "group"; id: string } | null>(null);
+
   function openChatRow(t: ChatThread) {
-    if (openingRowId) return;
     if (t.isDealChat) {
+      if (isDesktop) {
+        setSelected({ kind: "deal", id: t.chatRoomId });
+        return;
+      }
+      if (openingRowId) return;
       setOpeningRowId(t.chatRoomId);
       router.push(`/messages/deal/${t.chatRoomId}?from=chats`);
     } else if (t.partnerUid) {
       // 1:1 DM chat panel isn't ported yet (belongs to the same later pass
       // as the deal-chat panel) — route to the deal-chat page's shell
       // won't apply here, so fall back to the partner's profile for now.
+      // This is a genuine navigation away from /messages either way, so
+      // it stays a real route push on desktop too — there's no panel to
+      // embed it as.
+      if (openingRowId) return;
       setOpeningRowId(t.chatRoomId);
       router.push(`/seller/${t.partnerUid}`);
     }
   }
 
   function openDealRow(chatRoomId: string) {
+    if (isDesktop) {
+      setSelected({ kind: "deal", id: chatRoomId });
+      return;
+    }
     if (openingRowId) return;
     setOpeningRowId(chatRoomId);
     router.push(`/messages/deal/${chatRoomId}?from=deals`);
   }
 
   function openGroupRow(id: string) {
+    if (isDesktop) {
+      setSelected({ kind: "group", id });
+      return;
+    }
     if (openingRowId) return;
     setOpeningRowId(id);
     router.push(`/messages/group/${id}`);
   }
 
+  // Auto-select a sensible first thread on desktop once each tab's data
+  // has loaded, so the right pane is never just an empty "pick something"
+  // placeholder on first load — matches the request that this behave like
+  // Settings, where a panel is always showing. Only fires when nothing is
+  // already selected and doesn't fight the user's own clicks: switching
+  // tabs re-evaluates once that tab's rows exist, but re-selecting the
+  // same thread on every data refresh is avoided by only running when
+  // `selected` is null.
+  useEffect(() => {
+    if (!isDesktop || !user || selected) return;
+    if (inbox.tab === "deals" && !inbox.dealsLoading) {
+      const firstAccepted = inbox.deals.find((d) => d.status === "accepted" && d.chatRoomId);
+      if (firstAccepted?.chatRoomId) setSelected({ kind: "deal", id: firstAccepted.chatRoomId });
+    } else if (inbox.tab === "chats" && !inbox.chatsLoading) {
+      const firstDealChat = inbox.chats.find((t) => t.isDealChat);
+      if (firstDealChat) setSelected({ kind: "deal", id: firstDealChat.chatRoomId });
+    } else if (inbox.tab === "groups") {
+      setSelected({ kind: "group", id: IBX_GROUPS[0].id });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDesktop, user, selected, inbox.tab, inbox.dealsLoading, inbox.chatsLoading, inbox.deals, inbox.chats]);
+
+  // Switching tabs clears the current selection so e.g. leaving Groups
+  // for Deals doesn't leave a group panel showing next to the deals list
+  // — the auto-select effect above then picks a sensible default for the
+  // newly active tab.
+  useEffect(() => {
+    setSelected(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inbox.tab]);
+
   const totalUnread = inbox.chatsUnread + inbox.dealsUnread;
+  const showSplitPane = isDesktop && !!user;
 
   return (
     <div style={{ marginTop: 92, minHeight: "calc(100dvh - 92px)", background: "#080808", display: "flex", justifyContent: "center" }}>
-      <div className="ibx-box" style={{ height: "calc(100dvh - 92px)" }}>
-        <div className="ibx-header">
-          <div className="ibx-header-left">
-            <button className="ibx-back-btn" onClick={() => router.push("/myprofile")} aria-label="Back">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M19 12H5M12 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <span className="ibx-title">Messages &amp; Deals</span>
+      <div className={showSplitPane ? "ibx-box ibx-box-split" : "ibx-box"} style={{ height: "calc(100dvh - 92px)" }}>
+        <div className="ibx-list-pane">
+          <div className="ibx-header">
+            <div className="ibx-header-left">
+              <button className="ibx-back-btn" onClick={() => router.push("/myprofile")} aria-label="Back">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <span className="ibx-title">Messages &amp; Deals</span>
+            </div>
+            <span className="ibx-unread-pill">{totalUnread > 0 ? (totalUnread > 99 ? "99+" : totalUnread) : ""}</span>
           </div>
-          <span className="ibx-unread-pill">{totalUnread > 0 ? (totalUnread > 99 ? "99+" : totalUnread) : ""}</span>
+
+          <div className="ibx-tabs">
+            <button className={`ibx-tab${inbox.tab === "chats" ? " active" : ""}`} onClick={() => switchTab("chats")}>
+              Chats
+              {inbox.chatsUnread > 0 ? (
+                <span className="ibx-tab-badge">{inbox.chatsUnread > 99 ? "99+" : inbox.chatsUnread}</span>
+              ) : null}
+            </button>
+            <button className={`ibx-tab${inbox.tab === "deals" ? " active" : ""}`} onClick={() => switchTab("deals")}>
+              Deals
+              {inbox.dealsUnread > 0 ? (
+                <span className="ibx-tab-badge">{inbox.dealsUnread > 99 ? "99+" : inbox.dealsUnread}</span>
+              ) : null}
+            </button>
+            <button className={`ibx-tab${inbox.tab === "groups" ? " active" : ""}`} onClick={() => switchTab("groups")}>
+              Groups
+            </button>
+          </div>
+
+          <div className="ibx-body" onScroll={handleScroll}>
+            {!user ? (
+              <SignInRequired
+                fullScreen={false}
+                title="Sign in to see your messages"
+                description="Your chats, deal conversations, and group threads are only visible once you're signed in."
+              />
+            ) : inbox.tab === "chats" ? (
+              <ChatsTab
+                inbox={inbox}
+                onOpenChat={openChatRow}
+                onOpenAiSupport={openAiSupportChat}
+                openingRowId={openingRowId}
+                selectedId={showSplitPane ? selected?.id ?? null : null}
+              />
+            ) : inbox.tab === "deals" ? (
+              <DealsTab
+                inbox={inbox}
+                onOpenDealChat={openDealRow}
+                openingRowId={openingRowId}
+                selectedId={showSplitPane ? selected?.id ?? null : null}
+              />
+            ) : (
+              <GroupsTab
+                onOpenGroup={openGroupRow}
+                openingRowId={openingRowId}
+                selectedId={showSplitPane ? selected?.id ?? null : null}
+              />
+            )}
+          </div>
         </div>
 
-        <div className="ibx-tabs">
-          <button className={`ibx-tab${inbox.tab === "chats" ? " active" : ""}`} onClick={() => switchTab("chats")}>
-            Chats
-            {inbox.chatsUnread > 0 ? (
-              <span className="ibx-tab-badge">{inbox.chatsUnread > 99 ? "99+" : inbox.chatsUnread}</span>
-            ) : null}
-          </button>
-          <button className={`ibx-tab${inbox.tab === "deals" ? " active" : ""}`} onClick={() => switchTab("deals")}>
-            Deals
-            {inbox.dealsUnread > 0 ? (
-              <span className="ibx-tab-badge">{inbox.dealsUnread > 99 ? "99+" : inbox.dealsUnread}</span>
-            ) : null}
-          </button>
-          <button className={`ibx-tab${inbox.tab === "groups" ? " active" : ""}`} onClick={() => switchTab("groups")}>
-            Groups
-          </button>
-        </div>
-
-        <div className="ibx-body" onScroll={handleScroll}>
-          {!user ? (
-            <SignInRequired
-              fullScreen={false}
-              title="Sign in to see your messages"
-              description="Your chats, deal conversations, and group threads are only visible once you're signed in."
-            />
-          ) : inbox.tab === "chats" ? (
-            <ChatsTab inbox={inbox} onOpenChat={openChatRow} onOpenAiSupport={openAiSupportChat} openingRowId={openingRowId} />
-          ) : inbox.tab === "deals" ? (
-            <DealsTab inbox={inbox} onOpenDealChat={openDealRow} openingRowId={openingRowId} />
-          ) : (
-            <GroupsTab onOpenGroup={openGroupRow} openingRowId={openingRowId} />
-          )}
-        </div>
+        {showSplitPane ? (
+          <div className="ibx-detail-pane">
+            {selected?.kind === "deal" ? (
+              <DealChatPanel key={selected.id} chatRoomId={selected.id} embedded onBack={() => setSelected(null)} />
+            ) : selected?.kind === "group" ? (
+              <GroupChatPanel key={selected.id} groupId={selected.id} embedded onBack={() => setSelected(null)} />
+            ) : (
+              <div className="ibx-detail-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.18)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                </svg>
+                <p>Select a conversation</p>
+                <span>Pick a deal, chat, or group from the list to view it here.</span>
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -255,11 +353,13 @@ function ChatsTab({
   onOpenChat,
   onOpenAiSupport,
   openingRowId,
+  selectedId,
 }: {
   inbox: ReturnType<typeof useInbox>;
   onOpenChat: (t: ChatThread) => void;
   onOpenAiSupport: () => void;
   openingRowId: string | null;
+  selectedId?: string | null;
 }) {
   if (inbox.chatsLoading) return <Skeleton />;
 
@@ -293,7 +393,7 @@ function ChatsTab({
         inbox.chats.map((t) => (
           <div
             key={t.chatRoomId}
-            className="ibx-row"
+            className={`ibx-row${selectedId === t.chatRoomId ? " ibx-row-selected" : ""}`}
             style={{ paddingLeft: t.unread ? "1.8rem" : "1.5rem" }}
             onClick={() => onOpenChat(t)}
           >
@@ -335,10 +435,12 @@ function DealsTab({
   inbox,
   onOpenDealChat,
   openingRowId,
+  selectedId,
 }: {
   inbox: ReturnType<typeof useInbox>;
   onOpenDealChat: (chatRoomId: string) => void;
   openingRowId: string | null;
+  selectedId?: string | null;
 }) {
   return (
     <>
@@ -408,7 +510,7 @@ function DealsTab({
         </div>
       ) : (
         inbox.deals.map((d) => (
-          <DealRow key={d.id} deal={d} inbox={inbox} onOpenDealChat={onOpenDealChat} openingRowId={openingRowId} />
+          <DealRow key={d.id} deal={d} inbox={inbox} onOpenDealChat={onOpenDealChat} openingRowId={openingRowId} selectedId={selectedId} />
         ))
       )}
 
@@ -426,11 +528,13 @@ function DealRow({
   inbox,
   onOpenDealChat,
   openingRowId,
+  selectedId,
 }: {
   deal: Deal;
   inbox: ReturnType<typeof useInbox>;
   onOpenDealChat: (chatRoomId: string) => void;
   openingRowId: string | null;
+  selectedId?: string | null;
 }) {
   const uid = useAuth().user?.uid || "";
   const { currency, formatPriceShort } = useCurrency();
@@ -505,7 +609,7 @@ function DealRow({
   }
 
   return (
-    <div className={isUnread ? "ibx-deal-unread" : ""}>
+    <div className={`${isUnread ? "ibx-deal-unread" : ""}${selectedId && deal.chatRoomId === selectedId ? " ibx-row-selected" : ""}`}>
       <div className="ibx-deal-row" onClick={toggleOpen}>
         {isUnread ? <span className="ibx-row-dot ibx-deal-dot" /> : null}
         {deal.listingImage ? (
@@ -702,7 +806,15 @@ function GroupIcon({ id }: { id: string }) {
   }
 }
 
-function GroupsTab({ onOpenGroup, openingRowId }: { onOpenGroup: (id: string) => void; openingRowId: string | null }) {
+function GroupsTab({
+  onOpenGroup,
+  openingRowId,
+  selectedId,
+}: {
+  onOpenGroup: (id: string) => void;
+  openingRowId: string | null;
+  selectedId?: string | null;
+}) {
   const { user } = useAuth();
   const { openAuthModal } = useAuthModal();
   return (
@@ -710,7 +822,7 @@ function GroupsTab({ onOpenGroup, openingRowId }: { onOpenGroup: (id: string) =>
       {IBX_GROUPS.map((g) => (
         <div
           key={g.id}
-          className="ibx-group-row"
+          className={`ibx-group-row${selectedId === g.id ? " ibx-row-selected" : ""}`}
           onClick={() => {
             if (!user) {
               openAuthModal();
