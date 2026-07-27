@@ -1137,16 +1137,26 @@
   }
 
 /* ── Desktop widening ──
-     .pm-parent-content/.pm-quick-row were hard-capped at max-width:440px
-     (a phone-width single column) with no larger breakpoint, so on a wide
-     viewport the modal was centered but its actual content never grew
-     past phone width. .pm-listings-grid was also permanently 1 column.
-     This gives the modal real desktop proportions without changing
-     anything below 900px. */
+     Every direct child of .pm-modal-content (.pm-identity, .pm-inbox-btn,
+     .pm-quick-row, .pm-plan-card, .pm-parent-tab-row, .pm-parent-content,
+     .pm-bottom-actions) was hard-capped at max-width:440px — a phone-width
+     single column — with no larger breakpoint, so on a wide viewport the
+     page was centered but never actually used the available width; a
+     real desktop monitor just showed a narrow phone-shaped card floating
+     in a sea of empty background. All of them widen together here so the
+     page reads as one coherent desktop layout rather than a narrow header
+     sitting above a suddenly-wide tab area. Two tiers: 900px+ gets a
+     comfortable reading width (2-column listings), 1280px+ (an actual
+     desktop monitor, not just a large tablet) opens up further. Nothing
+     changes below 900px. */
 @media (min-width: 900px) {
+    .pm-identity,
+    .pm-inbox-btn,
     .pm-quick-row,
+    .pm-plan-card,
+    .pm-parent-tab-row,
     .pm-parent-content,
-    .pm-parent-tab-row {
+    .pm-bottom-actions {
       max-width: 720px;
     }
     .pm-modal-content {
@@ -1158,41 +1168,32 @@
     }
   }
 
-/* ── Profile modal bottom buttons ── */
-.pm-bottom-actions {
-           display: flex; flex-direction: column; gap: 0.6rem;
-           width: 100%; max-width: 440px;
-           margin-top: 0.25rem;
-         }
+@media (min-width: 1280px) {
+    .pm-identity,
+    .pm-inbox-btn,
+    .pm-quick-row,
+    .pm-plan-card,
+    .pm-parent-tab-row,
+    .pm-parent-content,
+    .pm-bottom-actions {
+      max-width: 980px;
+    }
+    .pm-modal-content {
+      padding: 2.5rem 2rem 3.5rem;
+    }
+    .pm-listings-grid {
+      max-width: 980px;
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
 
-.pm-bottom-row { display: flex; gap: 0.6rem; }
-
-.pm-bottom-btn {
-           flex: 1; display: flex; align-items: center; justify-content: center;
-           gap: 0.5rem; padding: 0.8rem 1rem;
-           border-radius: var(--mp-radius-sm); cursor: pointer; font-family: inherit;
-           font-size: 0.82rem; font-weight: 700;
-           border: 1px solid var(--mp-border);
-           background: var(--mp-surface);
-           color: var(--mp-text-sec);
-           transition: background var(--mp-transition), border-color var(--mp-transition), color var(--mp-transition);
-         }
-
-.pm-bottom-btn:hover { border-color: var(--mp-border-hover); color: var(--mp-text); background: var(--mp-surface-raised); }
-
-.pm-bottom-btn svg {
-           width: 16px; height: 16px; flex-shrink: 0; stroke: currentColor; fill: none;
-         }
-
-.pm-bottom-dispute { color: #fbbf24; }
-
-.pm-bottom-dispute:hover { background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.3); }
-
-.pm-bottom-logout { color: #f87171; }
-
-.pm-bottom-logout:hover { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.3); }
-
-/* plan badge styles used in profile modal.
+/* Note: .pm-bottom-actions / .pm-bottom-row / .pm-bottom-btn are defined
+   once, earlier in this file (search "Bottom action row") — a duplicate
+   unscoped copy used to live here and silently won (later in source
+   order, same specificity) over the @media(min-width:900px) widening
+   above, undoing it at every viewport width. Removed rather than kept
+   "for safety," since a dead duplicate that overrides a real fix is
+   worse than no duplicate at all. */
             .pm-sub-badge is aliased to the same rule set: pmRender() sets
             className to 'pm-sub-badge ' + planClass on #pmSubBadge, but
             .pm-sub-badge previously had no CSS of its own anywhere in this
