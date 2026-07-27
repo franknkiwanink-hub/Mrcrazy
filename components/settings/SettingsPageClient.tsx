@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import SettingsSidebar, { type SettingsPanelId } from "@/components/settings/SettingsSidebar";
+import SettingsSidebar from "@/components/settings/SettingsSidebar";
+import type { SettingsPanelId } from "@/components/settings/SettingsSidebar";
 import { useSettingsState } from "@/lib/useSettingsState";
 import { useAuth } from "@/lib/AuthContext";
 import SignInRequired from "@/components/auth/SignInRequired";
