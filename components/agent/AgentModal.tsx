@@ -328,7 +328,7 @@ export default function AgentModal({ open, onClose }: { open: boolean; onClose: 
 
   function handleGoToApiSettings() {
     onClose();
-    router.push("/settings?panel=api");
+    router.push("/settings/api");
   }
 
   const plans = ["free", "starter", "growth", "pro"] as const;
