@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, type ReactElement } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
@@ -81,7 +81,7 @@ function pmPlanClass(plan: string) {
   return "pm-plan-" + (["starter", "growth", "pro"].includes(plan) ? plan : "free");
 }
 
-type ParentTab = "profile" | "listings" | "favorites" | "following";
+export type ParentTab = "profile" | "listings" | "favorites" | "following";
 type SubTab = "account" | "public";
 
 export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab }) {
@@ -120,6 +120,25 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   } = useProfileData();
 
   const [parentTab, setParentTab] = useState<ParentTab>(initialTab || "profile");
+  const pathname = usePathname();
+
+  // "profile" has no /myprofile/profile URL — plain /myprofile already
+  // means "My Profile" tab, so it's left out of this map. See selectTab
+  // below and app/myprofile/[tab]/page.tsx for the other half of this.
+  const TAB_PATHS: Partial<Record<ParentTab, string>> = {
+    listings: "/myprofile/listings",
+    favorites: "/myprofile/favorites",
+    following: "/myprofile/following",
+  };
+
+  function selectTab(tab: ParentTab) {
+    setParentTab(tab);
+    const target = tab === "profile" ? "/myprofile" : TAB_PATHS[tab]!;
+    if (pathname !== target) {
+      router.push(target);
+    }
+  }
+
   const [subTab, setSubTab] = useState<SubTab>("account");
   // Immediate visual feedback for the Messages & Deals button — on a slow
   // connection the /messages route (server-rendered shell + client data)
@@ -492,14 +511,14 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
 
           {/* Parent tabs */}
           <div className="pm-parent-tab-row" style={{ position: "relative", zIndex: 1 }}>
-            <button className={`pm-parent-tab${parentTab === "profile" ? " active" : ""}`} onClick={() => setParentTab("profile")}>
+            <button className={`pm-parent-tab${parentTab === "profile" ? " active" : ""}`} onClick={() => selectTab("profile")}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                 <circle cx="12" cy="7" r="4" />
               </svg>
               <span>My Profile</span>
             </button>
-            <button className={`pm-parent-tab${parentTab === "listings" ? " active" : ""}`} onClick={() => setParentTab("listings")}>
+            <button className={`pm-parent-tab${parentTab === "listings" ? " active" : ""}`} onClick={() => selectTab("listings")}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="7" height="7" rx="1" />
                 <rect x="14" y="3" width="7" height="7" rx="1" />
@@ -508,13 +527,13 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
               </svg>
               <span>My Listings</span>
             </button>
-            <button className={`pm-parent-tab${parentTab === "favorites" ? " active" : ""}`} onClick={() => setParentTab("favorites")}>
+            <button className={`pm-parent-tab${parentTab === "favorites" ? " active" : ""}`} onClick={() => selectTab("favorites")}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
               </svg>
               <span>Favorites</span>
             </button>
-            <button className={`pm-parent-tab${parentTab === "following" ? " active" : ""}`} onClick={() => setParentTab("following")}>
+            <button className={`pm-parent-tab${parentTab === "following" ? " active" : ""}`} onClick={() => selectTab("following")}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                 <circle cx="9" cy="7" r="4" />
