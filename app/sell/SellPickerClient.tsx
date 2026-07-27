@@ -121,7 +121,7 @@ export default function SellPickerClient() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#000", color: "#fff", paddingTop: 92, paddingBottom: 80 }}>
-      <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 20px", textAlign: "center" }}>
+      <div style={{ maxWidth: 1160, margin: "0 auto", padding: "0 20px", textAlign: "center" }}>
         <div style={{ textAlign: "left", marginBottom: 24 }}>
           <WeeklyLimitBar />
         </div>
@@ -133,7 +133,7 @@ export default function SellPickerClient() {
           Choose a type to get started.
         </p>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <div className="sell-type-grid">
           <TypeCard
             label="Website"
             desc="A live site, SaaS, or online business."
