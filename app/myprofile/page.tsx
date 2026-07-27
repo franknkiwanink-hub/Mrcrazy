@@ -1,34 +1,33 @@
-"use client";
+import type { Metadata } from "next";
+import { getPublicBaseUrl } from "@/lib/server/adminDb";
+import MyProfilePageClient from "@/components/profile/MyProfilePageClient";
 
-import { useAuth } from "@/lib/AuthContext";
-import SignInRequired from "@/components/auth/SignInRequired";
-import MyProfileHub from "@/components/profile/MyProfileHub";
+// Own explicit metadata (title/description/canonical) per profile tab —
+// each of /myprofile, /myprofile/listings, /myprofile/favorites, and
+// /myprofile/following now has its own real URL and its own copy here
+// (see the sibling [tab]/page.tsx for the other three), instead of every
+// tab silently sharing one generic title. Still noindex/nofollow (same
+// treatment as /dashboard, /settings — see robots.ts's disallow list,
+// which blocks by path prefix so it already covers these sub-routes
+// too): this is an auth-gated page a crawler can't sign in to see, so
+// there's no actual search-ranking value here — this metadata is purely
+// for the browser tab title, and for link previews/bookmarks a signed-in
+// user shares or saves.
+const TITLE = "My Profile — Siterifty";
+const DESCRIPTION = "View and manage your Siterifty profile, account details, and public seller info.";
 
-// Real routed page for the PROFILE MODAL (Js/profile.js + profile-early.js)
-// — see MyProfileHub.tsx for the full port. Ports the original's
-// window.__openProfileModal guard (only ever called from click handlers
-// gated by __requireAuth) as an in-page check here instead, since a direct
-// /myprofile visit (bookmark, deep link, browser back) has no prior click
-// to gate.
+export function generateMetadata(): Metadata {
+  const url = `${getPublicBaseUrl()}/myprofile`;
+  return {
+    title: TITLE,
+    description: DESCRIPTION,
+    alternates: { canonical: url },
+    robots: { index: false, follow: false },
+    openGraph: { title: TITLE, description: DESCRIPTION, url, type: "website" },
+    twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION },
+  };
+}
+
 export default function MyProfilePage() {
-  const { user, loading } = useAuth();
-
-  if (loading || user === undefined) {
-    return (
-      <div style={{ marginTop: 92, minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.4)" }}>
-        Loading…
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <SignInRequired
-        title="Sign in to view your profile"
-        description="Your profile, listings, favorites, and account settings are only visible once you're signed in."
-      />
-    );
-  }
-
-  return <MyProfileHub />;
+  return <MyProfilePageClient initialTab="profile" />;
 }
