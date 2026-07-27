@@ -42,64 +42,6 @@
 
 #walletModalClose:hover { background: rgba(255,255,255,.12); color: #fff; }
 
-/* ── Desktop: the mobile version above is a genuine
-                  full-bleed sheet (#walletModal fixed/inset:0,
-                  #walletModalInner width/height:100%) with no upper
-                  size cap, so on a wide viewport it was just that same
-                  sheet stretched edge-to-edge instead of behaving like a
-                  dialog. This turns it into a proper centered card with
-                  a dimmed backdrop once there's room for one; nothing
-                  above this changes for phone widths. ── */
-@media (min-width: 768px) {
-                 #walletModal {
-                   background: rgba(5,5,8,0.7);
-                   backdrop-filter: blur(3px);
-                   -webkit-backdrop-filter: blur(3px);
-                   align-items: center;
-                   justify-content: center;
-                   padding: 32px;
-                 }
-                 #walletModalInner {
-                   width: 100%;
-                   max-width: 640px;
-                   height: auto;
-                   max-height: calc(100vh - 64px);
-                   border-radius: 22px;
-                   border: 1px solid rgba(255,255,255,.08);
-                   box-shadow: 0 30px 90px rgba(0,0,0,.55);
-                   overflow: hidden;
-                 }
-                 #walletModalHeader { padding-top: 16px; border-radius: 22px 22px 0 0; }
-                 #walletModalBody { padding-bottom: 40px; }
-               }
-
-/* ── Wide desktop (≥1000px): the tier above only makes the same
-                  single stacked column (balance card → tabs → active
-                  panel, all full width) wider — still one column
-                  centered in empty space, same as mobile (see
-                  screenshot). This splits it into a real two-pane
-                  dialog: left pane pinned (balance + tab nav), right
-                  pane the active tab's content — same pattern as
-                  Settings. Nothing below 1000px changes. ── */
-@media (min-width: 1000px) {
-                 #walletModalInner { max-width: 880px; }
-                 #walletModalBody {
-                   max-width: none;
-                   display: flex;
-                   align-items: flex-start;
-                   gap: 28px;
-                   padding: 28px 28px calc(48px + env(safe-area-inset-bottom));
-                 }
-                 #walletModalLeft {
-                   flex: 0 0 300px;
-                   position: sticky; top: 0;
-                 }
-                 #walletModalRight {
-                   flex: 1 1 auto; min-width: 0;
-                 }
-                 #walletTabs { flex-wrap: wrap; }
-               }
-
 #walletModalBody {
                flex: 1; overflow-y: auto;
                padding: 20px 18px calc(48px + env(safe-area-inset-bottom));
@@ -109,6 +51,65 @@
 /* No-ops below the ≥1000px split (see media query above) — keeps
                mobile/tablet exactly as before, just plain wrapper divs. */
 #walletModalLeft, #walletModalRight { display: contents; }
+
+/* ── Desktop (≥1000px): previously this widened into a centered
+                  popup-style dialog (max-width:640px, then 880px, dimmed
+                  backdrop, rounded card) with the balance/tabs and the
+                  active tab content both squeezed inside that fixed
+                  card width — cramped, tabs wrapped to a second row, and
+                  content needed scrolling that shouldn't have been
+                  necessary on a wide screen (see screenshot). Wallet is
+                  a full destination, not a transient dialog someone
+                  dismisses in passing, so this drops the popup/backdrop
+                  treatment entirely and keeps it genuinely fullscreen —
+                  the base mobile shell's fixed/inset:0 sheet, just with
+                  a real two-column layout and no upper width cap beyond
+                  a generous max-width for readability. Nothing below
+                  1000px changes. This block is placed after the base
+                  #walletModalBody rule above (same selector, later in
+                  source order) so it actually overrides it instead of
+                  being silently overridden by it — see the profile.css
+                  "dead duplicate" note from an earlier fix round for why
+                  source order matters here. ── */
+@media (min-width: 1000px) {
+                 #walletModalHeader { padding: 20px 40px; }
+                 #walletModalBody {
+                   max-width: 1180px;
+                   width: 100%;
+                   margin: 0 auto;
+                   display: grid;
+                   grid-template-columns: 300px minmax(0, 1fr);
+                   align-items: start;
+                   gap: 40px;
+                   padding: 32px 40px calc(56px + env(safe-area-inset-bottom));
+                 }
+                 #walletModalLeft {
+                   position: sticky; top: 32px;
+                   display: flex; flex-direction: column; gap: 20px;
+                 }
+                 #walletModalRight { min-width: 0; }
+
+                 /* Tabs — was a 4-across horizontal row above the
+                    balance card, which either wrapped to a second row
+                    inside the narrow popup or ate a full-width strip of
+                    vertical space at the top of the page. As a vertical
+                    list under the balance card in the left column, it
+                    reads like normal page navigation (Withdraw/Settings-
+                    style sidebar) instead of competing with the content
+                    for room. */
+                 #walletTabs {
+                   grid-template-columns: 1fr;
+                   gap: 3px;
+                   background: none; border: none; padding: 0;
+                   margin-bottom: 0;
+                 }
+                 .wallet-tab {
+                   text-align: left;
+                   padding: 11px 14px;
+                   border-radius: 10px;
+                 }
+                 .wallet-tab.active { background: rgba(163,230,53,0.14); color: #a3e635; }
+               }
 
 /* Balance hero */
 #walletBalanceCard {
