@@ -188,7 +188,7 @@
    grouped by day, with type filter tabs. ── */
 #notifCenterOverlay {
             position: fixed; inset: 0; z-index: 10070;
-            background: rgba(4,4,8,0.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            background: rgba(0,0,0,0.55);
             display: flex; align-items: stretch; justify-content: center;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             opacity: 0; transition: opacity 0.2s ease;
@@ -196,10 +196,20 @@
 
 #notifCenterOverlay.visible { opacity: 1; }
 
+/* Glassy black panel — was a flat #0a0a0f fill that (combined with the
+   backdrop-blur living on the overlay instead of the panel) made the
+   panel itself read as thin/see-through with poor text contrast. Now
+   the blur + darkening live on the panel surface itself, layered over a
+   solid near-black base, so text always sits on a properly dark,
+   opaque-reading backdrop no matter what's behind it. */
 .notif-center-panel {
             width: 100%; max-width: 560px; height: 100%;
             display: flex; flex-direction: column;
-            background: #0a0a0f;
+            background: rgba(8,8,12,0.92);
+            backdrop-filter: blur(24px) saturate(140%);
+            -webkit-backdrop-filter: blur(24px) saturate(140%);
+            border-left: 1px solid rgba(255,255,255,0.08);
+            box-shadow: -24px 0 60px rgba(0,0,0,0.5);
             margin: 0 auto;
             transform: translateY(14px); opacity: 0;
             transition: transform 0.22s cubic-bezier(.16,.84,.44,1), opacity 0.22s;
