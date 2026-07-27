@@ -11,6 +11,7 @@ import SellerDetailsOverlay from "@/components/seller/SellerDetailsOverlay";
 import RateOverlay from "@/components/seller/RateOverlay";
 import { SellerNotFoundScreen, SellerPrivateScreen } from "@/components/seller/SellerStateScreen";
 import { useConfirm } from "@/lib/useConfirm";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 // Matches the original's .sp-loading skeleton state — CSS-driven shimmer
@@ -67,7 +68,7 @@ export default function SellerProfileClient({
   uid: string;
   initialSeller?: FullSeller | null;
 }) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { openAuthModal } = useAuthModal();
   const router = useRouter();
   const { alert: confirmAlert, confirm: confirmDialog, ConfirmHost } = useConfirm();
@@ -81,6 +82,54 @@ export default function SellerProfileClient({
   const [reportDone, setReportDone] = useState(false);
 
   const isOwnProfile = !!user && user.uid === uid;
+
+  // For the "members" (Followers Only) gate below — needs its own check
+  // rather than reusing SellerProfileHeader's isFollowing state, because
+  // that component (which owns the Follow button) doesn't mount at all
+  // for a visitor who hasn't passed this gate yet. null = not checked
+  // yet (avoids a flash of the locked screen for someone who IS a
+  // follower, while this resolves).
+  const [isFollower, setIsFollower] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!uid || !user || user.uid === uid) {
+      setIsFollower(false);
+      return;
+    }
+    setIsFollower(null);
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "users", uid, "followers", user.uid));
+        if (!cancelled) setIsFollower(snap.exists());
+      } catch {
+        if (!cancelled) setIsFollower(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uid, user]);
+
+  const [followFromGateBusy, setFollowFromGateBusy] = useState(false);
+
+  async function handleFollowFromGate() {
+    if (!user || !seller) return;
+    setFollowFromGateBusy(true);
+    try {
+      const followerRef = doc(db, "users", seller.uid, "followers", user.uid);
+      const followingRef = doc(db, "users", user.uid, "following", seller.uid);
+      const myName = profile?.username || user.displayName || user.email?.split("@")[0] || "Someone";
+      await setDoc(followerRef, { uid: user.uid, username: myName, pic: profile?.profilePic || "", followedAt: serverTimestamp() });
+      await setDoc(followingRef, { uid: seller.uid, username: seller.username, pic: seller.profilePic || "", followedAt: serverTimestamp() });
+      setSeller((s) => (s ? { ...s, followerCount: s.followerCount + 1 } : s));
+      setIsFollower(true);
+    } catch (err) {
+      console.error("[SellerProfileClient] follow from gate failed", err);
+    } finally {
+      setFollowFromGateBusy(false);
+    }
+  }
 
   // Guards the reset-before-refetch logic below: true only once, on this
   // component's very first effect run. That first run is when
@@ -214,9 +263,12 @@ export default function SellerProfileClient({
   }
 
   // ── Privacy gate ── mirrors mpOpenSellerModal's intent: a private
-  // profile is fully hidden from anyone but its owner; a members-only
-  // profile is hidden from signed-out visitors. Both skip the listings
-  // grid, socials, and follow/rate actions entirely. Uses the dedicated
+  // profile is fully hidden from anyone but its owner; a "members"
+  // (Followers Only) profile is hidden from anyone who isn't a real
+  // follower of this seller — checked via the isFollower effect above
+  // against users/{sellerUid}/followers/{visitorUid}, not just whether
+  // the visitor happens to be signed in. Both skip the listings grid,
+  // socials, and follow/rate actions entirely. Uses the dedicated
   // full-screen state (not SellerProfileHeader, which owns Follow/
   // Donate/Rate/Report for the public view) — Report is wired up
   // separately here via handleReportFromPrivateScreen so a private
@@ -246,7 +298,7 @@ export default function SellerProfileClient({
               </div>
               <div id="spModalBio">
                 <div id="spModalBioText" style={{ color: "rgba(255,255,255,0.5)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  <span>This profile is only visible to signed-in members.</span>
+                  <span>This profile is only visible to {seller.username}'s followers.</span>
                   <button
                     onClick={openAuthModal}
                     style={{
@@ -261,6 +313,51 @@ export default function SellerProfileClient({
                     }}
                   >
                     Sign In / Sign Up
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Signed in but not (yet) a follower — still locked, but with a
+  // working Follow button right here instead of a dead end, since
+  // SellerProfileHeader (which normally owns Follow) never mounts for a
+  // visitor who fails this gate. isFollower === null is "still checking"
+  // (see the effect above) — render nothing yet rather than flash this
+  // locked screen for someone who turns out to already be a follower.
+  if (!isOwnProfile && seller.profileVisibility === "members" && user && isFollower !== true) {
+    if (isFollower === null) return null;
+    return (
+      <div id="spModal" className="active" style={{ position: "static", marginTop: 92 }}>
+        <div id="spModalInner">
+          <div id="spModalMain">
+            <div id="spModalNameInfo">
+              <div id="spModalNameLine">
+                <span id="spModalName">{seller.username}</span>
+              </div>
+              <div id="spModalBio">
+                <div id="spModalBioText" style={{ color: "rgba(255,255,255,0.5)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span>This profile is only visible to {seller.username}'s followers.</span>
+                  <button
+                    onClick={handleFollowFromGate}
+                    disabled={followFromGateBusy}
+                    style={{
+                      background: "#a3e635",
+                      color: "#0a0a0a",
+                      fontWeight: 700,
+                      fontSize: 12.5,
+                      border: "none",
+                      borderRadius: 999,
+                      padding: "6px 16px",
+                      cursor: followFromGateBusy ? "default" : "pointer",
+                      opacity: followFromGateBusy ? 0.7 : 1,
+                    }}
+                  >
+                    {followFromGateBusy ? "Following…" : "Follow to View"}
                   </button>
                 </div>
               </div>
