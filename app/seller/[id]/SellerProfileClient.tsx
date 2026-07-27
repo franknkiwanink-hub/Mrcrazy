@@ -371,6 +371,14 @@ export default function SellerProfileClient({
   return (
     <div id="spModal" className="active" style={{ position: "static", marginTop: 92 }}>
       <div id="spModalInner">
+        {/* Split on wide desktop via CSS grid placement (see
+            #spModalInner's ≥1024px rules in seller-profile.css):
+            #spModalCover stays full-width across the top, #spModalMain
+            (avatar/name/bio/actions, rendered inside
+            SellerProfileHeader) becomes the left column, and
+            SellerListingsGrid becomes the right column. No wrapper divs
+            needed — driven entirely by existing element IDs, so mobile
+            markup/behavior is untouched. */}
         <SellerProfileHeader
           seller={seller}
           onSellerChange={(updater) => setSeller((s) => (s ? updater(s) : s))}
