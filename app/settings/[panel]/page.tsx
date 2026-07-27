@@ -78,10 +78,11 @@ const PANEL_META: Record<string, { panel: SettingsPanelId; title: string; descri
   },
 };
 
-export function generateMetadata({ params }: { params: { panel: string } }): Metadata {
-  const meta = PANEL_META[params.panel];
+export async function generateMetadata({ params }: { params: Promise<{ panel: string }> }): Promise<Metadata> {
+  const { panel } = await params;
+  const meta = PANEL_META[panel];
   if (!meta) return {};
-  const url = `${getPublicBaseUrl()}/settings/${params.panel}`;
+  const url = `${getPublicBaseUrl()}/settings/${panel}`;
   return {
     title: meta.title,
     description: meta.description,
@@ -92,8 +93,9 @@ export function generateMetadata({ params }: { params: { panel: string } }): Met
   };
 }
 
-export default function SettingsPanelPage({ params }: { params: { panel: string } }) {
-  const meta = PANEL_META[params.panel];
+export default async function SettingsPanelPage({ params }: { params: Promise<{ panel: string }> }) {
+  const { panel } = await params;
+  const meta = PANEL_META[panel];
   if (!meta) notFound();
   return <SettingsPageClient initialPanel={meta.panel} />;
 }
