@@ -29,10 +29,11 @@ const TAB_META: Record<string, { tab: ParentTab; title: string; description: str
   },
 };
 
-export function generateMetadata({ params }: { params: { tab: string } }): Metadata {
-  const meta = TAB_META[params.tab];
+export async function generateMetadata({ params }: { params: Promise<{ tab: string }> }): Promise<Metadata> {
+  const { tab } = await params;
+  const meta = TAB_META[tab];
   if (!meta) return {};
-  const url = `${getPublicBaseUrl()}/myprofile/${params.tab}`;
+  const url = `${getPublicBaseUrl()}/myprofile/${tab}`;
   return {
     title: meta.title,
     description: meta.description,
@@ -43,8 +44,9 @@ export function generateMetadata({ params }: { params: { tab: string } }): Metad
   };
 }
 
-export default function MyProfileTabPage({ params }: { params: { tab: string } }) {
-  const meta = TAB_META[params.tab];
+export default async function MyProfileTabPage({ params }: { params: Promise<{ tab: string }> }) {
+  const { tab } = await params;
+  const meta = TAB_META[tab];
   if (!meta) notFound();
   return <MyProfilePageClient initialTab={meta.tab} />;
 }
