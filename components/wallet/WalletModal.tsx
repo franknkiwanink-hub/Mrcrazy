@@ -82,6 +82,7 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
         </div>
 
         <div id="walletModalBody" data-scroll-lock-exempt>
+          <div id="walletModalLeft">
           {/* Balance hero */}
           <div id="walletBalanceCard">
             <img
@@ -171,7 +172,9 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
               History
             </button>
           </div>
+          </div>
 
+          <div id="walletModalRight">
           {/* ── Deposit panel ── */}
           <div className={`wallet-panel${tab === "deposit" ? " active" : ""}`} id="walletPanelDeposit">
             <div
@@ -210,6 +213,7 @@ export default function WalletModal({ open, onClose }: { open: boolean; onClose:
           {/* ── History panel ── */}
           <div className={`wallet-panel${tab === "history" ? " active" : ""}`} id="walletPanelHistory">
             <HistoryTab active={tab === "history"} />
+          </div>
           </div>
         </div>
       </div>
