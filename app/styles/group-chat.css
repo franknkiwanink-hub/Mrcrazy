@@ -1,6 +1,12 @@
 /* ── extracted style block 11 (originally around char offset 1847747) ── */
 #groupChatPanel *, #groupChatPanel *::before, #groupChatPanel *::after { box-sizing: border-box; }
 
+/* Desktop split-view variant (see InboxShell.tsx / GroupChatPanel's
+   `embedded` prop) — same box-sizing reset as #groupChatPanel above,
+   scoped to the plain-pane class used when this renders inline next to
+   the thread list instead of as its own fixed overlay. */
+.gcp-embedded *, .gcp-embedded *::before, .gcp-embedded *::after { box-sizing: border-box; }
+
 /* ── Header ── */
 .gcp-header {
               display: flex; align-items: center; gap: 0.75rem;
