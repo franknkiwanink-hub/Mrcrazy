@@ -206,6 +206,24 @@ header {
 
 .ab-flag { font-size: 12px; line-height: 1; margin-left: -2px; }
 
+/* Notification bell — sits before the username in the announcement bar. */
+.ab-bell-btn {
+         position: relative; display: flex; align-items: center; justify-content: center;
+         width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+         background: transparent; border: none; color: rgba(255,255,255,0.55);
+         cursor: pointer; padding: 0; transition: background 0.15s, color 0.15s;
+         }
+
+.ab-bell-btn:hover { background: rgba(255,255,255,0.07); color: #fff; }
+
+.ab-bell-badge {
+         position: absolute; top: 2px; right: 2px;
+         min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px;
+         background: #ef4444; color: #fff;
+         font-size: 9px; font-weight: 800; line-height: 14px; text-align: center;
+         box-shadow: 0 0 0 2px rgba(10,10,14,0.9);
+         }
+
 .plan-badge { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 8px; border-radius: 20px; line-height: 1.6; }
 
 .plan-free    { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14); color: rgba(255,255,255,0.45); }
@@ -662,13 +680,15 @@ body.theme-active .plans-section { background: rgba(0,0,0,0.65); backdrop-filter
          GLOBAL BOOT OVERLAY — covers the entire viewport until the
          first auth check + user data fetch resolves, so nothing
          (login button, stats, name, theme) is ever seen mid-flicker.
+         Redesigned for a clean, premium, "billion-dollar marketplace"
+         feel — no mascot glyph, no falling glitter particles. Just a
+         solid wordmark, a quiet gradient backdrop, and a simple
+         progress ring.
          ══════════════════════════════════════════════════════════ */
 #appBootOverlay {
          position: fixed; inset: 0; width: 100%; height: 100vh; height: 100dvh;
          z-index: 999999;
-         background: rgba(6,6,10,0.62);
-         backdrop-filter: blur(28px) saturate(140%);
-         -webkit-backdrop-filter: blur(28px) saturate(140%);
+         background: #07080a;
          display: flex; flex-direction: column; align-items: center; justify-content: center;
          gap: 0; overflow: hidden;
          overscroll-behavior: none; touch-action: none;
@@ -678,8 +698,8 @@ body.theme-active .plans-section { background: rgba(0,0,0,0.65); backdrop-filter
 #appBootOverlay::before {
          content: ""; position: absolute; inset: 0; pointer-events: none;
          background:
-           radial-gradient(circle at 30% 20%, rgba(163,230,53,0.10) 0%, rgba(163,230,53,0) 45%),
-           radial-gradient(circle at 75% 80%, rgba(163,230,53,0.07) 0%, rgba(163,230,53,0) 50%);
+           radial-gradient(circle at 50% 28%, rgba(163,230,53,0.07) 0%, rgba(163,230,53,0) 55%),
+           radial-gradient(circle at 50% 100%, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 60%);
          }
 
 #appBootOverlay.boot-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
@@ -688,57 +708,58 @@ body.mnt-mode { overflow: hidden; }
 
 .boot-content {
          position: relative; display: flex; flex-direction: column; align-items: center;
-         gap: 1.6rem; animation: boot-fade-up .6s ease both;
-         padding: 40px 36px 34px;
-         border-radius: 24px;
-         background: rgba(255,255,255,0.045);
-         border: 1px solid rgba(255,255,255,0.09);
-         box-shadow: 0 8px 40px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06);
+         gap: 2rem; animation: boot-fade-up .6s ease both;
+         padding: 8px 36px;
          }
 
 @keyframes boot-fade-up {
-         from { opacity: 0; transform: translateY(10px); }
+         from { opacity: 0; transform: translateY(8px); }
          to   { opacity: 1; transform: translateY(0); }
          }
 
-.boot-mark-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.boot-mark-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 
 .boot-mark {
          display: flex; align-items: center; gap: 0.5rem;
          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-         font-size: 2rem; font-weight: 800; color: #fff; letter-spacing: -0.02em;
+         font-size: 1.9rem; font-weight: 700; color: #fff; letter-spacing: -0.03em;
          }
 
 .boot-mark span { color: #a3e635; }
 
+/* Monogram mark — a simple, solid rounded square with an "S", in
+            place of the old mascot/hexagon glyph. Reads as an actual
+            brand mark rather than a decorative character. */
 .boot-mark-glyph {
-         width: 56px; height: 56px;
+         width: 52px; height: 52px;
          display: flex; align-items: center; justify-content: center;
-         margin-bottom: 2px;
-         filter: drop-shadow(0 4px 16px rgba(163,230,53,0.25));
+         margin-bottom: 4px;
+         border-radius: 14px;
+         background: linear-gradient(155deg, #a3e635 0%, #65a30d 100%);
+         box-shadow: 0 6px 24px rgba(163,230,53,0.22);
          }
 
-.boot-mark-glyph img {
-         width: 100%; height: 100%; object-fit: contain;
+.boot-mark-glyph svg {
+         width: 26px; height: 26px;
          }
 
 .boot-tagline {
-         font-size: 12.5px; font-weight: 600; color: rgba(255,255,255,0.34);
-         letter-spacing: 0.02em; text-align: center;
+         font-size: 12.5px; font-weight: 500; color: rgba(255,255,255,0.36);
+         letter-spacing: 0.01em; text-align: center;
          }
 
-/* Progress ring replaces the old plain spinner — same footprint,
-            richer look, still purely CSS (no JS progress wiring needed).
-            Classic reliable technique: rotate the whole SVG continuously,
-            keep the dash pattern fixed on the circle itself — animating
-            stroke-dashoffset AND transform on the same <circle> at once
-            made the arc look broken/glitchy, so the circle only ever
-            gets a static partial dash now and the SVG wrapper spins. */
-.boot-ring-wrap { position: relative; width: 54px; height: 54px; }
+/* Progress ring — same footprint, still purely CSS (no JS progress
+            wiring needed). Classic reliable technique: rotate the whole
+            SVG continuously, keep the dash pattern fixed on the circle
+            itself — animating stroke-dashoffset AND transform on the
+            same <circle> at once made the arc look broken/glitchy, so
+            the circle only ever gets a static partial dash now and the
+            SVG wrapper spins. */
+.boot-ring-wrap { position: relative; width: 30px; height: 30px; }
 
 .boot-ring-wrap svg {
          width: 100%; height: 100%;
-         animation: boot-ring-spin 1s linear infinite;
+         animation: boot-ring-spin 0.9s linear infinite;
          }
 
 .boot-ring-track { fill: none; stroke: rgba(255,255,255,0.08); stroke-width: 3; }
@@ -753,64 +774,14 @@ body.mnt-mode { overflow: hidden; }
          to   { transform: rotate(360deg); }
          }
 
-/* ── Falling glitter — tiny CSS-only squares, no libraries. Each
-            one drifts down from above the mark, spinning, then fades out
-            near the bottom of its fall. Pure transform/opacity animation —
-            cheap on mobile. ── */
-.boot-glitter-field {
-         position: absolute; inset: 0; overflow: hidden; pointer-events: none;
-         }
-
-.boot-glitter {
-         position: absolute; top: -20px;
-         width: 4px; height: 4px;
-         background: #a3e635;
-         opacity: 0;
-         animation-name: boot-glitter-fall;
-         animation-timing-function: ease-in;
-         animation-iteration-count: infinite;
-         }
-
-/* Each particle gets its own horizontal start position (--gx),
-            drift target (--gtx), fall distance (--gy), size, delay and
-            duration via inline custom properties set in HTML below —
-            keeps this to one shared keyframe instead of 12 near-duplicate
-            animations. */
-@keyframes boot-glitter-fall {
-         0%   { transform: translate(var(--gx, 0), 0) rotate(0deg) scale(1); opacity: 0; }
-         12%  { opacity: 1; }
-         80%  { opacity: 1; }
-         100% { transform: translate(var(--gtx, 0), var(--gy, 260px)) rotate(420deg) scale(0.4); opacity: 0; }
-         }
-
 .boot-status-row {
-         display: flex; flex-direction: column; align-items: center; gap: 6px;
-         width: min(260px, 78vw);
+         display: flex; flex-direction: column; align-items: center; gap: 14px;
          }
 
 .boot-status-text {
-         font-size: 11.5px; font-weight: 700; color: rgba(255,255,255,0.4);
-         letter-spacing: 0.03em; text-transform: uppercase;
+         font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.32);
+         letter-spacing: 0.06em; text-transform: uppercase;
          }
-
-.boot-skel-col {
-         display: flex; flex-direction: column; gap: 9px; align-items: center;
-         width: min(240px, 76vw); margin-top: 4px;
-         }
-
-@keyframes boot-shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
-
-.boot-skel-line {
-         height: 8px; width: 100%; border-radius: 6px;
-         background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.05) 75%);
-         background-size: 200% 100%; animation: boot-shimmer 1.3s infinite;
-         }
-
-.boot-skel-line.w60 { width: 60%; }
-
-.boot-skel-line.w40 { width: 40%; }
-
-@keyframes boot-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 420px) {
            .boot-mark { font-size: 1.6rem; }
