@@ -167,12 +167,13 @@
            .wb-earn-amt { font-size: 26px; }
          }
 
-/* ── Desktop: .wb-shell above is hard-capped at max-width:480px
-            with no larger breakpoint at all, so on a wide viewport it was
-            just that same narrow phone-width column floating in the
-            middle of a huge dark screen. This widens the shell into a
-            proper centered card with its own backdrop treatment once
-            there's room, without touching anything below the breakpoint. ── */
+/* ── Desktop (768–1023px): .wb-shell above is hard-capped at
+            max-width:480px with no larger breakpoint at all, so on a
+            wide viewport it was just that same narrow phone-width column
+            floating in the middle of a huge dark screen. This widens the
+            shell into a proper centered card with its own backdrop
+            treatment once there's room, without touching anything below
+            the breakpoint. ── */
 @media (min-width: 768px) {
            #welcomeBackScreen {
              display: flex; align-items: center; justify-content: center;
@@ -192,4 +193,45 @@
            .wb-obj-scroll { padding: 0 24px; }
            .wb-sticky-bottom { padding: 16px 24px calc(20px + env(safe-area-inset-bottom, 0px)); border-radius: 0 0 24px 24px; }
          }
+
+/* ── Wide desktop (≥1024px): still one narrow card centered in a sea
+            of empty background — greeting, earned-today, and the full
+            objectives list all stacked in one column, same as mobile
+            just bigger (see screenshot). Splits it into a real two-pane
+            layout: left pane pinned (avatar/name/earned-today, doesn't
+            scroll), right pane the scrolling objectives list — same
+            "summary left, content right" pattern used for the
+            wallet/listing/seller fixes below. Doesn't touch 768–1023px
+            or mobile above. ── */
+@media (min-width: 1024px) {
+           .wb-shell {
+             max-width: 880px;
+             flex-direction: row;
+             align-items: stretch;
+             max-height: calc(100vh - 96px); max-height: calc(100dvh - 96px);
+           }
+           .wb-sticky-top {
+             flex-shrink: 0;
+             width: 300px;
+             border-right: 1px solid rgba(255,255,255,0.08);
+             padding: 40px 28px 28px;
+             display: flex; flex-direction: column; justify-content: center;
+           }
+           .wb-obj-header { display: none; } /* re-shown as .wb-right-header inside the right pane */
+           .wb-right-pane {
+             flex: 1 1 auto; min-width: 0;
+             display: flex; flex-direction: column;
+           }
+           .wb-right-header {
+             flex-shrink: 0;
+             padding: 40px 28px 14px;
+             display: block;
+           }
+           .wb-obj-scroll { padding: 0 28px; }
+           .wb-sticky-bottom { padding: 16px 28px calc(20px + env(safe-area-inset-bottom, 0px)); }
+           .wb-top { text-align: left; align-items: flex-start; }
+           .wb-earn-card { margin-bottom: 0; }
+         }
+
+.wb-right-header { display: none; } /* only shown at ≥1024px, see above */
 
