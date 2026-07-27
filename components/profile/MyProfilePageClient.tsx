@@ -2,7 +2,8 @@
 
 import { useAuth } from "@/lib/AuthContext";
 import SignInRequired from "@/components/auth/SignInRequired";
-import MyProfileHub, { type ParentTab } from "@/components/profile/MyProfileHub";
+import MyProfileHub from "@/components/profile/MyProfileHub";
+import type { ParentTab } from "@/components/profile/MyProfileHub";
 
 // Ports the PROFILE MODAL (Js/profile.js + profile-early.js) — see
 // MyProfileHub.tsx for the full port. Ports the original's
