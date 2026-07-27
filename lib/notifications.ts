@@ -197,11 +197,17 @@ export function useNotifications(uid: string | null | undefined): UseNotificatio
     let cancelled = false;
 
     (async () => {
-      const { collection, query, orderBy, limit, onSnapshot } = await import("firebase/firestore");
+      const { collection, query, limit, onSnapshot } = await import("firebase/firestore");
       const { db } = await import("@/lib/firebase");
       if (cancelled) return;
 
-      const q = query(collection(db, "users", uid, "notifications"), orderBy("createdAt", "desc"), limit(30));
+      // No orderBy() — see the matching comment in useNotificationCenter
+      // above for why: it silently excludes any doc missing the field
+      // being sorted on, which some older/malformed notification docs do.
+      // docChanges() below doesn't care about server-side order, so
+      // dropping orderBy costs nothing here and fixes the same class of
+      // "notification exists but never appears" gap this hook had too.
+      const q = query(collection(db, "users", uid, "notifications"), limit(30));
 
       unsub = onSnapshot(
         q,
@@ -316,16 +322,28 @@ export function useNotificationCenter(uid: string | null | undefined, active: bo
 
     let unsub: (() => void) | undefined;
     (async () => {
-      const { collection, query, orderBy, limit, onSnapshot } = await import("firebase/firestore");
+      const { collection, query, limit, onSnapshot } = await import("firebase/firestore");
       const { db } = await import("@/lib/firebase");
       if (cancelled) return;
 
-      const q = query(collection(db, "users", uid, "notifications"), orderBy("createdAt", "desc"), limit(50));
+      // Deliberately no orderBy() here. Firestore's orderBy(field) drops
+      // any document where that field is missing/undefined entirely from
+      // the result set — silently, no error. Some notification docs (older
+      // ones, or ones written by a path that predates createdAt being
+      // required) don't have it, so an orderBy("createdAt") query was
+      // returning zero results for real users while the separate
+      // where("read","==",false) count query (no orderBy, so nothing gets
+      // excluded) kept counting them fine — exactly the "badge shows a
+      // number but the list is empty" symptom this was fixing. Sorting is
+      // done client-side below instead, which never excludes anything.
+      const q = query(collection(db, "users", uid, "notifications"), limit(50));
       unsub = onSnapshot(
         q,
         (snap) => {
           if (cancelled) return;
-          setItems(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AppNotification, "id">) })));
+          const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AppNotification, "id">) }));
+          rows.sort((a, b) => ntfToMillis(b.createdAt) - ntfToMillis(a.createdAt));
+          setItems(rows);
           setLoading(false);
         },
         (err) => {
