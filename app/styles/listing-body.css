@@ -67,7 +67,8 @@
              padding-left: 24px; padding-right: 24px;
              display: grid;
              grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
-             gap: 32px;
+             grid-template-rows: auto auto auto;
+             gap: 16px 32px;
              align-items: start;
            }
            .lst-body-wrap .modal-hero {
@@ -77,16 +78,58 @@
              border-radius: 18px;
              aspect-ratio: 4/3;
            }
+           /* Was unassigned — with no grid-column/row set it fell through
+              to the grid's default auto-placement (next implicit row,
+              column 1 — but *after* .modal-content in source order, which
+              is column 2), so it landed below all the description/
+              details/seller text instead of stacking right under the
+              hero (the bug in the screenshot). Pinned into the same left
+              column, directly under the hero, and switched from a
+              horizontal scroll strip to a small 2-up grid since there's
+              no need to scroll sideways once it has its own column. */
+           .lst-body-wrap .modal-gallery {
+             grid-column: 1;
+             grid-row: 2;
+             display: grid;
+             grid-template-columns: repeat(2, 1fr);
+             overflow: visible;
+             padding: 0;
+             background: none;
+             border-bottom: none;
+           }
+           .lst-body-wrap .modal-gallery-shot,
+           .lst-body-wrap .modal-gallery-shot.portrait,
+           .lst-body-wrap .modal-gallery-shot.tall,
+           .lst-body-wrap .modal-gallery-shot.wide {
+             width: 100%;
+             aspect-ratio: 4/3;
+           }
            .lst-body-wrap .modal-content {
              grid-column: 2;
-             grid-row: 1;
+             grid-row: 1 / span 3;
              padding-bottom: 60px;
            }
-           /* .mp-modal-cta-bar ("Send Deal") stays as its existing
-              position:fixed centered floating pill (see marketplace.css)
-              — that part already works fine on desktop once it isn't
-              sitting in the same narrow column as the description text
-              it was overlapping in the screenshot. */
+           /* CTA ("Send Deal") — was a centered floating pill over the
+              full viewport width, which read oddly once there's a real
+              left column with spare room under the gallery (see
+              screenshot). Un-floats it into that left column, under the
+              hero/gallery, as a normal block instead of a viewport-fixed
+              centered pill. DealCtaBar still toggles the .cta-visible
+              class itself for its own show/hide timing (see
+              marketplace.css), so both states are overridden here rather
+              than just the base rule, otherwise .cta-visible's own
+              fixed-position slide-up animation would still apply. */
+           .lst-body-wrap .mp-modal-cta-bar,
+           .lst-body-wrap .mp-modal-cta-bar.cta-visible {
+             position: static;
+             left: auto; bottom: auto; transform: none;
+             grid-column: 1;
+             grid-row: 3;
+             width: 100%; max-width: none;
+             opacity: 1; pointer-events: auto;
+             animation: none;
+             margin-top: 4px;
+           }
          }
 
 @media (min-width: 760px) and (max-width: 1023px) {
