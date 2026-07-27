@@ -288,3 +288,131 @@ export function useNotifications(uid: string | null | undefined): UseNotificatio
 
   return { live, missed, dismissLive, consumeMissed, markRead };
 }
+
+// ── Full notification center list ────────────────────────────────────
+//
+// Separate from useNotifications() above, which only exists to feed the
+// toast stack + "missed while away" carousel and intentionally never
+// exposes already-read items. The notification center (bell icon in the
+// announcement bar) needs the full recent history — read and unread —
+// so sellers/buyers can review deals and messages they've already seen,
+// not just what's new. Ordered newest-first, capped at 50.
+export interface UseNotificationCenterResult {
+  items: AppNotification[];
+  loading: boolean;
+  unreadCount: number;
+  markRead: (id: string) => Promise<void>;
+  markAllRead: () => Promise<void>;
+}
+
+export function useNotificationCenter(uid: string | null | undefined, active: boolean): UseNotificationCenterResult {
+  const [items, setItems] = useState<AppNotification[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!uid || !active) return;
+    let cancelled = false;
+    setLoading(true);
+
+    let unsub: (() => void) | undefined;
+    (async () => {
+      const { collection, query, orderBy, limit, onSnapshot } = await import("firebase/firestore");
+      const { db } = await import("@/lib/firebase");
+      if (cancelled) return;
+
+      const q = query(collection(db, "users", uid, "notifications"), orderBy("createdAt", "desc"), limit(50));
+      unsub = onSnapshot(
+        q,
+        (snap) => {
+          if (cancelled) return;
+          setItems(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AppNotification, "id">) })));
+          setLoading(false);
+        },
+        (err) => {
+          console.error("[useNotificationCenter] listener error:", err);
+          if (!cancelled) setLoading(false);
+        }
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  }, [uid, active]);
+
+  const unreadCount = items.filter((n) => !n.read).length;
+
+  const markRead = useCallback(
+    async (id: string) => {
+      if (!uid) return;
+      try {
+        const { doc, updateDoc } = await import("firebase/firestore");
+        const { db } = await import("@/lib/firebase");
+        await updateDoc(doc(db, "users", uid, "notifications", id), { read: true });
+      } catch {
+        /* non-fatal */
+      }
+    },
+    [uid]
+  );
+
+  const markAllRead = useCallback(async () => {
+    if (!uid) return;
+    const unread = items.filter((n) => !n.read);
+    if (!unread.length) return;
+    try {
+      const { doc, writeBatch } = await import("firebase/firestore");
+      const { db } = await import("@/lib/firebase");
+      const batch = writeBatch(db);
+      unread.forEach((n) => batch.update(doc(db, "users", uid, "notifications", n.id), { read: true }));
+      await batch.commit();
+    } catch {
+      /* non-fatal */
+    }
+  }, [uid, items]);
+
+  return { items, loading, unreadCount, markRead, markAllRead };
+}
+
+// Lightweight unread-count-only hook for the bell badge in the
+// announcement bar — subscribes independently of whether the full
+// notification center modal is open, so the badge stays live in the
+// background. Capped at 50 like the center itself; "9+" display is
+// handled by the component, not here.
+export function useUnreadNotificationCount(uid: string | null | undefined): number {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    if (!uid) {
+      setCount(0);
+      return;
+    }
+    let cancelled = false;
+    let unsub: (() => void) | undefined;
+
+    (async () => {
+      const { collection, query, where, onSnapshot } = await import("firebase/firestore");
+      const { db } = await import("@/lib/firebase");
+      if (cancelled) return;
+
+      const q = query(collection(db, "users", uid, "notifications"), where("read", "==", false));
+      unsub = onSnapshot(
+        q,
+        (snap) => {
+          if (!cancelled) setCount(snap.size);
+        },
+        (err) => {
+          console.error("[useUnreadNotificationCount] listener error:", err);
+        }
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  }, [uid]);
+
+  return count;
+}
