@@ -46,6 +46,53 @@
 
 .cr-solo    { color: rgba(251,113,133,0.88); }
 
+/* ── Listing detail page wrapper (app/listing/[id]/page.tsx) — was a
+            plain single-column block (maxWidth:760, margin:auto) for
+            every listing type, so the whole page — video/image hero,
+            title, description, details, financials, seller block, and
+            the "Send Deal" CTA bar — was just one long stacked column
+            that got wider (not split) on desktop (see screenshot: hero
+            and price stay full-width on top, description gets pushed
+            down and cut off behind the CTA bar). This turns it into a
+            real two-column layout at ≥1024px: the hero/price/CTA stay
+            pinned in a left column, and the scrolling text content
+            (description, details, financials, seller) becomes the right
+            column — same "media/summary left, content right" split as a
+            typical product/listing page. Below 1024px this is a no-op;
+            same single stacked column as always. ── */
+@media (min-width: 1024px) {
+           .lst-body-wrap {
+             max-width: 1160px;
+             margin: 0 auto;
+             padding-left: 24px; padding-right: 24px;
+             display: grid;
+             grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
+             gap: 32px;
+             align-items: start;
+           }
+           .lst-body-wrap .modal-hero {
+             grid-column: 1;
+             grid-row: 1;
+             position: sticky; top: 24px;
+             border-radius: 18px;
+             aspect-ratio: 4/3;
+           }
+           .lst-body-wrap .modal-content {
+             grid-column: 2;
+             grid-row: 1;
+             padding-bottom: 60px;
+           }
+           /* .mp-modal-cta-bar ("Send Deal") stays as its existing
+              position:fixed centered floating pill (see marketplace.css)
+              — that part already works fine on desktop once it isn't
+              sitting in the same narrow column as the description text
+              it was overlapping in the screenshot. */
+         }
+
+@media (min-width: 760px) and (max-width: 1023px) {
+           .lst-body-wrap { max-width: 760px; margin: 0 auto; }
+         }
+
 /* ── Hero — big 16:9 cover shared by all 3 types ── */
 .modal-hero { position: relative; width: 100%; aspect-ratio: 16/9; background: #121215; overflow: hidden; flex-shrink: 0; }
 
