@@ -73,11 +73,42 @@
                  #walletModalBody { padding-bottom: 40px; }
                }
 
+/* ── Wide desktop (≥1000px): the tier above only makes the same
+                  single stacked column (balance card → tabs → active
+                  panel, all full width) wider — still one column
+                  centered in empty space, same as mobile (see
+                  screenshot). This splits it into a real two-pane
+                  dialog: left pane pinned (balance + tab nav), right
+                  pane the active tab's content — same pattern as
+                  Settings. Nothing below 1000px changes. ── */
+@media (min-width: 1000px) {
+                 #walletModalInner { max-width: 880px; }
+                 #walletModalBody {
+                   max-width: none;
+                   display: flex;
+                   align-items: flex-start;
+                   gap: 28px;
+                   padding: 28px 28px calc(48px + env(safe-area-inset-bottom));
+                 }
+                 #walletModalLeft {
+                   flex: 0 0 300px;
+                   position: sticky; top: 0;
+                 }
+                 #walletModalRight {
+                   flex: 1 1 auto; min-width: 0;
+                 }
+                 #walletTabs { flex-wrap: wrap; }
+               }
+
 #walletModalBody {
                flex: 1; overflow-y: auto;
                padding: 20px 18px calc(48px + env(safe-area-inset-bottom));
                max-width: 560px; width: 100%; margin: 0 auto;
                }
+
+/* No-ops below the ≥1000px split (see media query above) — keeps
+               mobile/tablet exactly as before, just plain wrapper divs. */
+#walletModalLeft, #walletModalRight { display: contents; }
 
 /* Balance hero */
 #walletBalanceCard {
