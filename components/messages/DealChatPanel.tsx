@@ -62,7 +62,26 @@ function priceLabel(escrowAmount: number | null, listingPrice: number | null): s
   return amt != null ? "$" + Number(amt).toLocaleString() + " USD" : "the agreed amount";
 }
 
-export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
+export default function DealChatPanel({
+  chatRoomId,
+  embedded = false,
+  onBack,
+}: {
+  chatRoomId: string;
+  // Desktop split-view (see InboxShell.tsx) mounts this directly next to
+  // the thread list instead of navigating to /messages/deal/[id] as its
+  // own full-screen route. `embedded` swaps the fixed, viewport-covering
+  // wrapper for a plain flex-fill pane and skips the body scroll-lock
+  // (the parent page manages its own scrolling — locking it from inside
+  // a side-pane would be wrong). `onBack`, when provided, replaces the
+  // "return to inbox" navigation below with a plain callback (selecting
+  // no thread) instead of a route change, since there's no separate
+  // route to leave in split-view. The checkout/transfer sub-flows still
+  // navigate to their own real routes either way — those are genuine
+  // full-page steps, not just "closing" this panel.
+  embedded?: boolean;
+  onBack?: () => void;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user } = useAuth();
@@ -139,7 +158,7 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   // has its own independent overflow-y:auto and is the only thing meant
   // to still scroll while this is open — mark it exempt so the shared
   // hook's touch blocker doesn't also swallow scrolls inside it.
-  useScrollLock(true);
+  useScrollLock(!embedded);
 
   // Scroll-to-bottom behavior for the message list. Previous approach
   // used two plain useEffects keyed off chat.messages with a double-rAF
@@ -241,7 +260,8 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
           } catch (e) {
             console.warn("auto-delete cancelled chat", e);
           }
-          router.push(`/messages?tab=${originTab}`);
+          if (onBack) onBack();
+          else router.push(`/messages?tab=${originTab}`);
         })();
         return;
       }
@@ -250,7 +270,7 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [deleteAfterCancel, chatRoomId, chat.room, router]);
+  }, [deleteAfterCancel, chatRoomId, chat.room, router, onBack, originTab]);
 
   // Back/Exit should return the user to wherever they actually came from
   // (the "chats" tab, the "deals" tab, a listing page, a notification,
@@ -265,6 +285,10 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   // go back to (e.g. the chat was opened via a deep link / new tab),
   // rather than assuming history always exists.
   function closeChat() {
+    if (onBack) {
+      onBack();
+      return;
+    }
     router.push(`/messages?tab=${originTab}`);
   }
 
@@ -573,7 +597,7 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
 
   if (!user) {
     return (
-      <div style={{ position: "fixed", inset: 0, background: "#06060e", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={embedded ? { display: "flex", flex: 1, minHeight: 0, background: "#06060e", alignItems: "center", justifyContent: "center" } : { position: "fixed", inset: 0, background: "#06060e", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <SignInRequired
           withHeaderOffset={false}
           title="Sign in to view this chat"
@@ -586,7 +610,11 @@ export default function DealChatPanel({ chatRoomId }: { chatRoomId: string }) {
   const room = chat.room;
 
   return (
-    <div id="dealChatPanel" style={{ display: "flex" }}>
+    <div
+      id={embedded ? undefined : "dealChatPanel"}
+      className={embedded ? "dcp-embedded" : undefined}
+      style={{ display: "flex" }}
+    >
       <ConfirmHost />
       {requestPaymentOverlayOpen ? (
         <RequestPaymentOverlay onDone={() => setRequestPaymentOverlayOpen(false)} />
