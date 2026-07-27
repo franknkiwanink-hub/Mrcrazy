@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { useScrollLock } from "@/lib/useScrollLock";
 
@@ -32,57 +32,21 @@ import { useScrollLock } from "@/lib/useScrollLock";
 // useAuth().loading directly rather than this component signaling it,
 // since nothing else currently needs to know when the boot splash has
 // fully faded.
+//
+// NOTE: this was redesigned to drop the mascot glyph image and the
+// falling-glitter particle field entirely — both read as unpolished/
+// "sketchy" for a marketplace handling real money, and risked making
+// first-time visitors distrust the product. The mark is now a plain
+// monogram + wordmark on a calm, static background.
 const BOOT_HOLD_MS = 1500;
 const BOOT_FADE_MS = 550;
 const BOOT_SAFETY_NET_MS = 8000;
-
-interface GlitterParticle {
-  key: number;
-  style: CSSProperties & Record<"--gx" | "--gtx" | "--gy", string>;
-}
-
-// Ports the falling-glitter generator IIFE from maintenance-banned.js
-// (index.html lines 1767-1795) verbatim — same particle count, same
-// random ranges for spawn position/drift/fall distance/size/delay/
-// duration, same --gx/--gtx/--gy custom-property scheme feeding the
-// shared boot-glitter-fall keyframe. Computed once (useMemo with no
-// deps), matching the original's one-time IIFE rather than
-// regenerating a new random field on every re-render.
-function makeGlitterParticles(): GlitterParticle[] {
-  const count = 18;
-  const particles: GlitterParticle[] = [];
-  for (let i = 0; i < count; i++) {
-    const startXvw = Number((Math.random() * 80 - 40).toFixed(1));
-    const driftX = Math.round(-startXvw * 2.2);
-    const fallY = `${(54 + Math.random() * 6).toFixed(1)}vh`;
-    const size = Math.random() < 0.5 ? 3 : 4;
-    const delay = (Math.random() * 3.2).toFixed(2);
-    const dur = (2.6 + Math.random() * 0.8).toFixed(2);
-    const rotated = Math.random() < 0.5;
-    particles.push({
-      key: i,
-      style: {
-        left: `calc(50% + ${startXvw}vw)`,
-        width: size,
-        height: size,
-        transform: rotated ? "rotate(45deg)" : undefined,
-        "--gx": "0px",
-        "--gtx": `${driftX}px`,
-        "--gy": fallY,
-        animationDelay: `${delay}s`,
-        animationDuration: `${dur}s`,
-      } as GlitterParticle["style"],
-    });
-  }
-  return particles;
-}
 
 export default function BootOverlay() {
   const { loading } = useAuth();
   const [hidden, setHidden] = useState(false);
   const [removed, setRemoved] = useState(false);
   const [dismissed, setDismissed] = useState(false);
-  const [mounted, setMounted] = useState(false);
 
   // Locks body scroll (wheel/keyboard) for as long as the overlay is
   // still in the DOM. `hidden` only starts the fade-out transition —
@@ -103,14 +67,6 @@ export default function BootOverlay() {
     document.addEventListener("touchmove", blockTouch, { passive: false });
     return () => document.removeEventListener("touchmove", blockTouch);
   }, [removed]);
-
-  // Particles use Math.random(), so they must not be generated during
-  // SSR/the first client render (which has to match the server's HTML).
-  // Generating them only after mount avoids a hydration mismatch.
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-  const glitter = useMemo(() => (mounted ? makeGlitterParticles() : []), [mounted]);
 
   // Dismiss once auth resolves (loading -> false), after the same 1.5s
   // cooldown the original applies so the splash doesn't flash away
@@ -144,40 +100,32 @@ export default function BootOverlay() {
 
   return (
     <div id="appBootOverlay" className={hidden ? "boot-hidden" : undefined}>
-      <div className="boot-glitter-field" id="bootGlitterField">
-        {glitter.map((p) => (
-          <div key={p.key} className="boot-glitter" style={p.style} />
-        ))}
-      </div>
       <div className="boot-content">
         <div className="boot-mark-wrap">
           <div className="boot-mark-glyph">
-            <img
-              src="/boot-mark-glyph.png"
-              alt="Siterifty"
-              width={40}
-              height={40}
-              style={{ display: "block" }}
-            />
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path
+                d="M17 8.5c0-2.2-2-3.5-5-3.5-3.3 0-5 1.4-5 3.4 0 2.1 1.9 2.7 4.6 3.2 3.4.6 6 1.4 6 4.4 0 2.4-2.1 4-5.6 4-3.2 0-5.5-1.3-6-3.7"
+                stroke="#07100a"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </div>
           <div className="boot-mark">
             Siterifty<span>.</span>
           </div>
-          <div className="boot-tagline">Buy, sell & build digital products</div>
-        </div>
-        <div className="boot-ring-wrap">
-          <svg viewBox="0 0 56 56">
-            <circle className="boot-ring-track" cx="28" cy="28" r="24" />
-            <circle className="boot-ring-fill" cx="28" cy="28" r="24" />
-          </svg>
+          <div className="boot-tagline">Buy, sell &amp; build digital products</div>
         </div>
         <div className="boot-status-row">
-          <div className="boot-status-text">Loading your account</div>
-          <div className="boot-skel-col">
-            <div className="boot-skel-line w60" />
-            <div className="boot-skel-line" />
-            <div className="boot-skel-line w40" />
+          <div className="boot-ring-wrap">
+            <svg viewBox="0 0 56 56">
+              <circle className="boot-ring-track" cx="28" cy="28" r="24" />
+              <circle className="boot-ring-fill" cx="28" cy="28" r="24" />
+            </svg>
           </div>
+          <div className="boot-status-text">Loading your account</div>
         </div>
       </div>
     </div>
