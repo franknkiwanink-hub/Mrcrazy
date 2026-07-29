@@ -26,14 +26,16 @@
 //         this; completing it only earns the green "Verified" badge shown
 //         on the listing (see WebsiteListingForm.tsx and the listing
 //         detail page).
-//   - Of the six "Coming soon" cards, three already have real backends in
-//     app/api/aistudio/_handler.js (auto-description, scam-check,
-//     deal-message-assist) that were simply never wired into this page —
-//     those three are wired for real here via lib/aiStudio.ts's
-//     aiStudioCall, with real loading/error states, no placeholder alerts.
-//   - The other three (valuation estimate, traffic snapshot, listing health
-//     check) have NO backend anywhere in this app. They stay honest
-//     "Coming soon" cards — nothing here fakes a result for them.
+//   - All six cards are now real, working tools:
+//       - auto-description, scam-check, deal-message-assist had backends
+//         already in app/api/aistudio/_handler.js and are wired via
+//         lib/aiStudio.ts's aiStudioCall, with real loading/error states.
+//       - Valuation estimate, Traffic snapshot, and Listing health check
+//         are NEW here, and deliberately NOT AI — each is a fixed,
+//         documented formula run entirely client-side over the signed-in
+//         user's own listing data (no external analytics API, no model
+//         call). See computeValuation / computeTrafficSnapshot /
+//         computeHealth below for the exact math each one runs.
 //
 // This route fills a link that already existed and 404'd:
 // components/marketplace/AiPromoCard.tsx's "Start using AI tools" CTA
@@ -423,8 +425,234 @@ function BuyerMessageAssistCard() {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// Wired tool: Scam guard (existing backend: action 'scam-check')
+// Working tool: Valuation estimate — pure algorithm, no AI/LLM call.
+//
+// Uses the same "profit multiple" logic real marketplaces (Flippa,
+// Acquire, Empire Flippers) quote for quick ballpark estimates: a base
+// monthly-profit multiple, adjusted up/down by category, traffic, age,
+// and monetization signals actually present on the listing. Falls back
+// to a revenue-based multiple when there's no profit figure, and to a
+// traffic-based floor when there are no financials at all — every branch
+// is a fixed, documented formula over the listing's own fields, nothing
+// generated or inferred by a model.
 // ══════════════════════════════════════════════════════════════════════
+const CATEGORY_MULTIPLIER: Record<string, number> = {
+  saas: 3.6,
+  ecommerce: 2.6,
+  content: 2.2,
+  marketplace: 3.0,
+  agency: 1.8,
+  newsletter: 2.4,
+  game: 2.0,
+  app: 2.8,
+  other: 2.2,
+};
+
+function monthsSince(createdAt: unknown): number | null {
+  if (!createdAt) return null;
+  let ms: number | null = null;
+  if (typeof createdAt === "number") ms = createdAt;
+  else if (
+    typeof createdAt === "object" &&
+    createdAt !== null &&
+    "toMillis" in createdAt &&
+    typeof (createdAt as { toMillis?: () => number }).toMillis === "function"
+  ) {
+    ms = (createdAt as { toMillis: () => number }).toMillis();
+  } else if (
+    typeof createdAt === "object" &&
+    createdAt !== null &&
+    "seconds" in createdAt &&
+    typeof (createdAt as { seconds?: number }).seconds === "number"
+  ) {
+    ms = (createdAt as { seconds: number }).seconds * 1000;
+  }
+  if (!ms) return null;
+  const months = (Date.now() - ms) / (1000 * 60 * 60 * 24 * 30.44);
+  return months > 0 ? months : 0;
+}
+
+function formatMoney(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(n >= 10_000_000 ? 1 : 2)}M`;
+  if (n >= 1_000) return `$${Math.round(n / 1000)}K`;
+  return `$${Math.round(n)}`;
+}
+
+interface ValuationResult {
+  low: number;
+  mid: number;
+  high: number;
+  basis: string;
+  lines: { label: string; value: string }[];
+}
+
+function computeValuation(l: Listing): ValuationResult | null {
+  const profit = l.financials?.profit;
+  const revenue = l.financials?.revenue;
+  const visits = l.traffic?.monthlyVisits;
+  const category = (l.settings?.category || l.category || "other").toLowerCase();
+  const catMult = CATEGORY_MULTIPLIER[category] ?? CATEGORY_MULTIPLIER.other;
+
+  const ageMonths = monthsSince(l.createdAt);
+  // Older, established listings carry a small trust premium; brand-new
+  // ones (<3mo) get a small discount — capped at ±12% either way.
+  let ageAdj = 1;
+  if (ageMonths !== null) {
+    if (ageMonths >= 24) ageAdj = 1.12;
+    else if (ageMonths >= 12) ageAdj = 1.06;
+    else if (ageMonths < 3) ageAdj = 0.9;
+  }
+
+  // Traffic adds a small bonus on top of a financials-based estimate —
+  // it's supporting evidence of demand, not the primary driver when real
+  // profit/revenue numbers exist.
+  let trafficAdj = 1;
+  if (visits) {
+    if (visits >= 100_000) trafficAdj = 1.15;
+    else if (visits >= 20_000) trafficAdj = 1.08;
+    else if (visits >= 2_000) trafficAdj = 1.03;
+  }
+
+  const lines: { label: string; value: string }[] = [];
+
+  if (profit && profit > 0) {
+    const monthlyProfit = profit;
+    const mid = monthlyProfit * catMult * ageAdj * trafficAdj;
+    lines.push({ label: "Monthly profit", value: formatMoney(monthlyProfit) + "/mo" });
+    lines.push({ label: "Category multiple", value: `${catMult.toFixed(1)}×` });
+    if (ageAdj !== 1) lines.push({ label: "Age adjustment", value: `${ageAdj > 1 ? "+" : ""}${Math.round((ageAdj - 1) * 100)}%` });
+    if (trafficAdj !== 1) lines.push({ label: "Traffic bonus", value: `+${Math.round((trafficAdj - 1) * 100)}%` });
+    return { low: mid * 0.75, mid, high: mid * 1.3, basis: "monthly profit × category multiple", lines };
+  }
+
+  if (revenue && revenue > 0) {
+    // No confirmed profit — fall back to a revenue multiple at roughly
+    // half the profit multiple's weight, reflecting the extra risk of
+    // unknown margins.
+    const revMult = catMult * 0.45;
+    const mid = revenue * revMult * ageAdj * trafficAdj;
+    lines.push({ label: "Monthly revenue", value: formatMoney(revenue) + "/mo" });
+    lines.push({ label: "Revenue multiple", value: `${revMult.toFixed(1)}×` });
+    lines.push({ label: "Basis", value: "no confirmed profit — revenue-based" });
+    return { low: mid * 0.7, mid, high: mid * 1.35, basis: "monthly revenue × discounted multiple (no profit on file)", lines };
+  }
+
+  if (visits && visits > 0) {
+    // No financials at all — floor estimate purely off traffic, using a
+    // conservative $ per monthly visit that scales down for content sites
+    // and up for higher-intent categories (saas/marketplace/app).
+    const perVisit = category === "saas" || category === "marketplace" || category === "app" ? 0.35 : 0.12;
+    const mid = visits * perVisit * ageAdj;
+    lines.push({ label: "Monthly visits", value: visits.toLocaleString() });
+    lines.push({ label: "Value per visit", value: `$${perVisit.toFixed(2)}` });
+    lines.push({ label: "Basis", value: "no financials on file — traffic-based floor" });
+    return { low: mid * 0.5, mid, high: mid * 1.5, basis: "monthly traffic × category rate (no financials on file)", lines };
+  }
+
+  return null;
+}
+
+function ValuationEstimateCard({ user }: { user: NonNullable<ReturnType<typeof useAuth>["user"]> }) {
+  const [expanded, setExpanded] = useState(false);
+  const [listings, setListings] = useState<Listing[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string>("");
+
+  useEffect(() => {
+    if (!expanded || listings !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const idToken = await user.getIdToken();
+        const { listings: mine } = await fetchMyListings({ idToken });
+        if (!cancelled) setListings(mine);
+      } catch (e) {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Could not load your listings.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
+
+  const selected = (listings || []).find((l) => l.id === selectedId) || null;
+  const result = selected ? computeValuation(selected) : null;
+
+  return (
+    <ToolCard
+      icon={IconValuation}
+      name="Valuation estimate"
+      desc="Get an estimated price range based on profit, revenue, or traffic — calculated instantly, no AI involved."
+      live
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+    >
+      {loadError && <div className="srf-tools-error">{loadError}</div>}
+      {listings === null && !loadError && <div className="srf-tools-empty-hint">Loading your listings…</div>}
+      {listings !== null && listings.length === 0 && (
+        <div className="srf-tools-empty-hint">You don&apos;t have any listings yet — create one first to get an estimate.</div>
+      )}
+      {listings !== null && listings.length > 0 && (
+        <>
+          <div className="srf-tools-field">
+            <label htmlFor="srf-tools-val-select">Choose a listing</label>
+            <select
+              id="srf-tools-val-select"
+              className="srf-tools-listing-select"
+              value={selectedId}
+              onChange={(e) => setSelectedId(e.target.value)}
+            >
+              <option value="">Select a listing…</option>
+              {listings.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.title || "Untitled"}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {selected && !result && (
+            <div className="srf-tools-empty-hint">
+              Add a profit, revenue, or monthly traffic figure to this listing to get an estimate.
+            </div>
+          )}
+
+          {result && (
+            <>
+              <div className="srf-tools-val-figure">
+                <div className="srf-tools-val-amount">{formatMoney(result.mid)}</div>
+                <div className="srf-tools-val-caption">Estimated value — based on {result.basis}</div>
+              </div>
+              <div className="srf-tools-val-range">
+                <div className="srf-tools-val-range-track">
+                  <div className="srf-tools-val-range-marker" style={{ left: "50%" }} />
+                </div>
+                <div className="srf-tools-val-range-labels">
+                  <span>{formatMoney(result.low)} low</span>
+                  <span>{formatMoney(result.high)} high</span>
+                </div>
+              </div>
+              <div className="srf-tools-val-breakdown">
+                {result.lines.map((line, i) => (
+                  <div className="srf-tools-val-line" key={i}>
+                    <span>{line.label}</span>
+                    <b>{line.value}</b>
+                  </div>
+                ))}
+              </div>
+              <div className="srf-tools-result-meta">
+                Ballpark only — a fixed formula based on your listing&apos;s own numbers, not an appraisal.
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </ToolCard>
+  );
+}
+
+
 function ScamGuardCard() {
   const [expanded, setExpanded] = useState(false);
   const [text, setText] = useState("");
@@ -494,8 +722,472 @@ function ScamGuardCard() {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// Shared card shell + honest stub for the three tools with no backend
+// Working tool: Listing health check — pure rule-based rubric, no AI.
+//
+// Scores completeness/trust signals that are already known to correlate
+// with buyer confidence: media, description quality, pricing clarity,
+// traffic proof, ownership verification, tech/monetization detail. Each
+// check is a fixed weight; nothing here is inferred or generated by a
+// model — it's the same kind of checklist a marketplace's own QA team
+// would run by hand.
 // ══════════════════════════════════════════════════════════════════════
+interface HealthCheck {
+  id: string;
+  title: string;
+  text: string;
+  status: "pass" | "warn" | "fail";
+  weight: number;
+}
+
+function computeHealth(l: Listing): { score: number; checks: HealthCheck[] } {
+  const checks: HealthCheck[] = [];
+
+  // Media — first thing a buyer sees.
+  const imageCount = (l.images || []).length + (l.imageCover ? 1 : 0) + (l.appIcon ? 1 : 0);
+  if (imageCount >= 3) {
+    checks.push({ id: "media", title: "Media", text: `${imageCount} images attached — good visual coverage.`, status: "pass", weight: 15 });
+  } else if (imageCount >= 1) {
+    checks.push({ id: "media", title: "Media", text: "Only 1–2 images. Add more screenshots to build buyer trust.", status: "warn", weight: 8 });
+  } else {
+    checks.push({ id: "media", title: "Media", text: "No images at all. Listings without visuals get far fewer offers.", status: "fail", weight: 0 });
+  }
+
+  // Description — length + presence of a tagline.
+  const descLen = (l.description || "").trim().length;
+  if (descLen >= 250) {
+    checks.push({ id: "desc", title: "Description", text: `${descLen} characters — detailed and thorough.`, status: "pass", weight: 15 });
+  } else if (descLen >= 80) {
+    checks.push({ id: "desc", title: "Description", text: `${descLen} characters — a bit short. Add more detail on what makes it valuable.`, status: "warn", weight: 8 });
+  } else {
+    checks.push({ id: "desc", title: "Description", text: "Missing or very short description — buyers need context to make an offer.", status: "fail", weight: 0 });
+  }
+
+  if (l.tagline && l.tagline.trim().length > 0) {
+    checks.push({ id: "tagline", title: "Tagline", text: "One-line pitch is set — helps your listing stand out in search.", status: "pass", weight: 5 });
+  } else {
+    checks.push({ id: "tagline", title: "Tagline", text: "No tagline set. A short pitch line improves click-through in listings.", status: "warn", weight: 2 });
+  }
+
+  // Pricing clarity.
+  const price = l.financials?.price;
+  if (price && price > 0) {
+    checks.push({ id: "price", title: "Asking price", text: `Priced at ${formatMoney(price)} — clear and set.`, status: "pass", weight: 15 });
+  } else {
+    checks.push({ id: "price", title: "Asking price", text: "No asking price set — buyers can't gauge fit without one.", status: "fail", weight: 0 });
+  }
+
+  // Financial transparency — revenue/profit disclosed.
+  const hasFinancials = Boolean(l.financials?.revenue || l.financials?.profit);
+  if (hasFinancials) {
+    checks.push({ id: "financials", title: "Financials", text: "Revenue/profit figures are on file — builds serious-buyer confidence.", status: "pass", weight: 15 });
+  } else {
+    checks.push({ id: "financials", title: "Financials", text: "No revenue or profit figures. Adding them (even $0) reduces buyer hesitation.", status: "warn", weight: 6 });
+  }
+
+  // Traffic proof.
+  const visits = l.traffic?.monthlyVisits;
+  const hasProof = (l.traffic?.proofUrls || []).length > 0;
+  if (visits && hasProof) {
+    checks.push({ id: "traffic", title: "Traffic proof", text: `${visits.toLocaleString()} monthly visits with supporting proof attached.`, status: "pass", weight: 12 });
+  } else if (visits) {
+    checks.push({ id: "traffic", title: "Traffic proof", text: "Traffic claimed but no proof screenshot attached — add one for credibility.", status: "warn", weight: 5 });
+  } else {
+    checks.push({ id: "traffic", title: "Traffic proof", text: "No traffic figures provided. Optional, but strengthens the listing.", status: "warn", weight: 4 });
+  }
+
+  // Ownership verification (feeds off the Verify ownership tool above).
+  if (l.verified) {
+    checks.push({ id: "verified", title: "Ownership verification", text: `Verified for ${l.verifiedDomain || "this domain"} — shows the green badge.`, status: "pass", weight: 13 });
+  } else if (l.url || l.platforms?.webUrl) {
+    checks.push({ id: "verified", title: "Ownership verification", text: "Not verified yet. Use the Verify ownership tool above to earn the badge.", status: "warn", weight: 5 });
+  } else {
+    checks.push({ id: "verified", title: "Ownership verification", text: "No verifiable domain on this listing.", status: "warn", weight: 5 });
+  }
+
+  // Tech/monetization detail (website listings mainly, but harmless elsewhere).
+  const hasTech = Boolean(l.tech?.frontend || l.tech?.backend || l.tech?.monetization);
+  if (hasTech) {
+    checks.push({ id: "tech", title: "Tech & monetization", text: "Stack and/or monetization details provided.", status: "pass", weight: 10 });
+  } else {
+    checks.push({ id: "tech", title: "Tech & monetization", text: "No tech stack or monetization model listed.", status: "warn", weight: 4 });
+  }
+
+  const earned = checks.reduce((sum, c) => sum + c.weight, 0);
+  const score = Math.round((earned / totalPossible(checks)) * 100);
+
+  return { score: Math.max(0, Math.min(100, score)), checks };
+}
+
+// Each check's max possible weight (i.e. its "pass" weight) — used as the
+// denominator so the score is always out of a consistent 100, regardless
+// of which branch each check landed in.
+const HEALTH_MAX_WEIGHTS: Record<string, number> = {
+  media: 15,
+  desc: 15,
+  tagline: 5,
+  price: 15,
+  financials: 15,
+  traffic: 12,
+  verified: 13,
+  tech: 10,
+};
+
+function totalPossible(checks: HealthCheck[]): number {
+  return checks.reduce((sum, c) => sum + (HEALTH_MAX_WEIGHTS[c.id] ?? c.weight), 0);
+}
+
+function healthColor(score: number): string {
+  if (score >= 75) return "#a3e635";
+  if (score >= 45) return "#fbbf24";
+  return "#ff4d4d";
+}
+
+function healthVerdict(score: number): { title: string; sub: string } {
+  if (score >= 85) return { title: "Excellent — buyer-ready", sub: "This listing hits nearly every trust signal buyers look for." };
+  if (score >= 65) return { title: "Good, with room to improve", sub: "Solid listing. Fixing the warnings below will raise buyer confidence further." };
+  if (score >= 40) return { title: "Needs work", sub: "Several important details are missing — buyers may hesitate to make offers." };
+  return { title: "Incomplete", sub: "This listing is missing most of what buyers look for before offering." };
+}
+
+const CHECK_ICON_PASS = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+);
+const CHECK_ICON_WARN = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round"><path d="M12 9v4M12 17h.01" /></svg>
+);
+const CHECK_ICON_FAIL = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+);
+
+function ListingHealthCheckCard({ user }: { user: NonNullable<ReturnType<typeof useAuth>["user"]> }) {
+  const [expanded, setExpanded] = useState(false);
+  const [listings, setListings] = useState<Listing[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string>("");
+
+  useEffect(() => {
+    if (!expanded || listings !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const idToken = await user.getIdToken();
+        const { listings: mine } = await fetchMyListings({ idToken });
+        if (!cancelled) setListings(mine);
+      } catch (e) {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Could not load your listings.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
+
+  const selected = (listings || []).find((l) => l.id === selectedId) || null;
+  const health = selected ? computeHealth(selected) : null;
+  const color = health ? healthColor(health.score) : "#a3e635";
+  const verdict = health ? healthVerdict(health.score) : null;
+
+  // Ring geometry: r=34 → circumference ≈ 213.6
+  const r = 34;
+  const circumference = 2 * Math.PI * r;
+  const dashOffset = health ? circumference - (health.score / 100) * circumference : circumference;
+
+  return (
+    <ToolCard
+      icon={IconHealth}
+      name="Listing health check"
+      desc="A weighted completeness score covering media, pricing, financials, and verification — no AI, just a checklist."
+      live
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+    >
+      {loadError && <div className="srf-tools-error">{loadError}</div>}
+      {listings === null && !loadError && <div className="srf-tools-empty-hint">Loading your listings…</div>}
+      {listings !== null && listings.length === 0 && (
+        <div className="srf-tools-empty-hint">You don&apos;t have any listings yet — create one first to run a health check.</div>
+      )}
+      {listings !== null && listings.length > 0 && (
+        <>
+          <div className="srf-tools-field">
+            <label htmlFor="srf-tools-health-select">Choose a listing</label>
+            <select
+              id="srf-tools-health-select"
+              className="srf-tools-listing-select"
+              value={selectedId}
+              onChange={(e) => setSelectedId(e.target.value)}
+            >
+              <option value="">Select a listing…</option>
+              {listings.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.title || "Untitled"}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {health && verdict && (
+            <>
+              <div className="srf-tools-health-top">
+                <div className="srf-tools-health-ring">
+                  <svg viewBox="0 0 84 84">
+                    <circle className="srf-tools-health-ring-bg" cx="42" cy="42" r={r} />
+                    <circle
+                      className="srf-tools-health-ring-fill"
+                      cx="42"
+                      cy="42"
+                      r={r}
+                      stroke={color}
+                      strokeDasharray={circumference}
+                      strokeDashoffset={dashOffset}
+                    />
+                  </svg>
+                  <div className="srf-tools-health-ring-score">{health.score}</div>
+                </div>
+                <div>
+                  <div className="srf-tools-health-verdict-text">{verdict.title}</div>
+                  <div className="srf-tools-health-verdict-sub">{verdict.sub}</div>
+                </div>
+              </div>
+
+              <div className="srf-tools-health-checklist">
+                {health.checks.map((c) => (
+                  <div className={`srf-tools-health-row ${c.status}`} key={c.id}>
+                    <span className="srf-tools-health-row-icon">
+                      {c.status === "pass" ? CHECK_ICON_PASS : c.status === "warn" ? CHECK_ICON_WARN : CHECK_ICON_FAIL}
+                    </span>
+                    <div className="srf-tools-health-row-body">
+                      <div className="srf-tools-health-row-title">{c.title}</div>
+                      <div className="srf-tools-health-row-text">{c.text}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </ToolCard>
+  );
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// Working tool: Traffic snapshot — pure algorithm, no AI/LLM call.
+//
+// This app has no analytics API (GA4/Search Console/etc) behind it, so
+// this can't pull real traffic — it works with what a listing actually
+// has: a claimed monthlyVisits figure and optional proof screenshots.
+// Rather than fake a "growth chart" from nothing, it does the one honest
+// thing possible with that data: turn the raw number into a normalized
+// snapshot (daily/yearly derived figures, a percentile against fixed
+// category benchmark bands) and a credibility read based on whether the
+// claim is backed by proof. All bands/weights below are fixed constants,
+// not generated per-request.
+// ══════════════════════════════════════════════════════════════════════
+
+// Rough monthly-visit bands per category, used only to place a claimed
+// number on a relative scale (small / growing / established / large) —
+// not a prediction, just a fixed yardstick so "40,000 visits" means
+// something in context instead of floating alone.
+const TRAFFIC_BANDS: Record<string, number[]> = {
+  // [small→growing, growing→established, established→large]
+  saas: [1_000, 15_000, 100_000],
+  ecommerce: [2_000, 25_000, 150_000],
+  content: [5_000, 50_000, 300_000],
+  marketplace: [1_500, 20_000, 120_000],
+  agency: [500, 5_000, 30_000],
+  newsletter: [1_000, 10_000, 80_000],
+  game: [2_000, 30_000, 200_000],
+  app: [1_000, 20_000, 150_000],
+  other: [1_500, 15_000, 100_000],
+};
+
+function trafficTier(visits: number, bands: number[]): { label: string; percentile: number } {
+  const [b1, b2, b3] = bands;
+  if (visits < b1) {
+    return { label: "Small", percentile: Math.round((visits / b1) * 25) };
+  }
+  if (visits < b2) {
+    return { label: "Growing", percentile: 25 + Math.round(((visits - b1) / (b2 - b1)) * 35) };
+  }
+  if (visits < b3) {
+    return { label: "Established", percentile: 60 + Math.round(((visits - b2) / (b3 - b2)) * 30) };
+  }
+  return { label: "Large", percentile: Math.min(99, 90 + Math.round(((visits - b3) / b3) * 9)) };
+}
+
+interface TrafficResult {
+  visits: number;
+  daily: number;
+  yearly: number;
+  tier: string;
+  percentile: number;
+  categoryLabel: string;
+  hasProof: boolean;
+  proofCount: number;
+  credibility: "verified" | "claimed" | "unproven";
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  saas: "SaaS",
+  ecommerce: "E-commerce",
+  content: "Content site",
+  marketplace: "Marketplace",
+  agency: "Agency",
+  newsletter: "Newsletter",
+  game: "Game",
+  app: "App",
+  other: "General",
+};
+
+function computeTrafficSnapshot(l: Listing): TrafficResult | null {
+  const visits = l.traffic?.monthlyVisits;
+  if (!visits || visits <= 0) return null;
+
+  const category = (l.settings?.category || l.category || "other").toLowerCase();
+  const bands = TRAFFIC_BANDS[category] ?? TRAFFIC_BANDS.other;
+  const { label, percentile } = trafficTier(visits, bands);
+  const proofCount = (l.traffic?.proofUrls || []).length;
+
+  return {
+    visits,
+    daily: Math.round(visits / 30.44),
+    yearly: Math.round(visits * 12),
+    tier: label,
+    percentile: Math.max(1, Math.min(99, percentile)),
+    categoryLabel: CATEGORY_LABELS[category] ?? CATEGORY_LABELS.other,
+    hasProof: proofCount > 0,
+    proofCount,
+    credibility: proofCount >= 2 ? "verified" : proofCount === 1 ? "claimed" : "unproven",
+  };
+}
+
+function credibilityMeta(c: TrafficResult["credibility"]): { label: string; hint: string; cls: "pass" | "warn" | "fail" } {
+  if (c === "verified") {
+    return { label: "Verified", hint: "Backed by 2+ proof screenshots — the strongest credibility level.", cls: "pass" };
+  }
+  if (c === "claimed") {
+    return { label: "Claimed", hint: "One proof screenshot attached. Add a second (e.g. Search Console + host panel) for full credibility.", cls: "warn" };
+  }
+  return { label: "Unproven", hint: "No proof attached. Buyers heavily discount unverified traffic claims — add a screenshot.", cls: "fail" };
+}
+
+function TrafficSnapshotCard({ user }: { user: NonNullable<ReturnType<typeof useAuth>["user"]> }) {
+  const [expanded, setExpanded] = useState(false);
+  const [listings, setListings] = useState<Listing[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string>("");
+
+  useEffect(() => {
+    if (!expanded || listings !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const idToken = await user.getIdToken();
+        const { listings: mine } = await fetchMyListings({ idToken });
+        if (!cancelled) setListings(mine);
+      } catch (e) {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Could not load your listings.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded]);
+
+  const selected = (listings || []).find((l) => l.id === selectedId) || null;
+  const snap = selected ? computeTrafficSnapshot(selected) : null;
+  const cred = snap ? credibilityMeta(snap.credibility) : null;
+
+  return (
+    <ToolCard
+      icon={IconTraffic}
+      name="Traffic snapshot"
+      desc="Turns your claimed monthly visits into a category-relative snapshot and credibility read — no AI involved."
+      live
+      expanded={expanded}
+      onToggle={() => setExpanded((v) => !v)}
+    >
+      {loadError && <div className="srf-tools-error">{loadError}</div>}
+      {listings === null && !loadError && <div className="srf-tools-empty-hint">Loading your listings…</div>}
+      {listings !== null && listings.length === 0 && (
+        <div className="srf-tools-empty-hint">You don&apos;t have any listings yet — create one first to run a snapshot.</div>
+      )}
+      {listings !== null && listings.length > 0 && (
+        <>
+          <div className="srf-tools-field">
+            <label htmlFor="srf-tools-traffic-select">Choose a listing</label>
+            <select
+              id="srf-tools-traffic-select"
+              className="srf-tools-listing-select"
+              value={selectedId}
+              onChange={(e) => setSelectedId(e.target.value)}
+            >
+              <option value="">Select a listing…</option>
+              {listings.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.title || "Untitled"}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {selected && !snap && (
+            <div className="srf-tools-empty-hint">
+              Add a monthly visits figure to this listing&apos;s Traffic section to get a snapshot.
+            </div>
+          )}
+
+          {snap && cred && (
+            <>
+              <div className="srf-tools-val-figure">
+                <div className="srf-tools-val-amount">{snap.visits.toLocaleString()}</div>
+                <div className="srf-tools-val-caption">Monthly visits — {snap.tier} for a {snap.categoryLabel} listing</div>
+              </div>
+
+              <div className="srf-tools-val-range">
+                <div className="srf-tools-val-range-track">
+                  <div className="srf-tools-val-range-marker" style={{ left: `${snap.percentile}%` }} />
+                </div>
+                <div className="srf-tools-val-range-labels">
+                  <span>Small</span>
+                  <span>Large</span>
+                </div>
+              </div>
+
+              <div className="srf-tools-val-breakdown">
+                <div className="srf-tools-val-line">
+                  <span>Daily average</span>
+                  <b>{snap.daily.toLocaleString()}</b>
+                </div>
+                <div className="srf-tools-val-line">
+                  <span>Yearly projected</span>
+                  <b>{snap.yearly.toLocaleString()}</b>
+                </div>
+                <div className="srf-tools-val-line">
+                  <span>Category percentile</span>
+                  <b>~{snap.percentile}th</b>
+                </div>
+              </div>
+
+              <span className={`srf-tools-verdict ${cred.cls === "pass" ? "allowed" : cred.cls === "warn" ? "warned" : "blocked"}`}>
+                {cred.label}
+              </span>
+              <div className="srf-tools-result-box">{cred.hint}</div>
+
+              <div className="srf-tools-result-meta">
+                Percentile is relative to fixed benchmark bands for {snap.categoryLabel} listings, not live market data.
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </ToolCard>
+  );
+}
+
 function ToolCard({
   icon,
   name,
@@ -526,17 +1218,6 @@ function ToolCard({
         <span className="srf-tools-badge srf-tools-soon">Coming soon</span>
       )}
       {live && expanded && <div className="srf-tools-panel">{children}</div>}
-    </div>
-  );
-}
-
-function StubCard({ icon, name, desc }: { icon: ReactNode; name: string; desc: string }) {
-  return (
-    <div className="srf-tools-card srf-tools-locked">
-      <div className="srf-tools-tool-icon">{icon}</div>
-      <div className="srf-tools-name">{name}</div>
-      <div className="srf-tools-desc">{desc}</div>
-      <span className="srf-tools-badge srf-tools-soon">Coming soon</span>
     </div>
   );
 }
@@ -580,27 +1261,15 @@ export default function AiToolsPage() {
 
           <div className="srf-tools-section-head">
             <h3>More tools</h3>
-            <p>New tools ship regularly</p>
+            <p>Everything below is live — pick a listing and run any of them</p>
           </div>
           <div className="srf-tools-grid">
-            <StubCard
-              icon={IconValuation}
-              name="Valuation estimate"
-              desc="Get an estimated price range based on traffic, revenue, and comparable sales."
-            />
-            <StubCard
-              icon={IconTraffic}
-              name="Traffic snapshot"
-              desc="Pull a quick traffic and growth overview to include in your listing."
-            />
+            <ValuationEstimateCard user={user} />
+            <TrafficSnapshotCard user={user} />
             <AutoDescriptionCard plan={profile?.plan || "free"} />
             <BuyerMessageAssistCard />
             <ScamGuardCard />
-            <StubCard
-              icon={IconHealth}
-              name="Listing health check"
-              desc="A quick score on how complete and trustworthy your listing looks to buyers."
-            />
+            <ListingHealthCheckCard user={user} />
           </div>
         </>
       )}
