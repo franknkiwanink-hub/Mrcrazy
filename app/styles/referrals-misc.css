@@ -1675,6 +1675,128 @@
 
 .srf-tools .mono { font-family: 'JetBrains Mono', monospace; }
 
+/* ── Valuation estimate + Listing health check — algorithmic tool cards ── */
+.srf-tools-listing-select {
+  width: 100%; padding: 10px 14px;
+  background: #0d0d0d; border: 1px solid var(--st-border); border-radius: 10px;
+  color: #fff; font-size: 13.5px; font-family: inherit;
+  outline: none; transition: border-color .15s ease; margin-bottom: 4px;
+}
+
+.srf-tools-listing-select:focus { border-color: rgba(163,230,53,0.5); }
+
+.srf-tools-empty-hint {
+  margin-top: 10px; font-size: 12.5px; color: var(--st-text-faint); line-height: 1.55;
+}
+
+/* Valuation result: big number + range bar showing where the estimate
+   sits between a conservative low and an optimistic high multiple. */
+.srf-tools-val-figure {
+  margin-top: 18px; text-align: center;
+}
+
+.srf-tools-val-amount {
+  font-size: 34px; font-weight: 800; letter-spacing: -0.02em; color: var(--st-lime);
+  line-height: 1.1;
+}
+
+.srf-tools-val-caption {
+  font-size: 12px; color: var(--st-text-faint); margin-top: 4px;
+}
+
+.srf-tools-val-range {
+  margin-top: 18px;
+}
+
+.srf-tools-val-range-track {
+  position: relative; height: 6px; border-radius: 4px;
+  background: linear-gradient(90deg, rgba(163,230,53,0.15), rgba(163,230,53,0.45));
+  overflow: visible;
+}
+
+.srf-tools-val-range-marker {
+  position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--st-lime); border: 2px solid #060606;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 3px rgba(163,230,53,0.2);
+}
+
+.srf-tools-val-range-labels {
+  display: flex; justify-content: space-between; margin-top: 8px;
+  font-size: 11px; color: var(--st-text-faint);
+}
+
+.srf-tools-val-breakdown {
+  margin-top: 18px; display: flex; flex-direction: column; gap: 8px;
+}
+
+.srf-tools-val-line {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12.5px; color: var(--st-text-dim); padding: 7px 0;
+  border-bottom: 1px solid var(--st-border-soft);
+}
+
+.srf-tools-val-line:last-child { border-bottom: none; }
+
+.srf-tools-val-line b { color: #fff; font-weight: 700; }
+
+/* Health check: score ring + weighted checklist rows, each pass/warn/fail */
+.srf-tools-health-top {
+  display: flex; align-items: center; gap: 18px; margin-top: 16px;
+}
+
+.srf-tools-health-ring {
+  position: relative; width: 84px; height: 84px; flex-shrink: 0;
+}
+
+.srf-tools-health-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+
+.srf-tools-health-ring-bg { fill: none; stroke: var(--st-border-soft); stroke-width: 8; }
+
+.srf-tools-health-ring-fill {
+  fill: none; stroke-width: 8; stroke-linecap: round;
+  transition: stroke-dashoffset 0.6s cubic-bezier(.16,.84,.44,1);
+}
+
+.srf-tools-health-ring-score {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 800; color: #fff;
+}
+
+.srf-tools-health-verdict-text { font-size: 14.5px; font-weight: 700; color: #fff; margin-bottom: 3px; }
+
+.srf-tools-health-verdict-sub { font-size: 12px; color: var(--st-text-faint); line-height: 1.5; }
+
+.srf-tools-health-checklist {
+  margin-top: 18px; display: flex; flex-direction: column; gap: 2px;
+}
+
+.srf-tools-health-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--st-border-soft);
+}
+
+.srf-tools-health-row:last-child { border-bottom: none; }
+
+.srf-tools-health-row-icon {
+  width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; margin-top: 1px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.srf-tools-health-row-icon svg { width: 10px; height: 10px; stroke-width: 3.2; }
+
+.srf-tools-health-row.pass .srf-tools-health-row-icon { background: rgba(163,230,53,0.15); color: var(--st-lime); }
+
+.srf-tools-health-row.warn .srf-tools-health-row-icon { background: rgba(251,191,36,0.15); color: #fbbf24; }
+
+.srf-tools-health-row.fail .srf-tools-health-row-icon { background: rgba(255,77,77,0.15); color: var(--st-red); }
+
+.srf-tools-health-row-body { flex: 1; min-width: 0; }
+
+.srf-tools-health-row-title { font-size: 12.8px; font-weight: 700; color: #fff; }
+
+.srf-tools-health-row-text { font-size: 12px; color: var(--st-text-faint); margin-top: 2px; line-height: 1.5; }
+
 /* Extends the app's existing dark/lime identity (see :root's --mp-*
    tokens) rather than introducing a new palette — this is the same
    surface/border/text scale used everywhere else in the app. */
