@@ -12,13 +12,14 @@ import {
   type AppNotification,
 } from "@/lib/notifications";
 
-// Fullscreen "Notifications" center opened from the bell icon in the
-// announcement bar (see NotificationBellButton.tsx). Distinct from the
-// toast stack and the "while you were away" carousel — this is the
-// persistent place a seller/buyer can come back to at any time to
-// review everything: new messages, deal offers, accept/reject events,
-// escrow milestones, disputes. Read and unread both show, grouped by
-// day, newest first.
+// ══════════════════════════════════════════════════════════════════════
+// Notification Center — rebuilt from scratch. Fullscreen, pure-black
+// modal opened from the bell icon in the announcement bar. Same data
+// contract as before (useNotificationCenter, day-grouping, type filter
+// tabs, mark read / mark all read) — only the markup and styling are
+// new, now themed off --mp-accent (see notifications.css) instead of a
+// hardcoded green so it tracks the live accent color.
+// ══════════════════════════════════════════════════════════════════════
 
 function dayLabel(ms: number): string {
   if (!ms) return "Earlier";
@@ -101,7 +102,6 @@ export default function NotificationCenterModal({
   const activeFilter = TYPE_FILTERS.find((f) => f.id === filter) || TYPE_FILTERS[0];
   const filtered = items.filter((n) => activeFilter.match(n.type || "message"));
 
-  // Group by day, preserving newest-first order within each group.
   const groups: { label: string; rows: AppNotification[] }[] = [];
   for (const n of filtered) {
     const label = dayLabel(ntfToMillis(n.createdAt));
@@ -119,36 +119,39 @@ export default function NotificationCenterModal({
       }}
     >
       <div className="notif-center-panel">
-        <div className="notif-center-header">
+        <header className="notif-center-header">
           <div className="notif-center-title-row">
             <h2>Notifications</h2>
-            {unreadCount > 0 && <span className="notif-center-badge">{unreadCount > 9 ? "9+" : unreadCount} new</span>}
+            {unreadCount > 0 && (
+              <span className="notif-center-badge">{unreadCount > 9 ? "9+" : unreadCount} new</span>
+            )}
           </div>
           <div className="notif-center-actions">
             {unreadCount > 0 && (
-              <button className="notif-center-markall" onClick={() => markAllRead()}>
+              <button type="button" className="notif-center-markall" onClick={() => markAllRead()}>
                 Mark all read
               </button>
             )}
-            <button className="notif-center-close" onClick={close} aria-label="Close notifications">
+            <button type="button" className="notif-center-close" onClick={close} aria-label="Close notifications">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
                 <path d="M18 6L6 18M6 6l12 12" />
               </svg>
             </button>
           </div>
-        </div>
+        </header>
 
-        <div className="notif-center-tabs">
+        <nav className="notif-center-tabs" aria-label="Filter notifications">
           {TYPE_FILTERS.map((f) => (
             <button
               key={f.id}
+              type="button"
               className={"notif-center-tab" + (filter === f.id ? " active" : "")}
               onClick={() => setFilter(f.id)}
             >
               {f.label}
             </button>
           ))}
-        </div>
+        </nav>
 
         <div className="notif-center-list">
           {loading && items.length === 0 ? (
@@ -177,6 +180,7 @@ export default function NotificationCenterModal({
                   return (
                     <button
                       key={n.id}
+                      type="button"
                       className={"notif-center-row" + (!n.read ? " unread" : "")}
                       onClick={() => handleOpenItem(n)}
                     >
