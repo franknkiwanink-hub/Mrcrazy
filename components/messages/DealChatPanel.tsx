@@ -10,6 +10,8 @@ import {
   countdownParts,
   verifyCountdownText,
   deleteCountdownText,
+  paymentRequestCooldownText,
+  isPaymentRequestOnCooldown,
   type DealMessage,
   type PaymentStatus,
 } from "@/lib/useDealChat";
@@ -384,9 +386,9 @@ export default function DealChatPanel({
 
   async function handleRemindBuyer() {
     if (!chat.room) return;
-    // Already sent one — block further sends until it's cleared (guards
-    // against the seller spamming unlimited payment requests).
-    if (chat.room.paymentRequestPending) return;
+    // Blocked only while still within the cooldown window since the last
+    // request — allowed again once it elapses, not a lifetime-once send.
+    if (isPaymentRequestOnCooldown(chat.room.paymentRequestedAt)) return;
     const label = priceLabel(chat.room.escrowAmount, chat.room.listingPrice);
     setRequestPaymentOverlayOpen(true);
     try {
@@ -671,7 +673,7 @@ export default function DealChatPanel({
             room={room}
             isSeller={isSeller}
             busy={ctaBusy}
-            requestPending={room.paymentRequestPending}
+            requestedAt={room.paymentRequestedAt}
             onPay={handlePay}
             onRelease={handleRelease}
             onDispute={handleDispute}
@@ -921,7 +923,7 @@ function AnnouncementBar({
   room,
   isSeller,
   busy,
-  requestPending,
+  requestedAt,
   onPay,
   onRelease,
   onDispute,
@@ -931,7 +933,7 @@ function AnnouncementBar({
   room: { paymentStatus: PaymentStatus; escrowAmount: number | null; listingPrice: number | null };
   isSeller: boolean;
   busy: boolean;
-  requestPending: boolean;
+  requestedAt: number | null;
   onPay: () => void;
   onRelease: () => void;
   onDispute: () => void;
@@ -941,6 +943,26 @@ function AnnouncementBar({
   const status = room.paymentStatus;
   if (status === "complete" || status === "refunded") return null;
   const price = priceLabel(room.escrowAmount, room.listingPrice);
+
+  // Ticks every 30s so the cooldown clears and the button re-enables on
+  // its own once an hour has passed, without needing a fresh Firestore
+  // write/read to notice.
+  const [cooldownText, setCooldownText] = useState(() =>
+    requestedAt ? paymentRequestCooldownText(requestedAt) : ""
+  );
+  useEffect(() => {
+    if (!requestedAt) {
+      setCooldownText("");
+      return;
+    }
+    function tick() {
+      setCooldownText(paymentRequestCooldownText(requestedAt!));
+    }
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, [requestedAt]);
+  const requestPending = !!cooldownText;
 
   const ICON_SHIELD = <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />;
   const ICON_CARDS = (
@@ -985,7 +1007,7 @@ function AnnouncementBar({
       msg = requestPending
         ? "Payment request sent — waiting for buyer to pay " + price + " into escrow"
         : "Waiting for buyer to pay " + price + " into escrow";
-      cta = { text: requestPending ? "Request Sent" : "Request Payment", onClick: onRemindBuyer };
+      cta = { text: requestPending ? cooldownText : "Request Payment", onClick: onRemindBuyer };
     } else {
       icon = ICON_CARDS;
       label = "Payment Due";
