@@ -14,7 +14,7 @@ import { SellerNotFoundScreen } from "@/components/seller/SellerStateScreen";
 // restyled full-screen (seller header banner, bigger stat cards, longer
 // recent-donations feed, a short "how it works" trust section) for a
 // more premium/dedicated feel instead of a boxed overlay.
-const DONATION_FEE_RATE_CLIENT = 0.3;
+const DONATION_FEE_RATE_CLIENT = 0.15;
 
 interface DonationRow {
   donorName?: string;
@@ -267,7 +267,7 @@ export default function DonatePageClient({ sellerUid }: { sellerUid: string }) {
         <h1 className="dnp-hero-title">
           Support <span>{sellerName}</span>
         </h1>
-        <p className="dnp-hero-sub">A portion of each donation goes directly to them — no strings attached.</p>
+        <p className="dnp-hero-sub">Donations go straight to their wallet — no strings attached.</p>
       </div>
 
       <div className="dnp-stats-row">
@@ -323,7 +323,7 @@ export default function DonatePageClient({ sellerUid }: { sellerUid: string }) {
           {showFee && (
             <div className="dnp-fee-breakdown">
               <div className="dnp-fee-line">
-                <span>Platform fee (30%)</span>
+                <span>Platform fee (15%)</span>
                 <span>{formatBalance(fee)}</span>
               </div>
               <div className="dnp-fee-line total">
@@ -361,8 +361,8 @@ export default function DonatePageClient({ sellerUid }: { sellerUid: string }) {
         <div className="dnp-side-panel">
           <div className="dnp-how-title">How donating works</div>
           <ul className="dnp-how-list">
-            <li>Donations are processed via PayPal split payment, not your Siterifty wallet balance.</li>
-            <li>{sellerName} receives 70% directly — a 30% platform fee applies.</li>
+            <li>Funds come straight from your Siterifty wallet balance.</li>
+            <li>85% goes directly to {sellerName}&apos;s wallet — a 15% platform fee applies.</li>
             <li>Add an optional public message to let them know why you&apos;re supporting them.</li>
             <li>Donations are shown on this page and are not refundable.</li>
           </ul>
