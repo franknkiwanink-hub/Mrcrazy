@@ -330,8 +330,10 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
       if (!idToken) throw new Error("Not signed in");
       await unboostListing({ idToken, listingId });
       toast("Boost stopped.", "success");
-    } catch {
-      toast("Could not stop the boost. Please try again.", "error");
+    } catch (err) {
+      console.error("[MyProfileHub] unboost failed:", err);
+      const msg = err instanceof Error && err.message ? err.message : "Could not stop the boost. Please try again.";
+      toast(msg, "error");
     } finally {
       setUnboostingId(null);
     }
