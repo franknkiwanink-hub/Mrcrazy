@@ -84,6 +84,7 @@ export default function NavDrawer() {
   // navigation is instant.
   useEffect(() => {
     const routes = [
+      "/",
       "/myprofile",
       "/sell",
       "/marketplace",
@@ -373,6 +374,13 @@ export default function NavDrawer() {
 
         <div className="nav-section">
           <div className="nav-section-title">Browse</div>
+          <a href="/" className="nav-link" id="navHomeLink" onClick={(e) => { e.preventDefault(); go("/"); }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <path d="M3 11l9-8 9 8" />
+              <path d="M5 10v10a1 1 0 001 1h4a1 1 0 001-1v-5h2v5a1 1 0 001 1h4a1 1 0 001-1V10" />
+            </svg>
+            Home
+          </a>
           <a href="/marketplace" className="nav-link" id="navMarketplaceLink" onClick={(e) => { e.preventDefault(); go("/marketplace"); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
               <rect x="3" y="3" width="7" height="7" rx="1" />
