@@ -37,6 +37,7 @@ export interface DashboardListing {
   successfulClickCount?: number;
   failedClickCount?: number;
   createdAt?: unknown;
+  boostedUntil?: number | { toMillis?: () => number; seconds?: number };
 }
 
 export interface DashboardDeal {
