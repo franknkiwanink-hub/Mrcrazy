@@ -52,8 +52,6 @@ export interface DealMessage {
   items?: string[];
   fileCount?: number;
   senderName?: string;
-  senderPic?: string;
-  isBot?: boolean;
   aiWarning?: string;
 }
 
@@ -112,8 +110,6 @@ function messageFromDoc(id: string, m: Record<string, unknown>): DealMessage {
     items: m.items as string[] | undefined,
     fileCount: m.fileCount as number | undefined,
     senderName: m.senderName as string | undefined,
-    senderPic: m.senderPic as string | undefined,
-    isBot: m.isBot as boolean | undefined,
     aiWarning: m.aiWarning as string | undefined,
   };
 }
