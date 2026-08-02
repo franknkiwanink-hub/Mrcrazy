@@ -191,8 +191,10 @@ export default function SellerDashboard() {
       await unboostListing({ idToken, listingId });
       toast("Boost stopped.", "success");
       load(range, true);
-    } catch {
-      toast("Could not stop the boost. Please try again.", "error");
+    } catch (err) {
+      console.error("[SellerDashboard] unboost failed:", err);
+      const msg = err instanceof Error && err.message ? err.message : "Could not stop the boost. Please try again.";
+      toast(msg, "error");
     } finally {
       setUnboostingId(null);
     }
