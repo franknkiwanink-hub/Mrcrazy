@@ -152,8 +152,13 @@ export default function DiscoverPageClient() {
           <>
             {blogs.length > 0 && (
               <section className="disc-section">
-                <h2 className="disc-section-title">From the blog</h2>
-                <div className="disc-blog-grid">
+                <div className="disc-section-head">
+                  <h2 className="disc-section-title">From the blog</h2>
+                  <button type="button" className="disc-view-all" onClick={() => router.push("/blog")}>
+                    View all
+                  </button>
+                </div>
+                <div className="disc-rail">
                   {blogs.map((post) => (
                     <BlogCard key={post.id} post={post} />
                   ))}
@@ -163,17 +168,23 @@ export default function DiscoverPageClient() {
 
             {listings.length > 0 && (
               <section className="disc-section">
-                <h2 className="disc-section-title">Listings you might like</h2>
-                <div className="disc-listing-grid">
+                <div className="disc-section-head">
+                  <h2 className="disc-section-title">Listings you might like</h2>
+                  <button type="button" className="disc-view-all" onClick={() => router.push("/marketplace")}>
+                    View more
+                  </button>
+                </div>
+                <div className="disc-rail disc-rail-listings">
                   {listings.map((listing) => (
-                    <ListingCard
-                      key={listing.id}
-                      listing={listing}
-                      onOpen={(l) => router.push(`/listing/${l.id}`)}
-                      onOpenSeller={(ownerId, l) =>
-                        router.push(`/seller/${encodeURIComponent(ownerId || l.ownerId || "")}`)
-                      }
-                    />
+                    <div className="disc-rail-listing-item" key={listing.id}>
+                      <ListingCard
+                        listing={listing}
+                        onOpen={(l) => router.push(`/listing/${l.id}`)}
+                        onOpenSeller={(ownerId, l) =>
+                          router.push(`/seller/${encodeURIComponent(ownerId || l.ownerId || "")}`)
+                        }
+                      />
+                    </div>
                   ))}
                 </div>
               </section>
@@ -181,8 +192,13 @@ export default function DiscoverPageClient() {
 
             {sellers.length > 0 && (
               <section className="disc-section">
-                <h2 className="disc-section-title">Sellers to check out</h2>
-                <div className="disc-seller-grid">
+                <div className="disc-section-head">
+                  <h2 className="disc-section-title">Sellers to check out</h2>
+                  <button type="button" className="disc-view-all" onClick={() => router.push("/sellers")}>
+                    View all
+                  </button>
+                </div>
+                <div className="disc-rail">
                   {sellers.map((seller) => (
                     <SellerCard key={seller.uid} seller={seller} />
                   ))}
