@@ -34,10 +34,10 @@ const PLAN_DATA: Record<PlanKey, PlanInfo> = {
   starter: {
     name: "Starter",
     price: 10,
-    fee: "24%",
+    fee: "15%",
     color: "#60a5fa",
     tagline: "For developers listing regularly",
-    pills: ["15 listings/wk", "24% fee"],
+    pills: ["15 listings/wk", "15% fee"],
     features: [
       { text: "Escrow protection", on: true },
       { text: "Wallet access", on: true },
@@ -50,10 +50,10 @@ const PLAN_DATA: Record<PlanKey, PlanInfo> = {
   growth: {
     name: "Growth",
     price: 20,
-    fee: "18%",
+    fee: "10%",
     color: "#a3e635",
     tagline: "For serious sellers scaling up",
-    pills: ["30 listings/wk", "18% fee"],
+    pills: ["30 listings/wk", "10% fee"],
     features: [
       { text: "Escrow protection", on: true },
       { text: "Wallet access", on: true },
@@ -66,10 +66,10 @@ const PLAN_DATA: Record<PlanKey, PlanInfo> = {
   pro: {
     name: "Pro",
     price: 30,
-    fee: "12%",
+    fee: "5%",
     color: "#d8b4fe",
     tagline: "For high-volume power sellers",
-    pills: ["Unlimited listings", "12% fee"],
+    pills: ["Unlimited listings", "5% fee"],
     features: [
       { text: "Escrow protection", on: true },
       { text: "Wallet access", on: true },
