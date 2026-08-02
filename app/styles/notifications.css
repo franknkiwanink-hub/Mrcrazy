@@ -201,27 +201,34 @@
 
 #notifCenterOverlay.visible { opacity: 1; }
 
-.notif-center-panel {
-  position: absolute;
-  inset: 0;
+/* Real route at /notifications/panel — in normal document flow below the
+   global fixed Header/AnnouncementBar (see app/layout.tsx), same
+   marginTop:92 convention SellerDashboard.tsx uses for /dashboard.
+   Deliberately NOT position:fixed/inset:0 like #notifCenterOverlay above:
+   that fixed-overlay approach is what let the old modal's backdrop end up
+   inside the announcement bar's own stacking context and fail to paint
+   opaque. A plain block-level page sidesteps that class of bug entirely. */
+.notif-center-page {
   width: 100%;
-  height: 100%;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+
+.notif-center-panel {
+  width: 100%;
+  min-height: inherit;
   display: flex;
   flex-direction: column;
   background: #000;
-  transform: translateY(10px);
-  opacity: 0;
-  transition: transform 0.22s cubic-bezier(.16,.84,.44,1), opacity 0.22s;
 }
-
-#notifCenterOverlay.visible .notif-center-panel { transform: translateY(0); opacity: 1; }
 
 .notif-center-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
-  padding: calc(env(safe-area-inset-top, 0px) + 1.2rem) 1.2rem 1rem;
+  padding: 1.2rem 1.2rem 1rem;
   border-bottom: 1px solid rgba(255,255,255,0.08);
   flex-shrink: 0;
 }
@@ -315,7 +322,7 @@
   color: var(--mp-accent, #a3e635);
 }
 
-.notif-center-list { flex: 1; overflow-y: auto; padding: 0.5rem 0 2.5rem; }
+.notif-center-list { padding: 0.5rem 0 2.5rem; }
 
 .notif-center-group { padding: 0.7rem 0; }
 
