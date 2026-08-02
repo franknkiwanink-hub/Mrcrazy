@@ -1045,6 +1045,19 @@
 
 .pm-listing-boost svg { width: 12px; height: 12px; flex-shrink: 0; }
 
+.pm-listing-boost:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Unboost is a "stop/cancel" action, not the same premium upsell — muted
+     neutral fill instead of the purple gradient so it doesn't read as
+     "boost again." */
+.pm-listing-unboost {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.75);
+  }
+
+.pm-listing-unboost:hover { opacity: 1; background: rgba(255,255,255,0.1); }
+
 .pm-listing-actions-row { display: flex; width: 100%; gap: 0.5rem; }
 
 .pm-listing-actions-row button {
