@@ -78,10 +78,10 @@ export default function EscrowPage() {
           </thead>
           <tbody>
             {[
-              ["Free", "20%"],
-              ["Starter", "15%"],
-              ["Growth", "10%"],
-              ["Pro", "5%"],
+              ["Free", "30%"],
+              ["Starter", "24%"],
+              ["Growth", "18%"],
+              ["Pro", "12%"],
             ].map(([plan, fee]) => (
               <tr key={plan} style={{ borderBottom: "1px solid var(--mp-border)" }}>
                 <td style={{ padding: "8px 4px" }}>{plan}</td>
