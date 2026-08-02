@@ -12,6 +12,9 @@ import {
 import DashboardChart from "@/components/dashboard/DashboardChart";
 import DashboardWebhooksModal from "@/components/dashboard/DashboardWebhooksModal";
 import { useBoostModal } from "@/components/boost/BoostModalProvider";
+import { unboostListing } from "@/lib/listings";
+import { useConfirm } from "@/lib/useConfirm";
+import { useSrToast } from "@/components/system/SrToastProvider";
 import SignInRequired from "@/components/auth/SignInRequired";
 import { useCurrency } from "@/lib/CurrencyContext";
 import type { ChartConfiguration } from "chart.js";
@@ -23,6 +26,26 @@ import type { ChartConfiguration } from "chart.js";
 // "route-backed section" convention /settings and /myprofile already use
 // in this app, and it lets closeDashboard's original
 // `location.pathname === '/dashboard'` check carry over directly.
+// Mirrors isBoosted() in lib/listings.ts but returns whole days remaining
+// (ceil) instead of a plain boolean, or null if not currently boosted —
+// what the "Your Listings" table needs to show status + a Stop Boost
+// action instead of always offering "Boost" even on an already-boosted row.
+function boostDaysLeft(listing: { boostedUntil?: number | { toMillis?: () => number; seconds?: number } }): number | null {
+  const until = listing.boostedUntil;
+  if (!until) return null;
+  const ms =
+    typeof until === "number"
+      ? until
+      : until.toMillis
+        ? until.toMillis()
+        : until.seconds
+          ? until.seconds * 1000
+          : 0;
+  const remainingMs = ms - Date.now();
+  if (remainingMs <= 0) return null;
+  return Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+}
+
 const RANGE_LABELS: Record<DashboardRange, { label: string; sub: string }> = {
   today: { label: "Today", sub: "" },
   yesterday: { label: "Yesterday", sub: "" },
@@ -143,12 +166,37 @@ export default function SellerDashboard() {
   const { listings, dealsData, loading, error, load, reset, getAggregateDailyStats } = useSellerDashboard();
   const { openBoost } = useBoostModal();
   const { formatFinFull } = useCurrency();
+  const { confirm, ConfirmHost } = useConfirm();
+  const { show: toast } = useSrToast();
 
   const [range, setRange] = useState<DashboardRange>("today");
   const [dateModalOpen, setDateModalOpen] = useState(false);
   const [pendingRange, setPendingRange] = useState<DashboardRange>("today");
   const [webhooksOpen, setWebhooksOpen] = useState(false);
   const [isSignedIn, setIsSignedIn] = useState<boolean | null>(null);
+  const [unboostingId, setUnboostingId] = useState<string | null>(null);
+
+  async function handleUnboost(listingId: string) {
+    const ok = await confirm({
+      theme: "danger",
+      title: "Stop Boost?",
+      msg: "This listing will stop showing as boosted right away. Remaining boost time is not refunded.",
+      confirmText: "Stop Boost",
+    });
+    if (!ok) return;
+    setUnboostingId(listingId);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error("Not signed in");
+      await unboostListing({ idToken, listingId });
+      toast("Boost stopped.", "success");
+      load(range, true);
+    } catch {
+      toast("Could not stop the boost. Please try again.", "error");
+    } finally {
+      setUnboostingId(null);
+    }
+  }
 
   const [trafficChart, setTrafficChart] = useState<{ config: ChartConfiguration; pill: string } | null>(null);
   const [revenueChartCfg, setRevenueChartCfg] = useState<{ config: ChartConfiguration; pill: string } | null>(null);
@@ -543,31 +591,61 @@ export default function SellerDashboard() {
                           <td colSpan={6} className="sd-table-empty">You haven&apos;t listed anything yet.</td>
                         </tr>
                       ) : (
-                        listings.map((l) => (
+                        listings.map((l) => {
+                          const daysLeft = boostDaysLeft(l);
+                          const boosted = daysLeft !== null;
+                          return (
                           <tr key={l.id}>
                             <td>{l.title || "Untitled"}</td>
                             <td>
                               <span className={`td-status ${l.status || "active"}`}>{titleCase(l.status || "active")}</span>
+                              {boosted ? (
+                                <span
+                                  className="td-status"
+                                  style={{
+                                    marginLeft: 6, background: "rgba(163,230,53,0.14)", color: "#a3e635",
+                                    border: "1px solid rgba(163,230,53,0.35)",
+                                  }}
+                                  title={`Boosted — ${daysLeft} day${daysLeft === 1 ? "" : "s"} left`}
+                                >
+                                  Boosted · {daysLeft}d left
+                                </span>
+                              ) : null}
                             </td>
                             <td>{formatNumber(l.impressionCount || 0)}</td>
                             <td>{formatNumber(l.viewCount || 0)}</td>
                             <td>{formatNumber((l.successfulClickCount || 0) + (l.failedClickCount || 0))}</td>
                             <td>
-                              <button
-                                type="button"
-                                className="sd-listing-boost-btn"
-                                onClick={() =>
-                                  openBoost(l.id, { title: l.title, type: l.type, images: l.images, imageCover: l.imageCover })
-                                }
-                              >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
-                                </svg>
-                                Boost
-                              </button>
+                              {boosted ? (
+                                <button
+                                  type="button"
+                                  className="sd-listing-boost-btn sd-listing-unboost-btn"
+                                  disabled={unboostingId === l.id}
+                                  onClick={() => handleUnboost(l.id)}
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M18 6L6 18M6 6l12 12" />
+                                  </svg>
+                                  {unboostingId === l.id ? "Stopping…" : "Stop Boost"}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="sd-listing-boost-btn"
+                                  onClick={() =>
+                                    openBoost(l.id, { title: l.title, type: l.type, images: l.images, imageCover: l.imageCover })
+                                  }
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
+                                  </svg>
+                                  Boost
+                                </button>
+                              )}
                             </td>
                           </tr>
-                        ))
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -622,6 +700,7 @@ export default function SellerDashboard() {
       ) : null}
 
       <DashboardWebhooksModal open={webhooksOpen} onClose={() => setWebhooksOpen(false)} />
+      <ConfirmHost />
     </div>
   );
 }
