@@ -45,6 +45,7 @@ export interface ProfileListing {
   description?: string;
   images?: string[];
   status?: string;
+  boostedUntil?: number | { toMillis?: () => number; seconds?: number };
 }
 
 export interface FavoriteListing {
