@@ -100,6 +100,12 @@ export default function DiscoverPanel({
   const [listings, setListings] = useState<DiscoverListing[]>([]);
   const [sellers, setSellers] = useState<DiscoverSeller[]>([]);
   const loadedOnce = useRef(false);
+  const router = useRouter();
+
+  function goTo(path: string) {
+    onOpenChange(false);
+    router.push(path);
+  }
 
   useEffect(() => {
     setMounted(true);
@@ -191,8 +197,13 @@ export default function DiscoverPanel({
           <>
             {blogs.length > 0 && (
               <section className="disc-section">
-                <h2 className="disc-section-title">From the blog</h2>
-                <div className="disc-blog-grid">
+                <div className="disc-section-head">
+                  <h2 className="disc-section-title">From the blog</h2>
+                  <button type="button" className="disc-view-all" onClick={() => goTo("/blog")}>
+                    View all
+                  </button>
+                </div>
+                <div className="disc-rail">
                   {blogs.map((post) => (
                     <BlogCard key={post.id} post={post} />
                   ))}
@@ -202,15 +213,21 @@ export default function DiscoverPanel({
 
             {listings.length > 0 && (
               <section className="disc-section">
-                <h2 className="disc-section-title">Listings you might like</h2>
-                <div className="disc-listing-grid">
+                <div className="disc-section-head">
+                  <h2 className="disc-section-title">Listings you might like</h2>
+                  <button type="button" className="disc-view-all" onClick={() => goTo("/marketplace")}>
+                    View more
+                  </button>
+                </div>
+                <div className="disc-rail disc-rail-listings">
                   {listings.map((listing) => (
-                    <ListingCard
-                      key={listing.id}
-                      listing={listing}
-                      onOpen={onOpen}
-                      onOpenSeller={onOpenSeller}
-                    />
+                    <div className="disc-rail-listing-item" key={listing.id}>
+                      <ListingCard
+                        listing={listing}
+                        onOpen={onOpen}
+                        onOpenSeller={onOpenSeller}
+                      />
+                    </div>
                   ))}
                 </div>
               </section>
@@ -218,8 +235,13 @@ export default function DiscoverPanel({
 
             {sellers.length > 0 && (
               <section className="disc-section">
-                <h2 className="disc-section-title">Sellers to check out</h2>
-                <div className="disc-seller-grid">
+                <div className="disc-section-head">
+                  <h2 className="disc-section-title">Sellers to check out</h2>
+                  <button type="button" className="disc-view-all" onClick={() => goTo("/sellers")}>
+                    View all
+                  </button>
+                </div>
+                <div className="disc-rail">
                   {sellers.map((seller) => (
                     <SellerCard key={seller.uid} seller={seller} />
                   ))}
