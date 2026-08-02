@@ -222,6 +222,25 @@ export default function WelcomeBackScreen() {
       <div id="welcomeBackScreen" className="active">
         <div className="wb-orb" />
         <div className="wb-shell">
+          <button
+            type="button"
+            className="wb-corner-close"
+            aria-label="Continue to Siterifty"
+            onClick={() => setActive(false)}
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
           <div className="wb-sticky-top">
             <div className="wb-top">
               <div
