@@ -6,11 +6,11 @@ import { useAuthModal } from "@/components/auth/AuthModalProvider";
 import { useScrollLock } from "@/lib/useScrollLock";
 import { useCurrency } from "@/lib/CurrencyContext";
 
-// Fixed 30% platform fee — mirrors DONATION_FEE_RATE in paypal.js. Used
+// Fixed 15% platform fee — mirrors DONATION_FEE_RATE in paypal.js. Used
 // here only for the live "seller receives" preview as the donor types;
 // the server recomputes this independently and is the real source of
 // truth for what's actually charged.
-const DONATION_FEE_RATE_CLIENT = 0.3;
+const DONATION_FEE_RATE_CLIENT = 0.15;
 
 interface DonationRow {
   donorName?: string;
@@ -229,7 +229,7 @@ export default function DonateOverlay({
               <div id="spDonateTitle">
                 Support <span id="spDonateSellerName">{sellerName}</span>
               </div>
-              <div id="spDonateSubtitle">A portion of each donation goes directly to them.</div>
+              <div id="spDonateSubtitle">Donations go straight to their wallet.</div>
             </div>
           </div>
         </div>
@@ -295,7 +295,7 @@ export default function DonateOverlay({
         {showFee && (
           <div className="wallet-fee-breakdown" id="spDonateFeeRow">
             <div className="wallet-fee-line">
-              <span>Platform fee (30%)</span>
+              <span>Platform fee (15%)</span>
               <span id="spDonateFee">{formatBalance(fee)}</span>
             </div>
             <div className="wallet-fee-line total">
