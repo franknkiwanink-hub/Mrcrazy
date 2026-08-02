@@ -25,6 +25,16 @@ import { auth, db } from "@/lib/firebase";
 
 export type PaymentStatus = "unfunded" | "funded" | "delivered" | "disputed" | "complete" | "refunded";
 
+// How long a seller must wait before sending another payment-request
+// reminder to the buyer for the same deal. Previously paymentRequestPending
+// was a one-way flag that only ever got set, never cleared on its own —
+// so once a seller sent one reminder, they were blocked from ever sending
+// another for that deal (a lifetime-1 limit, not an anti-spam cooldown).
+// Now it's a rolling window off paymentRequestedAt: sending is allowed
+// again once this many ms have passed since the last request, still
+// blocking rapid repeat sends without permanently locking the seller out.
+const PAYMENT_REQUEST_COOLDOWN_MS = 60 * 60 * 1000;
+
 export interface DealMessage {
   id: string;
   uid: string;
@@ -433,10 +443,12 @@ export function useDealChat(chatRoomId: string) {
   const remindBuyer = useCallback(
     async (price: string) => {
       if (!room?.buyerUid) return;
-      // Guard: don't let the seller keep sending unlimited payment
-      // requests — once one is pending, block further sends until it's
-      // cleared (buyer pays, deal is cancelled, etc.).
-      if (room.paymentRequestPending) return;
+      // Guard: don't let the seller spam unlimited payment requests —
+      // block re-sending until PAYMENT_REQUEST_COOLDOWN_MS has passed
+      // since the last one, rather than blocking forever after the
+      // first send.
+      const lastRequestedAt = room.paymentRequestedAt || 0;
+      if (Date.now() - lastRequestedAt < PAYMENT_REQUEST_COOLDOWN_MS) return;
       const requestedAt = Date.now();
       await updateDoc(doc(db, "dealChats", chatRoomId), {
         paymentRequestPending: true,
@@ -494,7 +506,20 @@ export function verifyCountdownText(autoReleaseAt: number): string {
   return `Auto-confirms in ${h}h ${m}m`;
 }
 
-export function deleteCountdownText(deleteAt: number): string {
+export function paymentRequestCooldownText(paymentRequestedAt: number): string {
+  const ms = paymentRequestedAt + PAYMENT_REQUEST_COOLDOWN_MS - Date.now();
+  if (ms <= 0) return "";
+  const s = Math.floor(ms / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `Try again in ${h}h ${m}m`;
+  return `Try again in ${m}m`;
+}
+
+export function isPaymentRequestOnCooldown(paymentRequestedAt: number | null): boolean {
+  if (!paymentRequestedAt) return false;
+  return Date.now() - paymentRequestedAt < PAYMENT_REQUEST_COOLDOWN_MS;
+}
   const ms = deleteAt - Date.now();
   if (ms <= 0) return "deleting chat…";
   const s = Math.floor(ms / 1000);
