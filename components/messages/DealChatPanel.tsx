@@ -1157,28 +1157,6 @@ function MessageRow({
 
   const isMine = m.uid === currentUid;
 
-  // Siterifty AI bot messages (isBot) — the built-in auto-accept
-  // announcement, never sent by a real user. Rendered with its own row
-  // shape (avatar + name + bubble) distinct from both the plain system
-  // banner above and the normal buyer/seller bubble below.
-  if (m.isBot) {
-    return (
-      <div className="dcp-msg-row theirs bot-msg">
-        <div className="dcp-bot-avatar">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={m.senderPic || "/favicon-32x32.png"} alt="" />
-        </div>
-        <div className="dcp-bot-body">
-          <div className="dcp-msg-meta">
-            <span className="dcp-msg-name">{m.senderName || "Siterifty AI"}</span>
-            <span className="dcp-msg-time">{fmtTime(m.createdAt)}</span>
-          </div>
-          <div className="dcp-bubble">{m.text}</div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className={`dcp-msg-row ${isMine ? "mine" : "theirs"}`}>
       <div className="dcp-msg-meta">
