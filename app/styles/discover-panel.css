@@ -98,7 +98,12 @@
 .disc-view-all:hover { text-decoration: underline; }
 
 /* Each section scrolls independently — horizontal rail, never wraps to a
-                  new row and never shares scroll state with the other sections. */
+                  new row and never shares scroll state with the other sections.
+                  The rail bleeds out to the full viewport width (cancelling
+                  .disc-body's side padding) and re-adds that padding as
+                  scroll-padding inside itself — otherwise cards get hard-clipped
+                  right at .disc-body's edge mid-scroll instead of showing a
+                  clean peek of the next card. */
 .disc-rail {
                display: flex;
                flex-wrap: nowrap;
@@ -107,7 +112,9 @@
                overflow-y: hidden;
                scroll-snap-type: x proximity;
                -webkit-overflow-scrolling: touch;
-               padding-bottom: 4px;
+               padding: 2px 18px 12px;
+               margin: 0 -18px;
+               width: calc(100% + 36px);
                }
 
 .disc-rail::-webkit-scrollbar { height: 6px; }
@@ -158,10 +165,16 @@
                }
 
 /* Listings — reuses the real marketplace card components via
-                  ListingCard; each item gets a fixed rail width so
-                  ListingCard's own internal layout is untouched. */
-.disc-rail-listing-item { width: 220px; display: flex; height: 100%; }
-.disc-rail-listing-item > * { flex: 1 1 auto; width: 100%; }
+                  ListingCard. Site/App/Game/Asset cards each have a
+                  different internal template (fixed-size icon block vs.
+                  21:9 media banner vs. plain text), so align-self:stretch
+                  alone can't make them match — stretching the outer flex
+                  box doesn't reshape those fixed-ratio inner blocks. A
+                  fixed height on the rail item, paired with overflow
+                  handling on the card body, is what actually makes every
+                  card in the row line up regardless of listing type. */
+.disc-rail-listing-item { width: 220px; height: 360px; }
+.disc-rail-listing-item > * { height: 100%; width: 100%; overflow: hidden; }
 
 /* Sellers — mirrors .mp-ts-card's avatar/name/stars layout
                   from the Premium sellers strip, as its own vertical card
@@ -201,7 +214,7 @@
 
 @media (max-width: 360px) {
                  .disc-blog-card { width: 220px; }
-                 .disc-rail-listing-item { width: 180px; }
+                 .disc-rail-listing-item { width: 180px; height: 330px; }
                  .disc-seller-card { width: 130px; }
                }
 
