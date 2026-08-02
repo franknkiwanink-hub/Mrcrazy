@@ -148,6 +148,17 @@
 
 .sd-listing-boost-btn svg { width: 12px; height: 12px; flex-shrink: 0; }
 
+.sd-listing-boost-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Unboost is a "stop/cancel" action, not the same premium upsell — muted
+     neutral fill instead of the purple accent used for "Boost". */
+.sd-listing-unboost-btn {
+  background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.14);
+  color: rgba(255,255,255,0.75);
+}
+
+.sd-listing-unboost-btn:hover { background: rgba(255,255,255,0.09); border-color: rgba(255,255,255,0.22); }
+
 .sd-quick-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; padding: 20px 0 8px; }
 
 .sd-quick-stat { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; padding: 14px 14px 12px; text-align: center; }
