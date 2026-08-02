@@ -96,8 +96,8 @@ export default function TermsPage() {
           When a deal completes, Siterifty deducts a platform fee from the sale price and credits
           the remainder to the seller&apos;s withdrawable balance, which the seller can then have
           paid out to a PayPal email, bank account, or Bitcoin address on file. The fee rate depends
-          on the seller&apos;s plan at the time of sale (currently 30% on Free, 24% on Starter, 18%
-          on Growth, 12% on Pro), plus a separate buyer service fee — both are disclosed before you
+          on the seller&apos;s plan at the time of sale (currently 20% on Free, 15% on Starter, 10%
+          on Growth, 5% on Pro), plus a separate buyer service fee — both are disclosed before you
           pay or accept a deal.
         </p>
       </StaticSection>
