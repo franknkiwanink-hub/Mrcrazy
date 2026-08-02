@@ -1,2040 +1,3436 @@
-// /api/aistudio.js
-// Siterifty AI Studio — single entry point for every AI feature on the
-// platform, plus a couple of non-AI features folded in here purely to
-// stay under the hobby-plan serverless function count:
-//   1. Support chat ("Chay")               action: 'chat'
-//   2. User-to-user chat scam guard        action: 'scam-check'
-//   3. Listing auto-description generator  action: 'auto-description'
-//   4. Send-deal message assist            action: 'deal-message-assist'
-//   5. Reports/disputes auto-triage        action: 'triage-report' | 'triage-dispute'
-//   6. Feedback suggestion dedupe          action: 'feedback-dedupe' (gray-zone tiebreaker only)
-//   7. "Recommended for you" listings      action: 'recommendations' (no AI call — folded in from old /api/aisearch.js)
-//   8. In-app feedback board               action: 'feedback-submit' | 'feedback-list-top' | 'feedback-vote-existing' | 'feedback-list-archive' | 'feedback-get-cycle' | 'feedback-list-for-review' | 'feedback-set-status' | 'check-nudge' (folded in from old /api/feedback.js; weekly 7-day cycle with a permanent top-3-per-week archive, see the FEATURE comment block below for the full schema)
-//   9. Seller AI agent's model calls       action: 'agent-deal-decision' | 'agent-auto-reply' (internal-token only — called by the AI agent module folded into api/deal.js, which owns eligibility/quota/scheduling and settles deals via its own settleDealCore)
+// /api/deal.js — Siterifty deal & escrow handler
+// ─────────────────────────────────────────────────────────────────────────────
+// Single source of truth for ALL deal and escrow operations.
+// Previously split across limits.js (create/accept/reject/cancel-deal) and
+// paypal.js (escrow-pay/deliver/release/refund/dispute). Centralised here so
+// deal logic lives in one place and is easy to audit, extend, and test.
 //
-// Providers: Groq (GROQ_API_KEY) + Google AI Studio / Gemini (GEMINI_API_KEY).
-// Every feature has a PRIMARY model and an ordered FALLBACK chain. If a call
-// fails (rate limit, 5xx, timeout) we automatically try the next model in the
-// chain. This matters because several Groq free-tier models here are capped
-// at ~1K requests/day — a single point of failure would take the feature down
-// for the rest of the day.
+// POST /api/deal  { action, idToken, ...params }
 //
-// Env vars required: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL,
-// FIREBASE_PRIVATE_KEY, GROQ_API_KEY, GEMINI_API_KEY
+//   ── Deal lifecycle ────────────────────────────────────────────────────────
+//   action: 'create-deal'   { idToken, listingId, message, offerPrice? }
+//                            → { allowed: true, dealId }
+//                            → 409 if a pending deal already exists
+//
+//   action: 'accept-deal'   { idToken, dealId }
+//                            → { allowed: true, chatRoomId, expiresAt }
+//                            Seller only. Creates deal chat room atomically.
+//
+//   action: 'reject-deal'   { idToken, dealId }
+//                            → { allowed: true }
+//                            Seller only.
+//
+//   action: 'cancel-deal'   { idToken, dealId }
+//                            → { allowed: true }
+//                            Buyer only.
+//
+//   ── Escrow lifecycle ──────────────────────────────────────────────────────
+//   Status machine:
+//     accepted → funded → delivered → complete
+//                        ↘ disputed → (refunded | complete via support)
+//     accepted → refunded  (buyer or seller cancels before funded)
+//
+//   action: 'escrow-pay'    { idToken, chatRoomId, dealId, amount }
+//                            Buyer pays wallet → escrow. Sets status='funded'.
+//                            → { success: true, escrowAmount }
+//
+//   action: 'escrow-deliver' { idToken, chatRoomId, dealId }
+//                            Seller marks as delivered. Sets status='delivered'.
+//                            Does NOT release funds — buyer must confirm.
+//                            → { success: true }
+//
+//   action: 'escrow-release' { idToken, chatRoomId, dealId }
+//                            Buyer confirms delivery. Credits seller wallet.
+//                            Sets status='complete'. Closes chat room.
+//                            → { success: true }
+//
+//   action: 'escrow-refund'  { idToken, chatRoomId, dealId }
+//                            Seller or buyer triggers refund. Refunds buyer wallet.
+//                            Sets status='refunded'. Closes chat room.
+//                            → { success: true }
+//
+//   action: 'escrow-dispute' { idToken, chatRoomId, dealId, reason }
+//                            Either party raises a dispute. Freezes escrow.
+//                            Creates a record in /disputes for admin review.
+//                            → { success: true }
+//
+//   action: 'escrow-get-download-url' { idToken, chatRoomId, dealId, storagePath }
+//                            Mints a short-lived (5 min) signed URL for a deal
+//                            deliverable stored in private Supabase storage.
+//                            Caller must be the buyer or seller on the deal.
+//                            Allowed while status is funded/delivered/disputed;
+//                            refused once complete or refunded — the buyer has
+//                            already had their verification window, so the
+//                            link is not kept alive indefinitely after the
+//                            transaction closes. (The file itself isn't
+//                            deleted — that's governed separately by
+//                            storage.js's autoCleanup — this only gates the
+//                            app-level ability to fetch a fresh link to it.)
+//                            → { url, expiresIn }
+//
+//   ── Seller Dashboard ──────────────────────────────────────────────────────
+//   action: 'list-my-deals' { idToken, range?, limit? }
+//                            → { ok: true, deals, revenue, dealsCompleted }
+//                            Caller's own deals (any status), newest first,
+//                            optionally filtered to a range matching the
+//                            dashboard's filter bar ('today'|'yesterday'|
+//                            'this-week'|'this-month'|'last-90'|'lifetime').
+//                            revenue/dealsCompleted only count status:'complete'
+//                            + dealOutcome:'successful' deals, same rule as
+//                            get-seller-stats.
+//
+// Firestore paths touched:
+//   users/{uid}/deals/{dealId}
+//   dealChats/{chatRoomId}
+//   dealChats/{chatRoomId}/messages/*
+//   users/{uid}/threads/{chatRoomId}
+//   users/{uid}/notifications/*
+//   users/{uid}/transactions/*
+//   disputes/*
+//   listings/{listingId}        (read only — to populate deal fields)
+//
+// All mutations run via Firebase Admin SDK inside Firestore transactions.
+// The client must NOT write directly to any of the above paths.
+//
+// ── AI agent module (below, same file) ────────────────────────────────────
+// The seller's AI agent (folded into this file — see "AI AGENT" section
+// near the bottom) accepts/rejects a pending deal by calling settleDealCore()
+// directly, going through the EXACT SAME transaction, chat-room creation,
+// and notification/email logic as a manual accept/reject — there is only
+// one accept/reject implementation in the app, not a duplicate "agent
+// version." The agent module used to be a separate /api/agent.js file; it
+// now lives here purely to stay under the hobby-plan serverless function
+// count (each file under /api is its own function slot).
+// ─────────────────────────────────────────────────────────────────────────────
 
-import admin from 'firebase-admin';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { supabaseCreateSignedUrl, findAccountById, deleteFiles } from '../_lib/storage.js';
+import { LIMITS } from '../_lib/limits.js';
+import { sendPushToUser } from '../_lib/push.js';
+import { dispatchWebhook } from '../_lib/webhooks.js';
+import crypto from 'crypto';
 
-// ── Firebase Admin init (singleton across invocations) ──
+// ═════════════════════════════════════════════════════════════════════════════
+// EMAIL (Resend) — sent only for the "big" moments: deal received, accepted,
+// payment funded, delivered, released (incl. auto-release), refunded (incl.
+// auto), disputed. Everyday chat/system messages stay in-app only.
 //
-// During `next build`, Next.js imports/parses every API route module as
-// part of the build's collection phase — even though this handler never
-// actually runs at build time. Vercel's build container does not have the
-// production Firebase env vars populated then, so admin.credential.cert()
-// would throw ("Service account object must contain a string 'project_id'
-// property.") purely from module evaluation and crash the whole build.
-// Fall back to a dummy credential in that case so the module can load; any
-// real Firestore call made through this dummy credential at runtime would
-// still fail loudly (as it should) if the real env vars are truly missing
-// in production.
-if (!admin.apps.length) {
-  let credential;
-  if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-    credential = admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+// Fire-and-forget by design, same philosophy as the in-app notification
+// writes elsewhere in this file: a slow or failing email must never hold up
+// or fail the underlying money/deal transaction. Every call site awaits this
+// AFTER the Firestore transaction has already committed, and errors are
+// caught and logged, never thrown.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const RESEND_API_KEY  = process.env.RESEND_API_KEY;
+const EMAIL_FROM       = process.env.DEAL_EMAIL_FROM || 'Siterifty <deals@dlsvalue.site>';
+const SITE_ORIGIN      = process.env.SITE_ORIGIN || process.env.PUBLIC_BASE_URL || '';
+
+// Brand accent per event — small visual language so buyers/sellers can
+// tell at a glance (before even reading) whether an email is good news,
+// informational, or needs attention.
+const EMAIL_ACCENTS = {
+  success: { bar: '#16a34a', chip: '#dcfce7', chipText: '#166534' }, // money in / deal won
+  info:    { bar: '#2563eb', chip: '#dbeafe', chipText: '#1e40af' }, // status update
+  warn:    { bar: '#d97706', chip: '#fef3c7', chipText: '#92400e' }, // needs action
+  danger:  { bar: '#dc2626', chip: '#fee2e2', chipText: '#991b1b' }, // dispute / rejected
+};
+
+// One shared, modern HTML shell. `accentKey` picks the color language,
+// `eyebrow` is the small label chip above the headline, everything else is
+// free-form content rendered as a single content block for simplicity —
+// callers pass fully-formed inner HTML (kept short/plain per email).
+function renderDealEmail({ accentKey = 'info', eyebrow, heading, bodyHtml, ctaLabel, ctaUrl, footerNote }) {
+  const accent = EMAIL_ACCENTS[accentKey] || EMAIL_ACCENTS.info;
+  const year = new Date().getFullYear();
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${heading}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(16,24,40,0.08);">
+          <tr>
+            <td style="height:5px;background:${accent.bar};line-height:0;font-size:0;">&nbsp;</td>
+          </tr>
+          <tr>
+            <td style="padding:32px 32px 8px 32px;">
+              <div style="display:inline-block;padding:4px 12px;border-radius:999px;background:${accent.chip};color:${accent.chipText};font-size:12px;font-weight:600;letter-spacing:0.02em;text-transform:uppercase;">
+                ${eyebrow}
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:12px 32px 0 32px;">
+              <h1 style="margin:0;font-size:22px;line-height:1.3;color:#0f1222;font-weight:700;">${heading}</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 32px 8px 32px;font-size:15px;line-height:1.6;color:#3f4354;">
+              ${bodyHtml}
+            </td>
+          </tr>
+          ${ctaUrl ? `
+          <tr>
+            <td style="padding:16px 32px 8px 32px;">
+              <a href="${ctaUrl}" style="display:inline-block;background:#0f1222;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 22px;border-radius:10px;">
+                ${ctaLabel || 'View deal'}
+              </a>
+            </td>
+          </tr>` : ''}
+          <tr>
+            <td style="padding:24px 32px 0 32px;">
+              <div style="height:1px;background:#eef0f4;"></div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 32px 32px 32px;font-size:12px;line-height:1.6;color:#9aa0ae;">
+              ${footerNote || 'You are receiving this because it relates to an active deal on Siterifty.'}
+              <br>© ${year} Siterifty. All rights reserved.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+// Low-level send — direct HTTPS call to Resend's API (no SDK dependency).
+// Swallows all errors; callers never need their own try/catch.
+async function sendResendEmail({ to, subject, html }) {
+  if (!RESEND_API_KEY) {
+    console.warn('[deal-email] RESEND_API_KEY not configured — skipping email:', subject);
+    return;
+  }
+  if (!to) {
+    console.warn('[deal-email] no recipient email — skipping:', subject);
+    return;
+  }
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+      },
+      body: JSON.stringify({ from: EMAIL_FROM, to, subject, html }),
     });
-  } else {
-    credential = {
-      getAccessToken: () => Promise.resolve({ access_token: 'dummy', expires_in: 3600 }),
-    };
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error('[deal-email] Resend API error', res.status, errText);
+    }
+  } catch (err) {
+    console.error('[deal-email] send failed (non-fatal):', err.message);
   }
-  admin.initializeApp({ credential });
 }
-// Lazy so `admin.firestore()` — which throws immediately if the credential
-// isn't a real cert/ADC credential — never runs at module-import time (e.g.
-// during `next build` page-data collection). It only runs the first time a
-// request handler actually touches `db`, by which point real env vars are
-// present in production.
-let _db;
-const db = new Proxy({}, {
-  get(_target, prop) {
-    if (!_db) _db = admin.firestore();
-    return _db[prop];
-  },
-});
-const FieldValue = admin.firestore.FieldValue;
 
-// ════════════════════════════════════════════════════════════════════════
-// PROVIDER ROUTER
+// High-level helper used by every call site below. `chatRoomId` (if present)
+// links the CTA straight to the deal chat; otherwise it links to the deals
+// inbox. Kept as one function so every email shares the same URL-building
+// and shell-rendering logic.
+function dealCtaUrl(chatRoomId) {
+  if (!SITE_ORIGIN) return null; // no CTA button if we don't know our own origin
+  return chatRoomId
+    ? `${SITE_ORIGIN}/?deal=${encodeURIComponent(chatRoomId)}`
+    : `${SITE_ORIGIN}/?tab=deals`;
+}
+
+async function sendDealEmail({ to, accentKey, eyebrow, heading, bodyHtml, ctaLabel, chatRoomId, subject }) {
+  const html = renderDealEmail({
+    accentKey,
+    eyebrow,
+    heading,
+    bodyHtml,
+    ctaLabel,
+    ctaUrl: dealCtaUrl(chatRoomId),
+  });
+  await sendResendEmail({ to, subject: subject || heading, html });
+}
+
+// ── Combined email + push helper ─────────────────────────────────────────────
+// "Two birds" — email and push are two independent delivery channels with
+// different failure modes (bad/unverified sender domain, spam folder, no
+// inbox at all vs. no active push subscription, browser never granted
+// permission, stale endpoint). Firing both means a single-channel outage
+// doesn't mean the user misses the notification entirely. Each channel is
+// awaited but isolated with its own .catch() so a failure in one never
+// blocks or suppresses the other — see sendDealEmail (never throws) and
+// sendPushToUser (never throws) for how each channel fails safely on its own.
 //
-// A "model spec" is { provider: 'groq' | 'gemini', model: '<id>' }.
-// callModel() normalizes both providers to the same shape the rest of this
-// file uses: { content, tool_calls } — so feature code never has to know
-// which provider actually answered.
-//
-// IMPORTANT: model ID strings below are taken directly from the rate-limit
-// table provided when this router was built. Verify exact API model-ID
-// strings (they can differ slightly from dashboard display names) against
-// https://console.groq.com/docs/models and Google AI Studio before relying
-// on this in production — some names here (Gemini 3.x line) could not be
-// independently verified at the time this file was written.
-// ════════════════════════════════════════════════════════════════════════
-
-const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GEMINI_URL = (model) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
-
-async function callGroq({ model, messages, tools, temperature, max_tokens }) {
-  const res = await fetch(GROQ_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      ...(tools ? { tools, tool_choice: 'auto' } : {}),
-      temperature: temperature ?? 0.4,
-      max_tokens: max_tokens ?? 1000,
+// `uid` is required for push (push looks up subscriptions by uid) but email
+// params are otherwise identical to sendDealEmail's.
+async function notifyDeal({ uid, to, accentKey, eyebrow, heading, bodyHtml, ctaLabel, chatRoomId, subject, pushBody }) {
+  await Promise.all([
+    sendDealEmail({ to, accentKey, eyebrow, heading, bodyHtml, ctaLabel, chatRoomId, subject }).catch(err => {
+      console.error('[deal-notify] email failed (non-fatal):', err?.message);
     }),
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`groq:${model} ${res.status} ${errText}`);
-  }
-  const data = await res.json();
-  const choice = data.choices?.[0];
-  return {
-    content: choice?.message?.content ?? '',
-    tool_calls: choice?.message?.tool_calls ?? null,
-    raw_message: choice?.message ?? null,
-  };
+    uid ? sendPushToUser(uid, {
+      title: heading,
+      // Push notifications render as plain text (no HTML), and are shown in
+      // a small OS-level bubble — so this uses a short, plain-text body
+      // rather than reusing bodyHtml (which contains <strong> tags meant for
+      // the email's rich HTML rendering).
+      body: pushBody || heading,
+      url: dealCtaUrl(chatRoomId) || '/',
+    }).catch(err => {
+      console.error('[deal-notify] push failed (non-fatal):', err?.message);
+    }) : Promise.resolve(),
+  ]);
 }
 
-// Gemini's REST shape differs from OpenAI's. We translate a plain
-// system+messages array into Gemini's { systemInstruction, contents } shape.
-// Tool-calling on Gemini uses a different schema (functionDeclarations); for
-// simplicity/reliability, Gemini is used here as a TEXT/VISION fallback
-// (no tool-calls) — if a Groq tool-calling model chain is fully exhausted,
-// the feature falls back to a plain-text Gemini answer instead of erroring.
-async function callGemini({ model, messages, temperature, max_tokens, imageParts }) {
-  const systemMsg = messages.find(m => m.role === 'system');
-  const rest = messages.filter(m => m.role !== 'system' && m.role !== 'tool');
 
-  const contents = rest.map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }],
-  }));
-
-  // Attach images (for vision use-cases) to the final user turn.
-  if (imageParts?.length && contents.length) {
-    contents[contents.length - 1].parts.push(...imageParts);
-  }
-
-  const body = {
-    contents,
-    ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
-    generationConfig: {
-      temperature: temperature ?? 0.4,
-      maxOutputTokens: max_tokens ?? 1000,
-    },
-  };
-
-  const res = await fetch(GEMINI_URL(model), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`gemini:${model} ${res.status} ${errText}`);
-  }
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
-  return { content: text, tool_calls: null, raw_message: null };
-}
-
-// ── Daily usage tracking ──
-// Each provider resets its daily (RPD) quota at a different clock boundary:
-//   - Google AI Studio: midnight Pacific Time, every day, regardless of when
-//     you hit the cap.
-//   - Groq: daily quotas reset on a rolling 24h-from-first-use / UTC daily
-//     cycle per Groq's own docs. We bucket Groq by UTC calendar day here;
-//     adjust getDateBucket() if Groq's dashboard shows a different boundary
-//     for your account tier.
-// RPM/TPM (per-minute) limits are NOT tracked here — those are rolling
-// windows, not daily, so a 429 on those is handled by the reactive catch in
-// callWithFallback() rather than by this proactive counter.
-function getDateBucket(provider) {
-  const now = new Date();
-  if (provider === 'gemini') {
-    // Convert to Pacific Time (UTC-8 standard / UTC-7 daylight). Using
-    // Intl so DST is handled correctly rather than a fixed offset.
-    const pt = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(now);
-    return pt; // 'YYYY-MM-DD' in Pacific time
-  }
-  // Groq: bucket by UTC calendar day.
-  return now.toISOString().slice(0, 10);
-}
-
-async function getUsageCount(provider, model) {
-  const bucket = getDateBucket(provider);
-  const docId = `${provider}__${model.replace(/\//g, '_')}__${bucket}`;
+// ── Internal call into /api/aistudio for AI triage ──
+// Fire-and-forget from the caller's perspective — dispute filing must never
+// fail or slow down because the AI is slow/down. AISTUDIO_INTERNAL_TOKEN lets
+// aistudio.js trust this as a server-to-server call rather than requiring a
+// user's Firebase ID token (there isn't a "user" for this specific call —
+// it's this backend calling another backend route).
+async function triggerAiTriage({ kind, id, evidence }) {
   try {
-    const snap = await db.collection('aiUsage').doc(docId).get();
-    return snap.exists ? (snap.data().count || 0) : 0;
+    const base = process.env.PUBLIC_BASE_URL
+      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
+    if (!base) {
+      console.warn('[deal] no base URL configured (PUBLIC_BASE_URL/VERCEL_URL) — skipping AI triage trigger');
+      return;
+    }
+    await fetch(`${base}/api/aistudio`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Token': process.env.AISTUDIO_INTERNAL_TOKEN || '',
+      },
+      body: JSON.stringify({
+        action: kind === 'dispute' ? 'triage-dispute' : 'triage-report',
+        [kind === 'dispute' ? 'disputeId' : 'reportId']: id,
+        evidence,
+      }),
+    });
   } catch (err) {
-    console.error('[aistudio] usage read failed, assuming 0:', err.message);
-    return 0; // fail open — don't block calls if Firestore hiccups
+    // Non-fatal — the dispute/report record still exists and can be triaged
+    // manually or retried later; we just log so it's visible in Vercel logs.
+    console.error('[deal] AI triage trigger failed (non-fatal):', err.message);
   }
 }
 
-async function incrementUsageCount(provider, model) {
-  const bucket = getDateBucket(provider);
-  const docId = `${provider}__${model.replace(/\//g, '_')}__${bucket}`;
+// ── Firebase Admin singleton ─────────────────────────────────────────────────
+function getAdminDb() {
+  if (!getApps().length) {
+    initializeApp({
+      credential: cert({
+        projectId:   process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      }),
+    });
+  }
+  return getFirestore();
+}
+
+// ── Admin session verification ───────────────────────────────────────────────
+// Mirrors admin.js's / paypal.js's cookie sign/verify exactly (same
+// COOKIE_NAME, same SESSION_SECRET, same HMAC-SHA256 format) so the same
+// admin_session cookie works across every serverless function without a
+// second login. Gates admin-only actions (dispute resolution) that must
+// NOT be reachable with a regular user's Firebase idToken.
+const ADMIN_COOKIE_NAME = 'admin_session';
+function verifyAdminSession(req) {
+  const header = req.headers.cookie || '';
+  const cookies = {};
+  header.split(';').forEach((part) => {
+    const idx = part.indexOf('=');
+    if (idx === -1) return;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (k) cookies[k] = decodeURIComponent(v);
+  });
+  const raw = cookies[ADMIN_COOKIE_NAME];
+  if (!raw) return null;
+  const dotIdx = raw.lastIndexOf('.');
+  if (dotIdx === -1) return null;
+  const payloadB64 = raw.slice(0, dotIdx);
+  const sig = raw.slice(dotIdx + 1);
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) return null;
+  const expectedSig = crypto.createHmac('sha256', secret).update(payloadB64).digest('hex');
+  const a = Buffer.from(sig, 'hex');
+  const b = Buffer.from(expectedSig, 'hex');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  let payload;
   try {
-    await db.collection('aiUsage').doc(docId).set({
-      provider, model, bucket,
-      count: FieldValue.increment(1),
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+    payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (!payload.exp || Date.now() > payload.exp) return null;
+  return payload; // { email, iat, exp }
+}
+
+// ── Firebase ID token verification ───────────────────────────────────────────
+const FIREBASE_WEB_API_KEY = 'AIzaSyCMdI_bIYse6j3GyGDBnbE6FoGNnPKaMao';
+
+async function verifyFirebaseToken(idToken) {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_WEB_API_KEY}`,
+    {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ idToken }),
+    }
+  );
+  if (!res.ok) throw new Error('Invalid Firebase token');
+  const data = await res.json();
+  const user = data.users?.[0];
+  if (!user) throw new Error('User not found');
+  return user; // { localId, email, displayName, ... }
+}
+
+// ── Deal expiry (imported from limits constants) ──────────────────────────────
+// How long an accepted deal has to be delivered before it auto-cancels.
+// Different listing types genuinely take different amounts of work to hand
+// over, so each gets its own target — but nothing is allowed to run past the
+// 14-day hard cap regardless of type.
+const DEAL_CHAT_EXPIRY_MS_BY_TYPE = {
+  game:    7  * 24 * 60 * 60 * 1000,  // games: usually a fast handover
+  app:     14 * 24 * 60 * 60 * 1000,  // apps: store transfers, signing keys, etc. take longer
+  website: 14 * 24 * 60 * 60 * 1000,  // websites: capped down from a natural 21d to the 14d hard max
+};
+const DEAL_CHAT_EXPIRY_MS_DEFAULT = 14 * 24 * 60 * 60 * 1000; // fallback / hard cap
+const DEAL_CHAT_EXPIRY_HARD_CAP_MS = 14 * 24 * 60 * 60 * 1000;
+
+function dealExpiryMsForType(listingType) {
+  const ms = DEAL_CHAT_EXPIRY_MS_BY_TYPE[listingType] || DEAL_CHAT_EXPIRY_MS_DEFAULT;
+  return Math.min(ms, DEAL_CHAT_EXPIRY_HARD_CAP_MS);
+}
+
+// Once the seller marks a deal delivered, the buyer has this long to confirm
+// receipt (or raise a dispute) before the deal auto-completes and funds
+// release automatically. This is intentionally separate from — and does NOT
+// close the chat like — the pre-delivery deadline above: the buyer can keep
+// asking questions in the chat right up until this window closes.
+const DEAL_AUTO_RELEASE_MS = 72 * 60 * 60 * 1000; // 72 hours
+
+// ── Minimum deal message length — single source of truth is
+//    limits.js LIMITS.deals.messageMinLength, never duplicated here.
+const DEAL_MSG_MIN_LENGTH = LIMITS.deals.messageMinLength;
+
+// ── Platform escrow fee recipient ────────────────────────────────────────────
+// The seller's plan-based cut (LIMITS.saleFees — 30%/24%/18%/12% by plan) is
+// deducted at escrow release and credited to this account's wallet, same as
+// any other wallet credit (walletBalance + withdrawableBalance, transaction
+// record, notification). The account is identified by email, set via the
+// ADMIN_EMAIL environment variable (set in Vercel → Project → Settings →
+// Environment Variables) — never hardcoded here, so the fee recipient can be
+// changed without touching code or redeploying from source. Same variable
+// name and pattern as paypal.js — both files must agree on who collects
+// platform fees, so this is intentionally not a separate/independent value.
+// Resolved once by email and cached in memory for the life of the serverless
+// instance — a Firestore query by email has no place inside the money-moving
+// transaction in _releaseEscrowForRoom, so this resolves ahead of time
+// instead.
+//
+// Lowercased at read time: Firebase Auth normalizes user emails to lowercase
+// on the users/{uid} doc, but there's nothing stopping ADMIN_EMAIL from being
+// entered with different casing in Vercel (e.g. 'Siterifty@gmail.com') — a
+// Firestore '==' query is case-sensitive, so that mismatch alone silently
+// fails the lookup even though the account exists. Normalizing here means
+// casing in the env var can never cause this again.
+//
+// Returns null (does NOT throw) if ADMIN_EMAIL is unset or the account can't
+// be found — escrow release must never block a real buyer/seller transaction
+// over a platform misconfiguration. Callers fall back to crediting the fee
+// into the platformFeesUnclaimed ledger (see _creditPlatformFeeOrLedger
+// below) instead of a live wallet when this returns null, so the fee is
+// still deducted and fully accounted for per-user, just not yet delivered
+// anywhere — nothing is silently discarded.
+const PLATFORM_FEE_ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase() || null;
+let _platformFeeAdminUidCache = null;
+
+async function getPlatformFeeAdminUid(db) {
+  if (_platformFeeAdminUidCache) return _platformFeeAdminUidCache;
+  if (!PLATFORM_FEE_ADMIN_EMAIL) {
+    console.error('[deal.js] ADMIN_EMAIL is not set — platform fees will be ledgered as unclaimed instead of credited live. Set it in Vercel → Project → Settings → Environment Variables.');
+    return null;
+  }
+  const snap = await db.collection('users')
+    .where('email', '==', PLATFORM_FEE_ADMIN_EMAIL)
+    .limit(1)
+    .get();
+  if (snap.empty) {
+    console.error(`[deal.js] Platform fee admin account (${PLATFORM_FEE_ADMIN_EMAIL}) not found — platform fees will be ledgered as unclaimed instead of credited live.`);
+    return null;
+  }
+  _platformFeeAdminUidCache = snap.docs[0].id;
+  return _platformFeeAdminUidCache;
+}
+
+// ── Unclaimed platform fees ledger ───────────────────────────────────────────
+// Used whenever a platform fee is correctly computed and deducted from the
+// paying party, but there's nowhere to credit it live (ADMIN_EMAIL unset or
+// unresolvable). The fee is NEVER silently discarded and the payer's own
+// transaction record always shows the real amount they were charged — this
+// ledger exists purely so the *platform's* side of that same fee isn't lost
+// while the admin account is misconfigured. Each doc is one such instance,
+// fully attributed (who, what deal/transfer, how much, when) so a follow-up
+// script can sweep platformFeesUnclaimed into the real admin wallet once
+// ADMIN_EMAIL is fixed, crediting the exact right historical amount.
+async function _ledgerUnclaimedFee(db, { amount, source, sourceId, payerUid, counterpartyUid, note }) {
+  try {
+    await db.collection('platformFeesUnclaimed').add({
+      amount,
+      source,          // 'escrow_release' | 'p2p_transfer' | 'donation'
+      sourceId,         // dealId / chatRoomId / transfer doc id, whatever identifies the originating transaction
+      payerUid,         // whose money this fee was deducted from
+      counterpartyUid,  // the other party on the transaction, if any
+      note,
+      claimed: false,
+      createdAt: FieldValue.serverTimestamp(),
+    });
   } catch (err) {
-    console.error('[aistudio] usage increment failed (non-fatal):', err.message);
+    // Ledger write is best-effort logging on top of a fee that's already
+    // been correctly deducted from the payer inside the real transaction —
+    // never let a ledger failure retroactively break or reverse that.
+    console.error('[deal.js] failed to write unclaimed-fee ledger entry (non-fatal)', err.message);
   }
 }
 
-// Try each model in `chain` in order until one succeeds. `chain` is an array
-// of model specs: [{provider:'groq', model:'...', rpd:N}, ...].
-// Before calling a model we check its counted usage today against its rpd
-// cap (90% safety margin) and skip straight to the next model if it's
-// likely exhausted — this avoids wasting a round-trip on a call we can
-// already predict will 429. We still catch actual 429s as a fallback for
-// cases where our counter is out of sync (e.g. other traffic hitting the
-// same key outside this app).
-async function callWithFallback(chain, params, { requireContent = false } = {}) {
-  let lastErr;
-  for (const spec of chain) {
-    if (spec.rpd) {
-      const used = await getUsageCount(spec.provider, spec.model);
-      if (used >= spec.rpd * 0.9) {
-        console.warn(`[aistudio] skipping ${spec.provider}:${spec.model} — ${used}/${spec.rpd} daily requests used`);
-        continue;
-      }
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN HANDLER
+// ─────────────────────────────────────────────────────────────────────────────
+export default async function handler(req, res) {
+  // sweep-expired-deals is a system/cron action — no end-user idToken exists
+  // for it, so it's authenticated with a shared secret instead (Vercel Cron
+  // convention: set CRON_SECRET in your project env vars, and Vercel sends
+  // it automatically as "Authorization: Bearer <CRON_SECRET>" on scheduled
+  // requests). It also accepts GET since Vercel Cron requests are GET.
+  const isSweepRequest =
+    (req.method === 'GET' && (req.query?.action === 'sweep-expired-deals')) ||
+    (req.method === 'POST' && (req.body?.action === 'sweep-expired-deals'));
+
+  if (isSweepRequest) {
+    const authHeader = req.headers['authorization'] || '';
+    const providedSecret = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : (req.body?.cronSecret || req.query?.cronSecret || '');
+    const expectedSecret = process.env.CRON_SECRET || '';
+    if (!expectedSecret || providedSecret !== expectedSecret) {
+      return res.status(401).json({ error: 'Unauthorized' });
     }
     try {
-      const out = spec.provider === 'groq'
-        ? { ...(await callGroq({ ...params, model: spec.model })), usedModel: `groq:${spec.model}` }
-        : { ...(await callGemini({ ...params, model: spec.model })), usedModel: `gemini:${spec.model}` };
-      // Some callers (e.g. auto-description) need actual prose back — a model
-      // can return HTTP 200 with empty/blank content (max_tokens hit before
-      // any text, a safety filter emptying the candidate, tool-call-only
-      // response with no message text, etc.). Without this check that was
-      // treated as a *success* with an empty string, so the description box
-      // silently stayed blank with no error shown anywhere. Treat it as a
-      // failure here so we fall through to the next model in the chain, and
-      // only give up (with a real error message) once every model has either
-      // errored or come back empty.
-      if (requireContent && !(out.content || '').trim()) {
-        lastErr = new Error(`${out.usedModel} returned an empty response`);
-        console.error('[aistudio] model returned empty content, trying next:', out.usedModel);
-        continue;
-      }
-      incrementUsageCount(spec.provider, spec.model); // fire-and-forget, don't block the response
-      return out;
+      return await handleSweepExpiredDeals(req, res);
     } catch (err) {
-      lastErr = err;
-      const isRateLimit = /429|rate.?limit|resource_exhausted/i.test(err.message);
-      if (isRateLimit) {
-        // Our counter may be stale (e.g. shared key usage elsewhere) — mark
-        // this model as maxed for the rest of today so we stop retrying it.
-        await db.collection('aiUsage').doc(`${spec.provider}__${spec.model.replace(/\//g, '_')}__${getDateBucket(spec.provider)}`)
-          .set({ count: spec.rpd || 999999 }, { merge: true }).catch(() => {});
-      }
-      console.error('[aistudio] model failed, trying next:', err.message);
+      console.error('[deal.js] sweep-expired-deals', err.message);
+      return res.status(500).json({ error: err.message || 'Internal error' });
     }
   }
-  throw new Error(`All models in chain exhausted. Last error: ${lastErr?.message}`);
-}
 
-// ── Per-feature model chains ──
-// NOTE ON PROMPT GUARD: meta-llama/llama-prompt-guard-2-* is a jailbreak /
-// prompt-injection CLASSIFIER, not a scam-detector — it's trained to catch
-// attempts to manipulate an LLM, not human-to-human "pay me outside escrow"
-// scams. For the marketplace scam-guard we use it only as a cheap first-pass
-// filter on the incoming text, then run the actual scam judgment through
-// gpt-oss-safeguard-20b (a policy-classification model) with a scam-specific
-// policy. Both run before a message is ever delivered.
-// `rpd` = requests/day cap from the provider table used to build this router.
-// Used by the usage tracker below to proactively skip a model BEFORE it 429s,
-// instead of waiting for a failed call. Gemini models reset at midnight
-// Pacific Time; Groq resets on its own daily cycle (UTC) per Groq's docs —
-// see getDateBucket() below for how each is computed.
-const CHAINS = {
-  chat: [
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'groq', model: 'openai/gpt-oss-120b', rpd: 1000 },
-    { provider: 'groq', model: 'qwen/qwen3-32b', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash', rpd: 20 },
-  ],
-  scamGuardClassifier: [ // fast first pass, injection/jailbreak style signals
-    { provider: 'groq', model: 'meta-llama/llama-prompt-guard-2-86m', rpd: 14400 },
-    { provider: 'groq', model: 'meta-llama/llama-prompt-guard-2-22m', rpd: 14400 },
-  ],
-  scamGuardJudge: [ // actual scam-pattern judgment
-    { provider: 'groq', model: 'openai/gpt-oss-safeguard-20b', rpd: 1000 },
-    { provider: 'groq', model: 'qwen/qwen3-32b', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  autoDescription: [
-    { provider: 'groq', model: 'openai/gpt-oss-20b', rpd: 1000 },
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  dealMessageAssist: [
-    { provider: 'groq', model: 'openai/gpt-oss-20b', rpd: 1000 },
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  reportsTriage: [
-    { provider: 'groq', model: 'openai/gpt-oss-120b', rpd: 1000 },
-    { provider: 'groq', model: 'qwen/qwen3-32b', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash', rpd: 20 },
-  ],
-  vision: [ // image reading (listing photos, dispute evidence) — Groq has no
-            // vision-capable text model in our current lineup, so this is
-            // Gemini-only.
-    { provider: 'gemini', model: 'gemini-2.5-flash', rpd: 20 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  feedbackDedupe: [ // tiny yes/no classification — feedback.js's local text
-                     // similarity handles almost every case on its own; this
-                     // chain only gets called for the rare gray-zone pair
-                     // that local scoring can't confidently call, so it's
-                     // fine to put on the smallest/cheapest models.
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'groq', model: 'qwen/qwen3-32b', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  agentDealDecision: [ // seller AI agent: accept/reject/hold judgment on a
-                        // pending deal — see handleAgentDealDecision below
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'groq', model: 'openai/gpt-oss-120b', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  agentAutoReply: [ // seller AI agent: drafts a reply in a deal chat
-    { provider: 'groq', model: 'openai/gpt-oss-20b', rpd: 1000 },
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-};
+  // agent-sweep is the AI agent's cron tick (Vercel Cron, every minute) —
+  // same trust model as sweep-expired-deals above, so it reuses the same
+  // CRON_SECRET rather than introducing a second cron secret for what is,
+  // from an auth standpoint, an identical "trusted scheduler" situation.
+  const isAgentSweepRequest =
+    (req.method === 'GET' && req.query?.action === 'agent-sweep') ||
+    (req.method === 'POST' && req.body?.action === 'agent-sweep');
 
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 1 — Support chat ("Chay")
-// ════════════════════════════════════════════════════════════════════════
-
-const PLATFORM_INFO = `
-You are Siterifty Support, the friendly, knowledgeable AI assistant for Siterifty — a marketplace where small developers buy and sell websites, apps, and games.
-
-🎯 YOUR JOB:
-- Welcome users by name.
-- Answer any question about how the platform works in clear, step‑by‑step detail.
-- Look up the CALLER'S OWN deals when asked (use get_my_deals tool).
-- File a report against another user via the report_user tool only when the caller explicitly asks to report someone.
-- If you cannot do something, don't just say "I can't". Explain exactly why, and suggest what the user CAN do instead.
-- NEVER invent data or claim you looked up something you didn't fetch.
-
-📚 PLATFORM DETAILS:
-- Sellers list a website/app/game with a price.
-- Buyers send a "deal" (offer/intro message) on a listing.
-- The seller can Accept or Reject the deal.
-- Accepting creates a private chat named "Deal · <first two words>…" between buyer and seller.
-- That chat auto‑locks (read‑only) 7 days after acceptance. Both sides must complete handover/payment within that window.
-- Users can report others for bad behaviour. If someone types "@username" while asking you to report, use the report_user tool. Do NOT ask them to report manually.
-
-🔒 PRIVACY RULES:
-- You can see only the CALLER'S own profile and deals.
-- You CANNOT see other users' private info (email, deals, messages).
-- If asked to reveal another user's details, politely decline and offer to help with their own account or suggest filing a report if appropriate.
-
-🗣️ TONE:
-- Be warm, concise, and helpful — like a real support person.
-- Break down complex answers into numbered steps.
-- Use examples when it helps.
-`;
-
-const CHAT_TOOLS = [
-  {
-    type: 'function',
-    function: {
-      name: 'report_user',
-      description: 'File a report against another user (by @username) and notify them. Use ONLY when the caller clearly asks to report someone. Returns the report ID if successful.',
-      parameters: {
-        type: 'object',
-        properties: {
-          username: { type: 'string', description: 'The username being reported, without the @ symbol.' },
-          reason: { type: 'string', description: 'Short summary of why they are being reported.' },
-        },
-        required: ['username', 'reason'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_my_deals',
-      description: "Fetch the CALLER'S own deals (buyer or seller) including status, expiration, and listing title. Returns only the caller's data.",
-      parameters: { type: 'object', properties: {}, required: [] },
-    },
-  },
-];
-
-async function resolveUsernamePublic(username) {
-  const clean = username.replace(/^@/, '').trim().toLowerCase();
-  if (!clean) return null;
-  const snap = await db.collection('users').where('usernameLower', '==', clean).limit(1).get();
-  if (snap.empty) {
-    const snap2 = await db.collection('users').where('username', '==', clean).limit(1).get();
-    if (snap2.empty) return null;
-    const d = snap2.docs[0];
-    return { uid: d.id, username: d.data().username || clean };
-  }
-  const d = snap.docs[0];
-  return { uid: d.id, username: d.data().username || clean };
-}
-
-async function toolReportUser({ username, reason }, callerUid, callerName) {
-  const target = await resolveUsernamePublic(username);
-  if (!target) return { ok: false, message: `I couldn't find a user named @${username.replace(/^@/, '')}.` };
-  if (target.uid === callerUid) return { ok: false, message: "You can't report yourself." };
-
-  const reportRef = db.collection('reports').doc();
-  const now = FieldValue.serverTimestamp();
-  await reportRef.set({
-    reportedUid: target.uid,
-    reportedUsername: target.username,
-    reporterUid: callerUid,
-    reporterName: callerName || 'A user',
-    reason: reason || 'No reason provided',
-    status: 'open',
-    source: 'ai_support',
-    createdAt: now,
-  });
-
-  await db.collection('users').doc(target.uid).collection('notifications').add({
-    type: 'report_filed',
-    title: 'You were reported',
-    body: `Someone reported your account. Our team will review it. If you believe this was a mistake, you can contact support.`,
-    read: false,
-    createdAt: now,
-  });
-
-  return { ok: true, message: `Filed a report against @${target.username} and notified them. Report ID: ${reportRef.id}` };
-}
-
-async function toolGetMyDeals(callerUid) {
-  const snap = await db.collection('users').doc(callerUid).collection('deals')
-    .orderBy('createdAt', 'desc').limit(20).get();
-  const deals = snap.docs.map(d => {
-    const v = d.data();
-    return {
-      id: d.id,
-      listingTitle: v.listingTitle || 'Untitled',
-      status: v.status || 'pending',
-      role: v.sellerUid === callerUid ? 'seller' : 'buyer',
-      expiresAt: v.expiresAt || null,
-      createdAt: v.createdAt?.toMillis ? v.createdAt.toMillis() : null,
-    };
-  });
-  return { deals };
-}
-
-async function handleChat({ messages, callerUid, callerName }) {
-  if (!Array.isArray(messages) || !messages.length) {
-    throw httpError(400, 'messages array required');
-  }
-
-  const systemPrompt = `${PLATFORM_INFO}\n\nThe person you're talking to is logged in as "${callerName}" (uid: ${callerUid}). Greet them warmly and use the tools available to look up their own deals or file a report. If you cannot do something, explain exactly why and suggest what they CAN do.`;
-
-  const chatMessages = [
-    { role: 'system', content: systemPrompt },
-    ...messages.slice(-20),
-  ];
-
-  let result = await callWithFallback(CHAINS.chat, { messages: chatMessages, tools: CHAT_TOOLS });
-
-  let loopGuard = 0;
-  while (result.tool_calls && result.tool_calls.length && loopGuard < 3) {
-    loopGuard++;
-    chatMessages.push(result.raw_message);
-
-    for (const call of result.tool_calls) {
-      let args = {};
-      try { args = JSON.parse(call.function.arguments || '{}'); } catch { /* default {} */ }
-
-      let toolResult;
-      if (call.function.name === 'report_user') {
-        toolResult = await toolReportUser(args, callerUid, callerName);
-      } else if (call.function.name === 'get_my_deals') {
-        toolResult = await toolGetMyDeals(callerUid);
-      } else {
-        toolResult = { ok: false, message: 'Unknown tool' };
-      }
-
-      chatMessages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(toolResult) });
+  if (isAgentSweepRequest) {
+    const authHeader = req.headers['authorization'] || '';
+    const providedSecret = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : (req.body?.cronSecret || req.query?.cronSecret || '');
+    const expectedSecret = process.env.CRON_SECRET || '';
+    if (!expectedSecret || providedSecret !== expectedSecret) {
+      return res.status(401).json({ error: 'Unauthorized' });
     }
-
-    result = await callWithFallback(CHAINS.chat, { messages: chatMessages, tools: CHAT_TOOLS });
+    try {
+      return await handleAgentSweep(req, res);
+    } catch (err) {
+      console.error('[deal.js] agent-sweep', err.message);
+      return res.status(500).json({ error: err.message || 'Internal error' });
+    }
   }
 
-  return {
-    reply: result.content || "I'm not sure how to help with that — could you rephrase? I'm here to assist with your account, deals, and platform questions.",
-    model: result.usedModel,
-  };
-}
+  // agent-limits is a public, read-only plan/usage lookup (shown on the
+  // agent settings panel) — no idToken required, same exemption pattern as
+  // get-seller-stats below.
+  if (req.method === 'GET' && req.query?.action === 'agent-limits') {
+    try {
+      return await handleAgentLimits(req, res);
+    } catch (err) {
+      console.error('[deal.js] agent-limits', err.message);
+      return res.status(500).json({ error: err.message || 'Internal error' });
+    }
+  }
 
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 2 — User-to-user chat scam guard
-//
-// Behavior (per product decision): auto-delete on HIGH-confidence scam
-// signals (off-platform payment requests, phishing links, fake escrow
-// impersonation, etc). On LOWER-confidence/ambiguous signals, deliver the
-// message but attach a warning banner instead of deleting it.
-// Every check is logged to `moderationLogs` regardless of outcome, so
-// patterns and false-positives can be audited later.
-// ════════════════════════════════════════════════════════════════════════
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
-const SCAM_POLICY = `
-You are a scam-detection classifier for Siterifty, a marketplace where users chat 1:1 to complete deals (buying/selling websites, apps, games) through escrow-protected transactions.
+  const { action, idToken } = req.body || {};
 
-Classify the message below for SCAM RISK. Common scam patterns on this platform:
-- Asking to pay or communicate "outside the platform" / "off Siterifty" to avoid fees or escrow protection.
-- Sharing external payment links, wallet addresses, or "faster" payment methods that bypass escrow.
-- Impersonating Siterifty staff, support, or escrow/admin.
-- Urgency/pressure tactics ("deal expires in 5 minutes, pay now via this link").
-- Requesting sensitive credentials (passwords, 2FA codes, hosting/domain logins) outside the normal secure handover flow.
-- Fake "buyer already paid, just send the code first" pressure before funds actually clear.
+  // get-seller-stats is a public, read-only aggregate (shown on any seller's
+  // public profile modal to any visitor, signed in or not) — it doesn't
+  // touch or expose anything auth-gated, so it's exempt from the idToken
+  // requirement that guards every other action below.
+  if (action === 'get-seller-stats') {
+    try {
+      return await handleGetSellerStats(req, res);
+    } catch (err) {
+      console.error('[deal.js] get-seller-stats', err.message);
+      return res.status(500).json({ error: err.message || 'Internal error' });
+    }
+  }
 
-Respond ONLY with strict JSON, no markdown, no commentary:
-{"risk": "high" | "low" | "none", "reason": "<one short sentence>"}
+  // record-profile-view is a public, write-only counter bump — fired by the
+  // frontend every time any visitor (signed in or not) opens a seller's
+  // public profile. Same exemption pattern as get-seller-stats above: it
+  // doesn't read or expose anything auth-gated, it just increments a field
+  // on the seller's own user doc, so no idToken is required to fire it.
+  if (action === 'record-profile-view') {
+    try {
+      return await handleRecordProfileView(req, res);
+    } catch (err) {
+      console.error('[deal.js] record-profile-view', err.message);
+      return res.status(500).json({ error: err.message || 'Internal error' });
+    }
+  }
 
-"high" = confident this is a scam attempt, message should be blocked.
-"low" = suspicious pattern but not conclusive, message should be delivered with a warning.
-"none" = normal deal conversation, no concern.
-`;
+  // admin-resolve-dispute is an ADMIN-ONLY action, authenticated via the
+  // admin_session cookie (verifyAdminSession) rather than a user idToken —
+  // it must be exempted from the idToken requirement below, same pattern as
+  // get-seller-stats/record-profile-view, but its own handler does its own
+  // (stricter) auth check immediately, so this is not actually public.
+  if (action === 'admin-resolve-dispute') {
+    try {
+      return await handleAdminResolveDispute(req, res);
+    } catch (err) {
+      console.error('[deal.js] admin-resolve-dispute', err.message);
+      return res.status(500).json({ error: err.message || 'Internal error' });
+    }
+  }
 
-async function classifyScamRisk(text) {
-  // First pass: cheap injection/jailbreak-style classifier as a quick filter.
-  // (Prompt Guard scores adversarial-prompt patterns; we treat a high score
-  // here only as a signal to weight the judge step more heavily, not as a
-  // verdict on its own — it isn't trained on marketplace scam language.)
-  let guardFlag = false;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+
   try {
-    const guardRes = await callWithFallback(CHAINS.scamGuardClassifier, {
-      messages: [{ role: 'user', content: text }],
-      max_tokens: 20,
-    });
-    guardFlag = /malicious|injection|jailbreak/i.test(guardRes.content || '');
+    switch (action) {
+      // ── Deal lifecycle ───────────────────────────────────────────────────
+      case 'create-deal':    return await handleCreateDeal(req, res, idToken);
+      case 'accept-deal':    return await handleAcceptDeal(req, res, idToken);
+      case 'reject-deal':    return await handleRejectDeal(req, res, idToken);
+      case 'cancel-deal':    return await handleCancelDeal(req, res, idToken);
+
+      // ── Escrow lifecycle ─────────────────────────────────────────────────
+      case 'escrow-pay':     return await handleEscrowPay(req, res, idToken);
+      case 'escrow-deliver': return await handleEscrowDeliver(req, res, idToken);
+      case 'escrow-release': return await handleEscrowRelease(req, res, idToken);
+      case 'escrow-refund':  return await handleEscrowRefund(req, res, idToken);
+      case 'escrow-dispute': return await handleEscrowDispute(req, res, idToken);
+
+      // ── Deliverable access ───────────────────────────────────────────────
+      case 'escrow-get-download-url': return await handleEscrowGetDownloadUrl(req, res, idToken);
+
+      // ── GitHub repo sharing (manual, seller-triggered) ───────────────────
+      case 'invite-github-collaborator':  return await handleInviteGithubCollaborator(req, res, idToken);
+      case 'github-collaborator-status':  return await handleGithubCollaboratorStatus(req, res, idToken);
+
+      // ── Client-safe lazy expiry check ────────────────────────────────────
+      // Any participant can ask the server to check-and-resolve their own
+      // deal room if its deadline has passed. This is a fallback so deals
+      // resolve correctly even before/without a cron job configured — the
+      // client calls this once whenever a deal chat is opened.
+      case 'check-deal-expiry': return await handleCheckDealExpiry(req, res, idToken);
+
+      // ── Seller Dashboard ─────────────────────────────────────────────────
+      case 'list-my-deals': return await handleListMyDeals(req, res, idToken);
+
+      // ── AI agent key management ──────────────────────────────────────────
+      case 'agent-check-key-limit': return await handleAgentCheckKeyLimit(req, res, idToken);
+      case 'agent-create-key':      return await handleAgentCreateKey(req, res, idToken);
+
+      default:
+        return res.status(400).json({ error: 'Unknown action' });
+    }
   } catch (err) {
-    console.error('[aistudio] prompt-guard pass failed, continuing to judge step:', err.message);
+    console.error('[deal.js]', action, err.message);
+    return res.status(500).json({ error: err.message || 'Internal error' });
   }
-
-  const judgeRes = await callWithFallback(CHAINS.scamGuardJudge, {
-    messages: [
-      { role: 'system', content: SCAM_POLICY },
-      { role: 'user', content: `Message to classify:\n"""${text}"""${guardFlag ? '\n\n(Note: an upstream filter flagged this text as containing adversarial/manipulative patterns — weigh that in your judgment.)' : ''}` },
-    ],
-    temperature: 0.1,
-    max_tokens: 150,
-  });
-
-  let parsed;
-  try {
-    const cleaned = (judgeRes.content || '').replace(/```json|```/g, '').trim();
-    parsed = JSON.parse(cleaned);
-  } catch {
-    parsed = { risk: 'low', reason: 'Could not parse classifier output — defaulting to warn.' };
-  }
-  return { ...parsed, model: judgeRes.usedModel };
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// SCAM GUARD ESCALATION — YouTube-style strike system
+// ─────────────────────────────────────────────────────────────────────────────
+// get-seller-stats  { sellerUid }  — no idToken required (public read)
 //
-// Policy (product decision):
-//   • 3 'warned' verdicts within a rolling 24h window  → 1 strike
-//   • 2 'blocked' verdicts within a rolling 24h window → 1 strike (harsher,
-//     since a block is already a higher-confidence signal than a warn)
-//   • Strike 1                                          → 1 hour suspension
-//   • Strike 2, if within 48h of the oldest active strike → 5 hour suspension
-//   • Strike 3, if within 72h of the oldest active strike → PERMANENT BAN
-//   • Strikes older than 72h (measured from the oldest strike still in the
-//     window) expire and drop off the list — this demotes the severity of
-//     whatever strike comes next rather than keeping someone banned forever
-//     for one bad week. There is no ban-equivalent "4th strike"; ban is the
-//     ceiling for scam-guard violations — accounts are never banned outright
-//     by this system without passing through the suspension ladder first.
+// Powers the "Deals" section of the public seller profile modal: lifetime
+// completed deals + revenue, last-7-days revenue, and a breakdown of
+// completed deals by listing category (website / app / game). Deliberately
+// aggregates server-side rather than letting the client read another user's
+// users/{uid}/deals or users/{uid}/transactions subcollections directly —
+// those are private (transactions in particular carry counterparty uids,
+// platform fee math, etc.) and are not meant to be world-readable.
 //
-// All of this lives on users/{uid}.moderation, written in the SAME schema
-// maintenance-banned.js already reads (banned/banReason/suspended/
-// suspendedUntil/suspendReason) so the existing full-screen account-status
-// overlay picks this up with zero front-end changes.
-// ════════════════════════════════════════════════════════════════════════
-
-const SCAM_WARN_WINDOW_MS    = 24 * 60 * 60 * 1000; // 3 warns within this window = 1 strike
-const SCAM_WARN_THRESHOLD    = 3;
-const SCAM_BLOCK_WINDOW_MS   = 24 * 60 * 60 * 1000; // 2 blocks within this window = 1 strike
-const SCAM_BLOCK_THRESHOLD   = 2;
-const SCAM_STRIKE2_WINDOW_MS = 48 * 60 * 60 * 1000; // strike 2 must land within this of strike 1 to count as strike 2
-const SCAM_STRIKE3_WINDOW_MS = 72 * 60 * 60 * 1000; // strike 3 must land within this of the oldest strike to trigger a ban
-
-const SCAM_SUSPEND_MS_BY_STRIKE = {
-  1: 60 * 60 * 1000,       // strike 1 → 1 hour
-  2: 5 * 60 * 60 * 1000,   // strike 2 → 5 hours
-};
-
-// Drop any timestamps older than `windowMs` relative to `now`, keeping the
-// array sorted ascending (oldest first) — used for both the warn/block
-// event lists and the strikes list itself.
-function _scamPruneOld(timestamps, windowMs, now) {
-  return (timestamps || []).filter(ts => now - ts <= windowMs).sort((a, b) => a - b);
-}
-
-// Given the user's current moderation state and a new event ('warned' or
-// 'blocked') just recorded at `now`, returns the updated moderation object
-// plus any account-status change that should be applied (suspend/ban), or
-// null if no threshold was crossed.
-function _scamApplyEscalation(moderation, eventType, now) {
-  const mod = {
-    warnEvents:  _scamPruneOld(moderation?.warnEvents,  SCAM_WARN_WINDOW_MS,  now),
-    blockEvents: _scamPruneOld(moderation?.blockEvents, SCAM_BLOCK_WINDOW_MS, now),
-    strikes:     _scamPruneOld(moderation?.strikes,     SCAM_STRIKE3_WINDOW_MS, now),
-  };
-
-  if (eventType === 'warned') mod.warnEvents.push(now);
-  else if (eventType === 'blocked') mod.blockEvents.push(now);
-
-  let newStrike = false;
-  if (eventType === 'warned' && mod.warnEvents.length >= SCAM_WARN_THRESHOLD) {
-    mod.warnEvents = []; // consumed into a strike
-    newStrike = true;
-  } else if (eventType === 'blocked' && mod.blockEvents.length >= SCAM_BLOCK_THRESHOLD) {
-    mod.blockEvents = []; // consumed into a strike
-    newStrike = true;
-  }
-
-  let statusChange = null;
-  if (newStrike) {
-    mod.strikes.push(now);
-    // Re-prune: the strike we just pushed may make an old one fall outside
-    // the 72h window relative to itself — but the correct reference point
-    // is the OLDEST strike still being counted, so prune once more here
-    // using that oldest timestamp rather than `now`.
-    const oldest = mod.strikes[0];
-    mod.strikes = mod.strikes.filter(ts => ts - oldest <= SCAM_STRIKE3_WINDOW_MS);
-
-    const strikeNumber = mod.strikes.length; // 1, 2, or 3 (post-prune, post-push)
-
-    if (strikeNumber >= 3) {
-      // Third strike within the 72h window from the oldest strike → permanent ban.
-      statusChange = { type: 'ban', reason: '3 scam-guard strikes within 72 hours.' };
-      mod.strikes = []; // banned — no further strikes need tracking
-    } else if (strikeNumber === 2) {
-      // Strike 2 only counts as strike 2 if it's within 48h of strike 1
-      // (mod.strikes[0] is strike 1's timestamp at this point).
-      const withinEscalationWindow = (now - mod.strikes[0]) <= SCAM_STRIKE2_WINDOW_MS;
-      if (withinEscalationWindow) {
-        statusChange = { type: 'suspend', ms: SCAM_SUSPEND_MS_BY_STRIKE[2], reason: '2nd scam-guard strike within 48 hours.' };
-      } else {
-        // Strike 1 aged out of relevance for escalation purposes — treat
-        // this as a fresh strike 1 instead of a harsher strike 2.
-        mod.strikes = [now];
-        statusChange = { type: 'suspend', ms: SCAM_SUSPEND_MS_BY_STRIKE[1], reason: '1st scam-guard strike.' };
-      }
-    } else {
-      // strikeNumber === 1
-      statusChange = { type: 'suspend', ms: SCAM_SUSPEND_MS_BY_STRIKE[1], reason: '1st scam-guard strike.' };
-    }
-  }
-
-  return { moderation: mod, statusChange };
-}
-
-// Applies a scam-guard verdict's consequence (if any) to users/{uid} inside
-// a transaction, so concurrent messages from the same user can't race each
-// other's strike math. Writes suspended/suspendedUntil/suspendReason or
-// banned/banReason using the exact field names maintenance-banned.js reads.
-async function applyScamGuardEscalation(uid, action) {
-  if (action !== 'warned' && action !== 'blocked') return null; // 'allowed' never escalates
-  if (!uid) return null;
-
-  const now = Date.now();
-  const userRef = db.collection('users').doc(uid);
-
-  return db.runTransaction(async tx => {
-    const snap = await tx.get(userRef);
-    const data = snap.exists ? snap.data() : {};
-    const { moderation, statusChange } = _scamApplyEscalation(data.moderation, action, now);
-
-    const update = { moderation };
-
-    if (statusChange?.type === 'ban') {
-      update.banned = true;
-      update.banReason = statusChange.reason;
-      // A ban supersedes any active suspension — clear it so the overlay
-      // shows the (permanent) ban state, not a suspension countdown.
-      update.suspended = false;
-      update.suspendedUntil = null;
-    } else if (statusChange?.type === 'suspend') {
-      update.suspended = true;
-      update.suspendedUntil = new Date(now + statusChange.ms);
-      update.suspendReason = statusChange.reason;
-    }
-
-    tx.set(userRef, update, { merge: true });
-    return statusChange; // null if this event didn't cross a strike threshold
-  });
-}
-
-async function handleScamCheck({ text, callerUid, chatId }) {
-  if (!text || typeof text !== 'string') throw httpError(400, 'text required');
-
-  const verdict = await classifyScamRisk(text);
-  const action = verdict.risk === 'high' ? 'blocked' : verdict.risk === 'low' ? 'warned' : 'allowed';
-
-  await db.collection('moderationLogs').add({
-    type: 'scam_guard',
-    chatId: chatId || null,
-    userId: callerUid,
-    textSample: text.slice(0, 500),
-    risk: verdict.risk,
-    reason: verdict.reason,
-    action,
-    model: verdict.model,
-    createdAt: FieldValue.serverTimestamp(),
-  });
-
-  // Feed this verdict into the strike/escalation ladder. Returns null if no
-  // strike threshold was crossed this time, or the resulting suspend/ban
-  // decision if one was — surfaced below so the client can react instantly
-  // (e.g. force the account-status overlay) instead of waiting for the next
-  // auth-state refresh to notice suspended/banned flipped true.
-  let statusChange = null;
-  try {
-    statusChange = await applyScamGuardEscalation(callerUid, action);
-  } catch (err) {
-    console.error('[aistudio] scam-guard escalation failed:', err.message);
-    // Fail open — a broken escalation write should never block the
-    // underlying blocked/warned/allowed message decision above.
-  }
-
-  return {
-    action,               // 'blocked' | 'warned' | 'allowed'
-    risk: verdict.risk,
-    reason: verdict.reason,
-    warningText: action === 'warned'
-      ? `⚠️ Heads up — this message has patterns common in scams (${verdict.reason}). Never pay or share credentials outside Siterifty's escrow flow.`
-      : null,
-    accountStatusChange: statusChange, // null | { type: 'suspend', ms, reason } | { type: 'ban', reason }
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 3 — Listing auto-description generator
+// Only 'complete' deals count toward these stats — pending/accepted/
+// rejected/cancelled/refunded/disputed deals are excluded since no money
+// actually changed hands (or, for disputed, it's not yet resolved).
 //
-// Plan-based char limits (minimum the USER can request; user still picks
-// within their plan's ceiling):
-//   Free: up to 100   Start: up to 500   Growth: up to 1500   Pro: up to 5000
-// The user supplies the listing TITLE + desired length; AI writes the
-// description scoped to that length.
-// ════════════════════════════════════════════════════════════════════════
-
-const PLAN_LIMITS = { free: 100, start: 500, growth: 1500, pro: 5000 };
-
-const DESCRIPTION_SYSTEM = `
-You are a marketplace listing copywriter for Siterifty (buy/sell websites, apps, games).
-Given a listing TITLE and a target length, write a compelling, honest, specific product description.
-Rules:
-- Do not invent fake stats, revenue figures, user counts, or technical claims not implied by the title.
-- Write in an active, confident tone aimed at a buyer evaluating a small digital asset.
-- Stay as close as possible to the requested character count without going over it.
-- No markdown, no headers, no emoji spam — plain prose paragraphs suitable for a listing page.
-- Do not include placeholder text like "[insert detail]" — write naturally around missing specifics instead.
-`;
-
-async function handleAutoDescription({ title, targetLength, plan, callerUid }) {
-  if (!title || typeof title !== 'string' || !title.trim()) {
-    throw httpError(400, 'title is required so the AI knows what it is describing');
-  }
-  const cap = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
-  const requested = Math.max(20, Math.min(Number(targetLength) || cap, cap));
-
-  const result = await callWithFallback(CHAINS.autoDescription, {
-    messages: [
-      { role: 'system', content: DESCRIPTION_SYSTEM },
-      { role: 'user', content: `Listing title: "${title.trim()}"\nTarget length: approximately ${requested} characters (plan cap: ${cap}).\nWrite the description now.` },
-    ],
-    temperature: 0.6,
-    max_tokens: Math.ceil(requested / 3) + 100, // rough token headroom for char budget
-  }, { requireContent: true });
-
-  let description = (result.content || '').trim();
-  if (!description) {
-    // Should be unreachable now that callWithFallback enforces requireContent,
-    // but keep this as a hard backstop so the client never silently gets an
-    // empty description with a 200 OK — it always either gets real text or a
-    // thrown error the UI can show.
-    throw new Error('AI returned an empty description — please try again.');
-  }
-  if (description.length > cap) description = description.slice(0, cap).replace(/\s+\S*$/, '') + '…';
-
-  return { description, charCount: description.length, cap, model: result.usedModel };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 4 — Send-deal message assist
-// Helps a buyer/seller write their deal intro/offer message.
-// ════════════════════════════════════════════════════════════════════════
-
-const DEAL_MESSAGE_SYSTEM = `
-You help a user write a short, effective message when sending a "deal" (an offer/intro) on a Siterifty listing.
-Write ONE message option (2-5 sentences) that is:
-- Polite, direct, and specific to the listing context given.
-- States genuine interest and, if a price/offer was given, references it naturally.
-- Does not invent details about the listing that weren't provided.
-- Does not pressure, guarantee, or make claims about payment happening outside the platform's escrow flow.
-Return ONLY the message text — no preamble, no quotes around it.
-`;
-
-async function handleDealMessageAssist({ listingTitle, listingSummary, offerAmount, userDraft, callerUid }) {
-  const context = [
-    listingTitle ? `Listing: "${listingTitle}"` : null,
-    listingSummary ? `Listing summary: ${listingSummary}` : null,
-    offerAmount ? `Offer amount: ${offerAmount}` : null,
-    userDraft ? `User's rough draft to improve: "${userDraft}"` : 'User has not written a draft yet — write one from scratch.',
-  ].filter(Boolean).join('\n');
-
-  const result = await callWithFallback(CHAINS.dealMessageAssist, {
-    messages: [
-      { role: 'system', content: DEAL_MESSAGE_SYSTEM },
-      { role: 'user', content: context },
-    ],
-    temperature: 0.6,
-    max_tokens: 300,
-  });
-
-  return { message: (result.content || '').trim(), model: result.usedModel };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 5 — Reports/disputes support-assist triage
-//
-// Per product decision: the AI does NOT move money, ban users, or change
-// dispute/report status on its own — a marketplace refund/ban is too
-// consequential to hand to an LLM's judgment call unsupervised, especially
-// since verifying "who's actually at fault" often requires checking whether
-// delivered code/product genuinely works, which text analysis can't confirm.
-// Instead, the AI reads the last 10 TEXT messages of the deal chat (image/
-// file messages are skipped from its input — token budget — but counted so
-// the agent knows more evidence exists) and writes a severity flag + plain-
-// English summary + suggested next step onto the report/dispute doc. A
-// human on the support team still makes and executes the actual call.
-// ════════════════════════════════════════════════════════════════════════
-
-// SUPPORT-ASSIST TRIAGE — this does NOT move money, ban users, or change
-// dispute/report status. It reads the last 10 TEXT messages of the deal
-// chat (skipping images/files — just noting they exist) plus the filed
-// reason, and writes a support-facing summary: severity flag + a plain-
-// English recap + a suggested next step. A human on the support team reads
-// this and decides/executes the actual action. This keeps the AI's job to
-// what it can reliably do (summarize a conversation) rather than what it
-// can't safely verify alone (whether delivered code/product actually works,
-// or who's "at fault" in a way that should move real money automatically).
-const TRIAGE_SYSTEM = `
-You are a support-assist triage tool for Siterifty, an escrow-based marketplace. You are NOT deciding the outcome — a human support agent will read your summary and decide. Your job is to make their job fast.
-
-You'll be given: the dispute/report reason, and the last up to 10 text messages exchanged between the buyer and seller in their deal chat (if available).
-
-Respond ONLY with strict JSON, no markdown:
-{
-  "severity": "low" | "medium" | "high",
-  "summary": "<3-5 sentence plain-English recap of what happened, from the chat evidence, written for a support agent who hasn't read the chat yet>",
-  "suggestedAction": "<one short sentence: what a reasonable next step looks like, e.g. 'Ask seller for delivery proof' or 'Likely straightforward refund — buyer never received access'>",
-  "flags": ["<short tag>", ...]
-}
-
-Guidance:
-- "high" severity = large sums, clear-cut bad behavior (ghosting, credential theft, abusive language), or urgent buyer/seller safety concern.
-- "low" severity = minor miscommunication, first-time/small dispute, or insufficient info to tell.
-- flags examples: "no_delivery", "seller_unresponsive", "buyer_pressuring", "credential_request_offplatform", "possible_scam_language", "insufficient_evidence".
-- Do NOT recommend refunding or releasing funds as a final decision — only as a suggestion for the agent to verify. Do NOT claim to know whether delivered code/product actually works — you cannot verify that from chat text alone.
-- Be honest if the chat evidence is too thin to say anything useful — a short accurate "not enough information" is better than a confident guess.
-`;
-
-// Fetch the last N TEXT-only messages from a deal chat, oldest-first, for
-// the AI to read. Images/files are skipped from the model input (it can't
-// see them) but we note how many existed so the agent knows evidence exists.
-async function getRecentChatTextMessages(chatRoomId, limit = 10) {
-  if (!chatRoomId) return { messages: [], nonTextCount: 0 };
-  try {
-    const snap = await db.collection('dealChats').doc(chatRoomId).collection('messages')
-      .orderBy('createdAt', 'desc').limit(40).get(); // pull a bit extra so we can filter to text-only and still get `limit`
-    let nonTextCount = 0;
-    const textMsgs = [];
-    for (const d of snap.docs) {
-      const v = d.data();
-      if (v.type && v.type !== 'text') { nonTextCount++; continue; }
-      if (!v.text) continue;
-      textMsgs.push({ uid: v.uid, text: String(v.text).slice(0, 600), createdAt: v.createdAt || null });
-      if (textMsgs.length >= limit) break;
-    }
-    return { messages: textMsgs.reverse(), nonTextCount }; // oldest-first for the model
-  } catch (err) {
-    console.error('[aistudio] failed to read chat history for triage:', err.message);
-    return { messages: [], nonTextCount: 0 };
-  }
-}
-
-async function handleTriage({ kind, reportId, disputeId, evidence, callerUid }) {
-  const docId = reportId || disputeId;
-  if (!docId || !evidence) throw httpError(400, 'reportId/disputeId and evidence are required');
-
-  const collection = kind === 'dispute' ? 'disputes' : 'reports';
-
-  const { messages: chatMessages, nonTextCount } = await getRecentChatTextMessages(evidence.chatRoomId, 10);
-  const transcript = chatMessages.length
-    ? chatMessages.map(m => `[${m.uid === evidence.sellerUid ? 'seller' : m.uid === evidence.buyerUid ? 'buyer' : m.uid}]: ${m.text}`).join('\n')
-    : '(no text messages available)';
-
-  const result = await callWithFallback(CHAINS.reportsTriage, {
-    messages: [
-      { role: 'system', content: TRIAGE_SYSTEM },
-      { role: 'user', content: `Case type: ${kind}\nFiled reason/evidence:\n${JSON.stringify(evidence, null, 2)}\n\nLast ${chatMessages.length} text messages in the deal chat (oldest first)${nonTextCount ? ` — plus ${nonTextCount} non-text message(s) (image/file) not shown here` : ''}:\n${transcript}` },
-    ],
-    temperature: 0.2,
-    max_tokens: 400,
-  });
-
-  let analysis;
-  try {
-    analysis = JSON.parse((result.content || '').replace(/```json|```/g, '').trim());
-  } catch {
-    analysis = { severity: 'medium', summary: 'Could not parse AI output — please review manually.', suggestedAction: 'Manual review needed.', flags: ['ai_parse_error'] };
+// → {
+//     ok: true,
+//     lifetimeDeals: number,
+//     lifetimeRevenue: number,       // sum of seller's net proceeds (post platform-fee)
+//     last7DaysRevenue: number,      // same, restricted to deals completed in the last 7 days
+//     byCategory: { website: number, app: number, game: number },  // completed deal counts
+//   }
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleGetSellerStats(req, res) {
+  const sellerUid = req.body?.sellerUid;
+  if (!sellerUid || typeof sellerUid !== 'string') {
+    return res.status(400).json({ error: 'Missing sellerUid' });
   }
 
-  // Support-facing fields only — status is deliberately left untouched so a
-  // human on the team still opens and resolves this the normal way. No money
-  // moves, no bans, nothing auto-applied.
-  await db.collection(collection).doc(docId).set({
-    aiSeverity: analysis.severity || 'medium',
-    aiSummary: analysis.summary || '',
-    aiSuggestedAction: analysis.suggestedAction || '',
-    aiFlags: Array.isArray(analysis.flags) ? analysis.flags : [],
-    aiModel: result.usedModel,
-    aiTriagedAt: FieldValue.serverTimestamp(),
-    aiChatMessagesSeen: chatMessages.length,
-    aiNonTextMessagesSkipped: nonTextCount,
-  }, { merge: true });
-
-  return {
-    severity: analysis.severity,
-    summary: analysis.summary,
-    suggestedAction: analysis.suggestedAction,
-    flags: analysis.flags,
-    model: result.usedModel,
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 6 (bonus) — Image reading
-// For listing screenshots or dispute evidence photos. Gemini-only (vision).
-// ════════════════════════════════════════════════════════════════════════
-
-async function handleImageRead({ imageBase64, mimeType, question }) {
-  if (!imageBase64) throw httpError(400, 'imageBase64 required');
-  const result = await callWithFallback(CHAINS.vision, {
-    messages: [
-      { role: 'system', content: 'You read images uploaded to a marketplace (listing screenshots or dispute evidence). Describe factually what you see. Do not speculate about intent beyond what is visibly shown.' },
-      { role: 'user', content: question || 'Describe what is shown in this image, factually and concisely.' },
-    ],
-    imageParts: [{ inline_data: { mime_type: mimeType || 'image/png', data: imageBase64 } }],
-    max_tokens: 500,
-  });
-  return { description: result.content, model: result.usedModel };
-}
-
-// ── Reported-content image check ──
-// Deliberately scoped tight: ONE image, only for content that a human has
-// already flagged (a reported listing, or dispute evidence) — never run
-// across every image on every new listing. Vision (Gemini) daily quotas here
-// are ~20 requests/day per model in the fallback chain, so this only stays
-// usable if call volume matches "occasional reported item," not "every
-// upload." Callers must pass a single imageUrl; this function does not
-// accept or loop over an array, by design.
-async function handleAnalyzeReportedImage({ imageUrl, context, reportId, disputeId }) {
-  if (!imageUrl || typeof imageUrl !== 'string') throw httpError(400, 'imageUrl (single URL) is required');
-
-  let imageBase64, mimeType;
-  try {
-    const imgRes = await fetch(imageUrl);
-    if (!imgRes.ok) throw new Error(`image fetch failed: ${imgRes.status}`);
-    mimeType = imgRes.headers.get('content-type') || 'image/jpeg';
-    const buf = Buffer.from(await imgRes.arrayBuffer());
-    imageBase64 = buf.toString('base64');
-  } catch (err) {
-    throw httpError(502, `Could not fetch image for analysis: ${err.message}`);
-  }
-
-  const result = await callWithFallback(CHAINS.vision, {
-    messages: [
-      { role: 'system', content: `You review a single image from a marketplace listing that has been reported or is part of a dispute. Judge ONLY appropriateness/policy concerns — not whether the underlying product is good. Respond ONLY with strict JSON, no markdown:
-{"appropriate": true|false, "concerns": ["<short tag>", ...], "summary": "<1-2 sentence factual description>"}
-Concern tags to use when relevant: "explicit_content", "violence", "misleading_stock_photo", "unrelated_to_listing", "contains_personal_info", "copyright_watermark_mismatch", "none".
-Be factual — do not guess intent beyond what's visibly in the image.` },
-      { role: 'user', content: context ? `Context: ${context}\n\nReview this image.` : 'Review this image.' },
-    ],
-    imageParts: [{ inline_data: { mime_type: mimeType, data: imageBase64 } }],
-    max_tokens: 300,
-  });
-
-  let analysis;
-  try {
-    analysis = JSON.parse((result.content || '').replace(/```json|```/g, '').trim());
-  } catch {
-    analysis = { appropriate: null, concerns: ['ai_parse_error'], summary: 'Could not parse AI output — please review manually.' };
-  }
-
-  // Write the verdict back onto whichever doc this check was triggered for,
-  // same pattern as handleTriage — support-facing only, no auto-action.
-  const docId = reportId || disputeId;
-  if (docId) {
-    const collection = disputeId ? 'disputes' : 'reports';
-    await db.collection(collection).doc(docId).set({
-      aiImageAppropriate: analysis.appropriate,
-      aiImageConcerns: Array.isArray(analysis.concerns) ? analysis.concerns : [],
-      aiImageSummary: analysis.summary || '',
-      aiImageModel: result.usedModel,
-      aiImageCheckedAt: FieldValue.serverTimestamp(),
-    }, { merge: true }).catch(err => console.error('[aistudio] failed to write image verdict:', err.message));
-  }
-
-  return { ...analysis, model: result.usedModel };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE — Feedback suggestion dedupe tiebreaker
-//
-// feedback.js does all duplicate-detection with free local text similarity
-// (token overlap + character trigrams) and only calls this when two
-// suggestions score in a genuine gray zone — not obviously the same idea,
-// not obviously different. This keeps the call rare and the prompt trivial:
-// a single yes/no judgment on two short strings.
-// ════════════════════════════════════════════════════════════════════════
-
-const FEEDBACK_DEDUPE_SYSTEM = `
-You compare two short user-submitted feature/change suggestions for a marketplace app and judge whether they are asking for the SAME underlying change, even if worded differently.
-
-Respond ONLY with strict JSON, no markdown:
-{"sameRequest": true|false, "reason": "<one short sentence>"}
-
-Treat them as the SAME request if a developer would reasonably build one fix/feature that satisfies both. Treat them as DIFFERENT if they target different parts of the product, or one is clearly broader/narrower in a way that isn't just phrasing.
-`;
-
-async function handleFeedbackDedupe({ textA, textB }) {
-  if (!textA || !textB) throw httpError(400, 'textA and textB are required');
-
-  const result = await callWithFallback(CHAINS.feedbackDedupe, {
-    messages: [
-      { role: 'system', content: FEEDBACK_DEDUPE_SYSTEM },
-      { role: 'user', content: `Suggestion A: "${textA}"\nSuggestion B: "${textB}"` },
-    ],
-    temperature: 0.1,
-    max_tokens: 60,
-  });
-
-  let parsed;
-  try {
-    const cleaned = (result.content || '').replace(/```json|```/g, '').trim();
-    parsed = JSON.parse(cleaned);
-  } catch {
-    parsed = { sameRequest: false, reason: 'Could not parse classifier output — defaulting to distinct.' };
-  }
-  return { sameRequest: !!parsed.sameRequest, reason: parsed.reason || '', model: result.usedModel };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE — "Recommended for you" listings panel (formerly /api/aisearch.js)
-//
-// Zero-input personalized recommender, NOT a text query box — plain
-// keyword/type search still lives in the regular search bar. No text-model
-// call here at all; ranking is a plain in-memory score over Firestore
-// listings, so it's folded in here purely to stay under the hobby-plan
-// serverless function count, not because it shares any model/provider code
-// with the rest of aistudio.js.
-//
-// Ranking signals combined into one score per listing:
-//   - recency:  freshness boost that decays over ~14 days
-//   - saves:    log-scaled popularity (so one viral listing can't dominate
-//               every ranking)
-//   - boost:    sellers with an active `boostedUntil` get a flat multiplier
-//   - affinity: if the caller is signed in, bonus for listing types/
-//               categories matching their users/{uid}/savedListings.
-//               Signed-out callers just get the non-personalized ranking.
-//
-// Results are then diversified (round-robin across types) so the first
-// page doesn't clump same-type listings together.
-//
-// Base (non-personalized) scores are cached for BASE_CACHE_MS so repeated
-// opens don't re-scan Firestore every time; affinity is cheap and always
-// computed fresh per request since it depends on the caller.
-// ════════════════════════════════════════════════════════════════════════
-
-const RECS_RESULT_LIMIT = 24;
-const RECS_BASE_CACHE_MS = 60 * 1000;
-const RECS_RECENCY_HALFLIFE_DAYS = 14;
-const RECS_BOOST_MULTIPLIER = 1.6;
-const RECS_AFFINITY_BONUS = 0.9;
-
-function recsToMillis(v) {
-  if (!v) return 0;
-  if (typeof v === 'number') return v;
-  if (typeof v.toMillis === 'function') return v.toMillis();
-  if (typeof v.seconds === 'number') return v.seconds * 1000;
-  return 0;
-}
-function recsIsBoostedNow(listing) {
-  return recsToMillis(listing.boostedUntil) > Date.now();
-}
-function recsRecencyScore(listing) {
-  const createdMs = recsToMillis(listing.createdAt);
-  if (!createdMs) return 0;
-  const ageDays = Math.max(0, (Date.now() - createdMs) / 86400000);
-  return Math.pow(0.5, ageDays / RECS_RECENCY_HALFLIFE_DAYS);
-}
-function recsSavesScore(listing) {
-  const saves = typeof listing.saves === 'number' ? listing.saves : 0;
-  return Math.log10(saves + 1);
-}
-function recsListingCategory(v) {
-  return v.category || v.tech?.frontend || v.tech?.backend || '';
-}
-function recsToLite(id, v) {
-  return {
-    id,
-    title: v.title || 'Untitled',
-    type: v.type || 'website',
-    price: typeof v.financials?.price === 'number' ? v.financials.price : null,
-    saves: typeof v.saves === 'number' ? v.saves : 0,
-    boosted: recsIsBoostedNow(v),
-  };
-}
-
-let _recsBaseCache = null; // { at, scored: [{id, v, base}] }
-
-async function recsGetBaseScored() {
-  if (_recsBaseCache && Date.now() - _recsBaseCache.at < RECS_BASE_CACHE_MS) {
-    return _recsBaseCache.scored;
-  }
-  const snap = await db.collection('listings').where('status', '==', 'active').get();
-  const scored = snap.docs.map(d => {
-    const v = d.data();
-    const base = recsRecencyScore(v) + recsSavesScore(v) * (recsIsBoostedNow(v) ? RECS_BOOST_MULTIPLIER : 1);
-    return { id: d.id, v, base };
-  });
-  _recsBaseCache = { at: Date.now(), scored };
-  return scored;
-}
-
-async function recsGetUserAffinity(uid) {
-  const types = new Map();
-  const categories = new Map();
-  try {
-    const snap = await db.collection('users').doc(uid).collection('savedListings').get();
-    snap.forEach(d => {
-      const v = d.data();
-      if (v.type) types.set(v.type, (types.get(v.type) || 0) + 1);
-      if (v.category) categories.set(v.category, (categories.get(v.category) || 0) + 1);
-    });
-  } catch (err) {
-    console.error('[aistudio] recommendations affinity lookup failed', err.message);
-  }
-  return { types, categories };
-}
-
-function recsDiversify(scoredSorted, limit) {
-  const byType = new Map();
-  for (const item of scoredSorted) {
-    const t = item.v.type || 'website';
-    if (!byType.has(t)) byType.set(t, []);
-    byType.get(t).push(item);
-  }
-  const buckets = [...byType.values()];
-  const out = [];
-  let i = 0;
-  while (out.length < limit && buckets.some(b => i < b.length)) {
-    for (const bucket of buckets) {
-      if (i < bucket.length) out.push(bucket[i]);
-      if (out.length >= limit) break;
-    }
-    i++;
-  }
-  return out;
-}
-
-// callerUid may be null here (signed-out callers still get non-personalized
-// recommendations) — this is the one action in this file where auth is
-// optional rather than required; see OPTIONAL_AUTH_ACTIONS in the handler.
-async function handleRecommendations({ callerUid }) {
-  const baseScored = await recsGetBaseScored();
-
-  if (!baseScored.length) {
-    return {
-      mode: 'recommendations',
-      reply: "No active listings yet — check back soon.",
-      listingIds: [],
-      listings: [],
-      personalized: false,
-    };
-  }
-
-  let affinity = null;
-  if (callerUid) affinity = await recsGetUserAffinity(callerUid);
-
-  const scored = baseScored.map(item => {
-    let score = item.base;
-    if (affinity) {
-      const t = item.v.type;
-      const c = recsListingCategory(item.v);
-      if (t && affinity.types.has(t)) score += RECS_AFFINITY_BONUS;
-      if (c && affinity.categories.has(c)) score += RECS_AFFINITY_BONUS;
-    }
-    return { ...item, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-  const picked = recsDiversify(scored, RECS_RESULT_LIMIT);
-  const listings = picked.map(item => recsToLite(item.id, item.v));
-  const personalized = !!(affinity && (affinity.types.size || affinity.categories.size));
-
-  return {
-    mode: 'recommendations',
-    reply: personalized
-      ? 'Recommended for you, based on what you\u2019ve saved.'
-      : 'Recommended listings for you right now.',
-    listingIds: listings.map(l => l.id),
-    listings,
-    personalized,
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE — In-app feedback suggestion board (formerly /api/feedback.js)
-//
-// Folded in here for the same hobby-plan function-count reason as
-// recommendations above — this one DOES touch the feedback-dedupe AI
-// tiebreaker, but since it now lives in the same process/file, that call
-// is a direct function call below, not an HTTP round-trip to itself.
-//
-// What this does:
-//   1. Users submit short feature/change suggestions.
-//   2. Before saving, compare the new text against existing OPEN
-//      suggestions using cheap local text-similarity (no external API
-//      call, no cost, no embeddings). Clear duplicates bump the existing
-//      suggestion's voteCount instead of creating a new row.
-//   3. Only a genuine gray-zone pair (not obviously same, not obviously
-//      different) calls handleFeedbackDedupe() as a tiebreaker — rare, so
-//      it stays cheap.
-//   4. Popular suggestions bubble to the top for the team via
-//      'list-for-review' (admin-only).
-//
-// Firestore collections:
-//
-// "feedbackSuggestions" (the live, weekly-reset board)
-//   { textNormalized, textOriginal, votes: { [uid]: score }, voteCount
-//     (= number of voters), totalScore (= sum of votes), status:
-//     'open'|'planned'|'done'|'declined', createdAt, updatedAt,
-//     lastVotedAt, submittedByUid, aiMatchedCount }
-//
-//   Voting scale (each voter can cast ONE vote per suggestion, changeable):
-//     3  = "Fantastic idea"
-//     2  = "Nice idea"
-//     1  = "Average"
-//    -1  = "Bad idea"
-//   totalScore is just the sum of every cast vote. Suggestions are ranked
-//   by totalScore, highest first.
-//
-// "feedbackArchive" ("What We're Working On" — permanent, never deleted)
-//   { textOriginal, totalScore, voteCount, cycleEndedAt, archivedAt }
-//   Written to (never overwritten) every time a 7-day cycle ends — the
-//   week's top 3 open suggestions get appended here, so this list only
-//   ever grows, +3 per week, regardless of how large the live board gets.
-//
-// "feedbackCycle/current" (single doc — the 7-day cycle clock)
-//   { cycleStart: Timestamp }
-//   cycleStart is set the first time anyone hits the board (effectively
-//   "when this feature goes live"), and again every time a cycle resets.
-//   The countdown shown to users is always cycleStart + 7 days.
-// ════════════════════════════════════════════════════════════════════════
-
-const FB_CYCLE_DAYS = 7;
-const FB_CYCLE_MS = FB_CYCLE_DAYS * 24 * 60 * 60 * 1000;
-const FB_TOP_N = 3;
-
-const FB_VOTE_SCORES = { fantastic: 3, nice: 2, average: 1, bad: -1 };
-
-function fbSumVotes(votesMap) {
-  return Object.values(votesMap || {}).reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
-}
-
-function fbVoteBreakdown(votesMap) {
-  const out = { fantastic: 0, nice: 0, average: 0, bad: 0 };
-  for (const v of Object.values(votesMap || {})) {
-    if (v === 3) out.fantastic++;
-    else if (v === 2) out.nice++;
-    else if (v === 1) out.average++;
-    else if (v === -1) out.bad++;
-  }
-  return out;
-}
-
-// Ensures the cycle-clock doc exists, and returns its cycleStart (ms).
-// Does NOT perform the reset itself — see fbMaybeRunReset() for that.
-async function fbGetOrInitCycleStart() {
-  const ref = db.collection('feedbackCycle').doc('current');
-  const snap = await ref.get();
-  if (snap.exists && snap.data().cycleStart) {
-    return { ref, startMs: snap.data().cycleStart.toMillis() };
-  }
-  const now = FieldValue.serverTimestamp();
-  await ref.set({ cycleStart: now }, { merge: true });
-  const fresh = await ref.get();
-  return { ref, startMs: fresh.data().cycleStart.toMillis() };
-}
-
-// Client-triggered reset check: called whenever someone opens the feedback
-// board. If the 7-day window has elapsed, this:
-//   1. Grabs the current top 3 OPEN suggestions by totalScore.
-//   2. Appends them to feedbackArchive (permanent — "What We're Working On").
-//   3. Deletes every remaining feedbackSuggestions doc (all of them, not
-//      just non-top-3 — the whole board resets empty).
-//   4. Restarts the cycle clock from now.
-// Because this only fires when a real visit happens after expiry, a reset
-// can run late (no one to trigger it exactly on time) but never early, and
-// never runs twice for the same cycle (the cycle clock is what's checked,
-// not a fixed schedule).
-async function fbMaybeRunReset() {
-  const { ref: cycleRef, startMs } = await fbGetOrInitCycleStart();
-  const now = Date.now();
-  const msRemaining = (startMs + FB_CYCLE_MS) - now;
-  if (msRemaining > 0) {
-    return { ranReset: false, cycleStart: startMs, msRemaining };
-  }
-
-  // Expired — run the reset.
-  const openSnap = await db.collection('feedbackSuggestions')
-    .where('status', '==', 'open')
+  const db = getAdminDb();
+  const dealsSnap = await db.collection('users').doc(sellerUid).collection('deals')
+    .where('status', '==', 'complete')
     .get();
 
-  const scored = openSnap.docs
-    .map(d => {
-      const data = d.data();
-      return { id: d.id, data, totalScore: typeof data.totalScore === 'number' ? data.totalScore : fbSumVotes(data.votes) };
-    })
-    .sort((a, b) => b.totalScore - a.totalScore);
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
 
-  const top3 = scored.slice(0, FB_TOP_N);
+  let lifetimeDeals = 0;
+  let lifetimeRevenue = 0;
+  let last7DaysRevenue = 0;
+  const byCategory = { website: 0, app: 0, game: 0 };
+
+  dealsSnap.forEach(d => {
+    const deal = d.data();
+    lifetimeDeals += 1;
+
+    const type = ['website', 'app', 'game'].includes(deal.listingType) ? deal.listingType : 'website';
+    byCategory[type] += 1;
+
+    // Prefer the actual net amount credited to the seller (escrowAmount minus
+    // platform fee) when available; fall back to listingPrice/offerPrice so
+    // older deal docs (written before this field existed) still count
+    // toward lifetime totals, just without 7-day precision if undated.
+    const amount = typeof deal.sellerNetAmount === 'number' ? deal.sellerNetAmount
+      : typeof deal.escrowAmount === 'number' ? deal.escrowAmount
+      : typeof deal.listingPrice === 'number' ? deal.listingPrice
+      : typeof deal.offerPrice === 'number' ? deal.offerPrice
+      : 0;
+    lifetimeRevenue += amount;
+
+    const completedAtMs = deal.completedAt?.toMillis ? deal.completedAt.toMillis()
+      : deal.createdAt?.toMillis ? deal.createdAt.toMillis()
+      : null;
+    if (completedAtMs && (now - completedAtMs) <= SEVEN_DAYS_MS) {
+      last7DaysRevenue += amount;
+    }
+  });
+
+  return res.status(200).json({
+    ok: true,
+    lifetimeDeals,
+    lifetimeRevenue: parseFloat(lifetimeRevenue.toFixed(2)),
+    last7DaysRevenue: parseFloat(last7DaysRevenue.toFixed(2)),
+    byCategory,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// list-my-deals  { idToken, range?, limit? }  → { ok: true, deals, revenue, dealsCompleted }
+//
+// Powers the Seller Dashboard's Recent Deals table + Revenue chart. Unlike
+// get-seller-stats (public aggregate for any seller's profile modal), this
+// is the CALLER'S OWN deals — auth required, not a public read — and it
+// returns individual deal records (not just totals), since the dashboard
+// needs a real per-deal list to render as table rows and a day-by-day
+// series, not just a lifetime/7-day sum.
+//
+// `range` mirrors the dashboard's filter bar: 'today' | 'yesterday' |
+// 'this-week' | 'this-month' | 'last-90' | 'lifetime'. Filtering happens
+// server-side against createdAt so the client never has to fetch-then-trim.
+// Defaults to 'last-90' if omitted/unrecognised.
+//
+// Every status is returned (not just 'complete') — the dashboard table
+// shows pending/active/cancelled deals too, same statuses the deal chat UI
+// itself uses. Revenue/dealsCompleted totals, however, only count 'complete'
+// deals with dealOutcome:'successful', same rule as get-seller-stats, so the
+// two surfaces never disagree about what counts as "revenue."
+// ─────────────────────────────────────────────────────────────────────────────
+const DEAL_LIST_RANGE_DAYS = {
+  today: 1, yesterday: 2, 'this-week': 7, 'this-month': 31, 'last-90': 90, lifetime: null,
+};
+const DEAL_LIST_MAX = 200;
+
+async function handleListMyDeals(req, res, idToken) {
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  const { range, limit } = req.body || {};
+  const days = Object.prototype.hasOwnProperty.call(DEAL_LIST_RANGE_DAYS, range)
+    ? DEAL_LIST_RANGE_DAYS[range]
+    : DEAL_LIST_RANGE_DAYS['last-90'];
+  const size = Math.min(DEAL_LIST_MAX, Math.max(1, Number(limit) || DEAL_LIST_MAX));
+
+  const db = getAdminDb();
+  let query = db.collection('users').doc(uid).collection('deals')
+    .orderBy('createdAt', 'desc')
+    .limit(size);
+
+  if (days != null) {
+    const cutoff = Timestamp.fromMillis(Date.now() - days * 24 * 60 * 60 * 1000);
+    query = db.collection('users').doc(uid).collection('deals')
+      .where('createdAt', '>=', cutoff)
+      .orderBy('createdAt', 'desc')
+      .limit(size);
+  }
+
+  const snap = await query.get();
+
+  let revenue = 0;
+  let dealsCompleted = 0;
+
+  const deals = snap.docs.map(d => {
+    const deal = d.data();
+    const isSuccessfulComplete = deal.status === 'complete' && deal.dealOutcome === 'successful';
+
+    // Same amount-resolution order as get-seller-stats: prefer the actual
+    // net proceeds credited to the seller, fall back through the earlier
+    // fields for deals completed before sellerNetAmount existed.
+    const amount = typeof deal.sellerNetAmount === 'number' ? deal.sellerNetAmount
+      : typeof deal.escrowAmount === 'number' ? deal.escrowAmount
+      : typeof deal.listingPrice === 'number' ? deal.listingPrice
+      : typeof deal.offerPrice === 'number' ? deal.offerPrice
+      : 0;
+
+    if (isSuccessfulComplete) {
+      revenue += amount;
+      dealsCompleted += 1;
+    }
+
+    const createdAtMs = deal.createdAt?.toMillis ? deal.createdAt.toMillis() : null;
+    const completedAtMs = deal.completedAt?.toMillis ? deal.completedAt.toMillis() : null;
+
+    return {
+      dealId:       deal.dealId || d.id,
+      listingId:    deal.listingId || null,
+      listingTitle: deal.listingTitle || 'Untitled',
+      listingType:  deal.listingType || 'website',
+      buyerName:    deal.buyerName || 'Buyer',
+      buyerUid:     deal.buyerUid || null,
+      amount,
+      status:       deal.status || 'pending',
+      dealOutcome:  deal.dealOutcome || null,
+      createdAt:    createdAtMs,
+      completedAt:  completedAtMs,
+    };
+  });
+
+  return res.status(200).json({
+    ok: true,
+    deals,
+    revenue: parseFloat(revenue.toFixed(2)),
+    dealsCompleted,
+  });
+}
+
+
+// Public, write-only counter bump on users/{sellerUid}.profileViewCount.
+// Fired by the frontend every time a seller's public profile is opened —
+// including by the seller viewing their own profile, since "how many times
+// was this profile opened" is the honest metric; sellers aren't excluded
+// from their own count any more than a listing owner is excluded from a
+// listing's own view count elsewhere in the app.
+//
+// Uses FieldValue.increment(), same atomic-op pattern as listings.js's
+// view/click counters — no read-modify-write race under concurrent visits.
+//
+// Abuse note: same tradeoff as listings.js's view/click counters — this is
+// an unauthenticated-by-design analytics pixel (anonymous profile visits
+// are real traffic sellers want counted), so it can't be fully bot/refresh-
+// proofed at the API layer. We guard the cheap stuff (missing/garbage
+// sellerUid, nonexistent user, tight-loop duplicate fires from the same
+// caller) via a short in-memory debounce; real bot filtering belongs in
+// front of this route (e.g. edge/WAF rate limiting), not here.
+// ─────────────────────────────────────────────────────────────────────────────
+const PROFILE_VIEW_DEBOUNCE_MS = 4000;
+const _recentProfileViews = new Map(); // key: `${sellerUid}:${viewerKey}` -> timestamp
+function _pruneRecentProfileViews() {
+  const cutoff = Date.now() - PROFILE_VIEW_DEBOUNCE_MS * 5;
+  for (const [key, ts] of _recentProfileViews) {
+    if (ts < cutoff) _recentProfileViews.delete(key);
+  }
+}
+
+async function handleRecordProfileView(req, res) {
+  const { sellerUid, idToken } = req.body || {};
+  if (!sellerUid || typeof sellerUid !== 'string') {
+    return res.status(400).json({ error: 'Missing sellerUid' });
+  }
+
+  // Verify the token only if one was sent — same pattern as get-seller-stats'
+  // sibling public endpoints elsewhere in the app (listings.js handleFeed/
+  // handleFileUrl): a stale/bad token from a logged-out browser must never
+  // hard-fail an otherwise valid anonymous hit.
+  let viewerUid = null;
+  if (idToken) {
+    try {
+      const fbUser = await verifyFirebaseToken(idToken);
+      viewerUid = fbUser.localId;
+    } catch (_) {
+      // treat as anonymous
+    }
+  }
+
+  const viewerKey = viewerUid || 'anon';
+  const dedupeKey = `${sellerUid}:${viewerKey}`;
+  const now = Date.now();
+  const lastView = _recentProfileViews.get(dedupeKey);
+  if (lastView && (now - lastView) < PROFILE_VIEW_DEBOUNCE_MS) {
+    return res.status(200).json({ ok: true, counted: false });
+  }
+  _recentProfileViews.set(dedupeKey, now);
+  if (_recentProfileViews.size > 5000) _pruneRecentProfileViews();
+
+  const db = getAdminDb();
+  const sellerRef = db.collection('users').doc(sellerUid);
+  const sellerSnap = await sellerRef.get();
+  if (!sellerSnap.exists) return res.status(404).json({ error: 'Seller not found' });
+
+  await sellerRef.update({ profileViewCount: FieldValue.increment(1) });
+
+  return res.status(200).json({ ok: true, counted: true });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// DEAL LIFECYCLE
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────────────────────────
+// create-deal  { idToken, listingId, message, offerPrice? }
+// → { allowed: true, dealId } | 409 if a pending deal already exists
+//
+// Server is the source of truth for: listing data (price/title/owner/image —
+// never trusted from the client), the generated dealId, and duplicate
+// prevention. Writes both the seller's and buyer's deal docs atomically.
+// ─────────────────────────────────────────────────────────────────────────────
+async function _handleCreateDealCore(req, res, idToken) {
+  const fbUser = await verifyFirebaseToken(idToken);
+  const buyerUid = fbUser.localId;
+
+  const { listingId, message, offerPrice } = req.body || {};
+  if (!listingId || typeof listingId !== 'string') {
+    return res.status(400).json({ error: 'Missing listingId' });
+  }
+
+  const msg = typeof message === 'string' ? message.trim() : '';
+  if (msg.length < DEAL_MSG_MIN_LENGTH) {
+    return res.status(400).json({
+      error: `Message must be at least ${DEAL_MSG_MIN_LENGTH} characters.`,
+    });
+  }
+
+  let offer = null;
+  if (offerPrice != null) {
+    const n = Number(offerPrice);
+    if (!Number.isFinite(n) || n <= 0) {
+      return res.status(400).json({ error: 'Invalid offer price' });
+    }
+    offer = n;
+  }
+
+  const db = getAdminDb();
+
+  // Fetch listing server-side — client cannot supply or spoof these fields
+  const listingSnap = await db.collection('listings').doc(listingId).get();
+  if (!listingSnap.exists) return res.status(404).json({ error: 'Listing not found' });
+  const listing   = listingSnap.data();
+  const sellerUid = listing.ownerId;
+  if (!sellerUid) return res.status(400).json({ error: 'Listing has no owner' });
+  if (sellerUid === buyerUid) {
+    return res.status(400).json({ error: "You can't send a deal on your own listing" });
+  }
+
+  // Buyer profile for display fields on the deal doc
+  const buyerSnap = await db.collection('users').doc(buyerUid).get();
+  const buyerData = buyerSnap.exists ? buyerSnap.data() : {};
+  const buyerName = buyerData.username
+    || fbUser.displayName
+    || (fbUser.email ? fbUser.email.split('@')[0] : 'Buyer');
+  const buyerPic  = buyerData.profilePic || '';
+  const buyerEmail = fbUser.email || buyerData.email || '';
+
+  // Seller email for the "you got a deal request" notification email
+  const sellerSnapForEmail = await db.collection('users').doc(sellerUid).get();
+  const sellerEmail = sellerSnapForEmail.exists ? (sellerSnapForEmail.data().email || '') : '';
+
+  const typeWord = listing.type === 'app' ? 'app' : listing.type === 'game' ? 'game' : 'website';
+  const introMsg = `Hi! I'm interested in this ${typeWord} — is it still available?`;
+  const dealId   = `${buyerUid}_${listingId}_${Date.now()}`;
+
+  const sellerDealsRef = db.collection('users').doc(sellerUid).collection('deals');
+  const sellerDealRef  = sellerDealsRef.doc(dealId);
+  const buyerDealRef   = db.collection('users').doc(buyerUid).collection('deals').doc(dealId);
+
+  try {
+    await db.runTransaction(async tx => {
+      // Duplicate-prevention: block a second pending deal from this buyer
+      // on this listing. Read happens inside the transaction so two
+      // concurrent submits can't both pass the check.
+      const dupeSnap = await tx.get(
+        sellerDealsRef
+          .where('buyerUid',   '==', buyerUid)
+          .where('listingId',  '==', listingId)
+          .where('status',     '==', 'pending')
+      );
+      if (!dupeSnap.empty) {
+        throw Object.assign(
+          new Error('You already have a pending deal on this listing.'),
+          { code: 'DUPLICATE_DEAL' }
+        );
+      }
+
+      const dealData = {
+        dealId,
+        listingId,
+        listingTitle: listing.title || 'Untitled',
+        listingType:  listing.type  || 'website',
+        listingPrice: typeof listing.financials?.price === 'number' ? listing.financials.price : null,
+        offerPrice:   offer,
+        listingImage: listing.images?.[2] || listing.imageCover || listing.images?.[0] || '',
+        listingUrl:   listing.url || '',
+        buyerUid,
+        buyerName,
+        buyerPic,
+        sellerUid,
+        introMessage: introMsg,
+        message:      msg,
+        status:       'pending',
+        createdAt:    FieldValue.serverTimestamp(),
+        read:         false,
+        agentHandled: false,
+      };
+
+      tx.set(sellerDealRef, dealData);
+      tx.set(buyerDealRef,  { ...dealData, read: true });
+    });
+  } catch (err) {
+    if (err.code === 'DUPLICATE_DEAL') {
+      return res.status(409).json({ error: err.message });
+    }
+    throw err;
+  }
+
+  // Notifications + agent ping after transaction commits — best-effort,
+  // never block the deal itself on these.
+  //
+  // Seller-facing "deals received" counter — bumped here (not inside the
+  // transaction above) because it's an analytics tally, not part of the
+  // deal's own consistency: same fire-and-forget philosophy as the
+  // notifications/email below it. Uses FieldValue.increment(), atomic
+  // under concurrent deal submissions.
+  db.collection('users').doc(sellerUid).update({ dealCount: FieldValue.increment(1) })
+    .catch(e => console.error('[deal] dealCount increment failed (non-fatal)', e.message));
+
+  const notifyBatch = db.batch();
+  notifyBatch.set(
+    db.collection('users').doc(buyerUid).collection('notifications').doc(),
+    {
+      type:  'deal_sent',
+      title: 'Deal sent',
+      body:  `You sent a deal request for "${listing.title || 'this listing'}"` +
+             (offer ? ` with an offer of $${offer.toLocaleString()}` : ''),
+      dealId, listingId, toUid: sellerUid, read: false, createdAt: Date.now(),
+    }
+  );
+  notifyBatch.set(
+    db.collection('users').doc(sellerUid).collection('notifications').doc(),
+    {
+      type:     'deal_request',
+      title:    buyerName,
+      body:     `Sent a deal request for "${listing.title || 'your listing'}"` +
+                (offer ? ` — offering $${offer.toLocaleString()}` : ''),
+      dealId, listingId, fromUid: buyerUid, fromName: buyerName, fromPic: buyerPic,
+      offerPrice: offer, read: false, createdAt: Date.now(),
+    }
+  );
+  await notifyBatch.commit().catch(e => console.error('[deal] notify error', e));
+
+  // Notifications — deal request is a "big" moment for both sides: buyer gets a
+  // confirmation, seller gets alerted they have money on the table. Both
+  // email and push are sent so a missed/undelivered email doesn't mean the
+  // notification never reaches the person.
+  const priceLine = offer ? `an offer of <strong>$${offer.toLocaleString()}</strong>` : 'a deal request';
+  const priceLinePlain = offer ? `an offer of $${offer.toLocaleString()}` : 'a deal request';
+  notifyDeal({
+    uid: buyerUid,
+    to: buyerEmail,
+    accentKey: 'info',
+    eyebrow: 'Deal sent',
+    heading: 'Your deal request is on its way',
+    bodyHtml: `You sent ${priceLine} for <strong>${listing.title || 'this listing'}</strong>. We'll email you as soon as the seller responds.`,
+    pushBody: `You sent ${priceLinePlain} for "${listing.title || 'this listing'}".`,
+    ctaLabel: 'View deal',
+    chatRoomId: null,
+  }).catch(() => {});
+  notifyDeal({
+    uid: sellerUid,
+    to: sellerEmail,
+    accentKey: 'success',
+    eyebrow: 'New deal request',
+    heading: `${buyerName} wants your listing`,
+    bodyHtml: `You received ${priceLine} for <strong>${listing.title || 'your listing'}</strong>. Accept it to open a deal chat and get paid through escrow.`,
+    pushBody: `${buyerName} sent ${priceLinePlain} for "${listing.title || 'your listing'}".`,
+    ctaLabel: 'Review request',
+    chatRoomId: null,
+  }).catch(() => {});
+
+  // ── Built-in auto-accept check (synchronous, no AI Studio involved) ──
+  // This is separate from the AI Studio "agent" system elsewhere in this
+  // file (auto-reply/price-drop/auto-relist, which require a linked API
+  // key + plan and run async via cron/fire-and-forget). This is a plain
+  // on/off switch a seller sets on their own user doc:
+  //   agentConfig.active               — master on/off (missing/false = off)
+  //   agentConfig.autoAccept.enabled   — whether offers can be auto-accepted
+  //   agentConfig.autoAccept.minPercent — minimum offer, as a % of the
+  //                                       listing's price, to accept (e.g.
+  //                                       80 = must offer >= 80% of listed
+  //                                       price). A percentage rather than a
+  //                                       flat dollar amount because one
+  //                                       seller's listings can range from a
+  //                                       $200 site to a $50k app — a single
+  //                                       fixed minPrice would either block
+  //                                       everything on the cheap listing or
+  //                                       accept lowball offers on the
+  //                                       expensive one.
+  // When on:
+  //   • A full-price request (no offer) is always auto-accepted.
+  //   • An offer >= minPercent% of the listing price is auto-accepted.
+  //   • An offer below that, or autoAccept not enabled at all, is left
+  //     pending for the seller to review manually — never silently
+  //     downgraded to the listed price.
+  let dealOutcome = { status: 'pending' };
+  try {
+    dealOutcome = await runBuiltInAutoAccept({
+      db, sellerUid, dealId, offer,
+      listingPrice: typeof listing.financials?.price === 'number' ? listing.financials.price : null,
+    });
+  } catch (err) {
+    console.error('[deal.js] auto-accept check failed for new deal', dealId, err.message);
+  }
+
+  return res.status(200).json({ allowed: true, dealId, ...dealOutcome });
+}
+
+// Synchronous built-in auto-accept — runs inline during create-deal so the
+// buyer's response can say "you're in the chat now" instead of always
+// landing on pending and finding out later. Uses the same settleDealCore
+// transaction as a manual seller accept, so chat-room creation, the agreed
+// price carried into escrow, notifications, and race-safety are identical.
+async function runBuiltInAutoAccept({ db, sellerUid, dealId, offer, listingPrice }) {
+  const sellerSnap = await db.collection('users').doc(sellerUid).get();
+  const agentConfig = sellerSnap.exists ? sellerSnap.data().agentConfig : null;
+
+  if (!agentConfig?.active) {
+    return { status: 'pending' };
+  }
+
+  const autoAccept = agentConfig.autoAccept;
+  const isFullPriceRequest = offer == null;
+
+  // Percentage-based threshold: minPercent of the listing's own price, not
+  // a flat dollar figure, so one seller's config works across listings of
+  // very different prices. If the listing has no known price, there's
+  // nothing to compute a percentage of — treat as not meeting the
+  // threshold rather than guessing.
+  let meetsMinPercent = false;
+  if (autoAccept?.enabled && offer != null && typeof listingPrice === 'number' && listingPrice > 0) {
+    const minPercent = autoAccept.minPercent ?? 100;
+    const minAmount = listingPrice * (minPercent / 100);
+    meetsMinPercent = offer >= minAmount;
+  }
+
+  if (!isFullPriceRequest && !meetsMinPercent) {
+    // Agent is on, but either offers aren't configured to auto-accept at
+    // all, or this particular offer is below the seller's minimum percent
+    // of the listing price — leave it as a normal pending deal for manual
+    // review.
+    return { status: 'pending' };
+  }
+
+  try {
+    const result = await settleDealCore({ callerUid: sellerUid, dealId, action: 'accept' });
+    await postAutoAcceptBotMessage(db, {
+      chatRoomId:   result.chatRoomId,
+      buyerName:    result.deal?.buyerName,
+      listingTitle: result.deal?.listingTitle,
+    });
+    return { status: 'accepted', chatRoomId: result.chatRoomId, expiresAt: result.expiresAt };
+  } catch (err) {
+    // Should be unreachable (deal was just created as pending, nothing
+    // else could have settled it yet), but never let an auto-accept race
+    // surface as a failure to the buyer — they still have a valid pending
+    // deal to fall back on.
+    console.error('[deal.js] settleDealCore failed during auto-accept', dealId, err.message);
+    return { status: 'pending' };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// handleCreateDeal — thin wrapper around _handleCreateDealCore that tracks
+// the Send Deal CTA outcome onto the listing's own counters:
+//   successfulClickCount — the deal was actually created (core returned 200)
+//   failedClickCount     — Send Deal was clicked but it did NOT go through
+//                          (validation error, duplicate deal, unexpected
+//                          throw, etc.)
+//
+// The earliest failure (missing/invalid listingId) can't be attributed to
+// any specific listing's failedClickCount, since we don't yet know which
+// listing was involved — that one exit is not counted. Every other exit
+// point, success or failure, happens after `listingId` has been read from
+// the request body, so we always have something to increment against once
+// we get past that first check.
+//
+// We capture the core's response status via a lightweight `res` proxy
+// rather than touching every `return res.status(...)` line inside the core
+// — Express's `res.status(code)` returns `res` itself, so a later
+// `.json()` call chains onto the real, un-proxied `res` object; only the
+// `status` call itself is intercepted, purely to record what code was sent.
+// ─────────────────────────────────────────────────────────────────────────────
+async function _trackCreateDealClick(listingId, succeeded) {
+  if (!listingId || typeof listingId !== 'string') return; // can't attribute — no listing known yet
+  try {
+    const db = getAdminDb();
+    const field = succeeded ? 'successfulClickCount' : 'failedClickCount';
+    // Same field, incremented in two places: the specific listing (per-item
+    // stats) and stats/platformTotals (running platform-wide total — see
+    // listings.js's _bumpListingCounter for the matching impression/view
+    // side of this same doc). Fired together, not chained, so a slow/failed
+    // write to one never blocks or masks the other.
+    await Promise.all([
+      db.collection('listings').doc(listingId).update({ [field]: FieldValue.increment(1) }),
+      db.collection('stats').doc('platformTotals').set({ [field]: FieldValue.increment(1) }, { merge: true }),
+    ]);
+  } catch (err) {
+    // Never let analytics bookkeeping break or mask the real deal outcome.
+    console.error('[deal.js] _trackCreateDealClick failed (non-fatal)', listingId, succeeded, err.message);
+  }
+}
+
+async function handleCreateDeal(req, res, idToken) {
+  const listingId = req.body?.listingId;
+  let capturedStatus = null;
+
+  const resProxy = new Proxy(res, {
+    get(target, prop, receiver) {
+      if (prop === 'status') {
+        return (code) => {
+          capturedStatus = code;
+          return target.status(code); // returns the real res — chaining (.json()) is untouched
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+
+  try {
+    const result = await _handleCreateDealCore(req, resProxy, idToken);
+    _trackCreateDealClick(listingId, capturedStatus === 200).catch(() => {});
+    return result;
+  } catch (err) {
+    // Core threw before ever calling res.status() (e.g. verifyFirebaseToken
+    // failure, or an unexpected error deep in the transaction) — still a
+    // failed click if we know which listing it was for.
+    _trackCreateDealClick(listingId, false).catch(() => {});
+    throw err;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// accept-deal  { idToken, dealId }
+// reject-deal  { idToken, dealId }
+// cancel-deal  { idToken, dealId }
+//
+// All three are thin wrappers around settleDealHttp() -> settleDealCore()
+// Firestore transaction. The transaction re-reads both deal docs inside itself
+// to close any race with concurrent agent actions.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleAcceptDeal(req, res, idToken) {
+  return settleDealHttp(req, res, idToken, 'accept');
+}
+
+async function handleRejectDeal(req, res, idToken) {
+  return settleDealHttp(req, res, idToken, 'reject');
+}
+
+async function handleCancelDeal(req, res, idToken) {
+  return settleDealHttp(req, res, idToken, 'cancel');
+}
+
+// Thin HTTP wrapper: resolves callerUid from a real Firebase idToken, then
+// delegates to the shared core. Every manual (buyer/seller-initiated)
+// accept/reject/cancel goes through here.
+async function settleDealHttp(req, res, idToken, action) {
+  const fbUser    = await verifyFirebaseToken(idToken);
+  const callerUid = fbUser.localId;
+
+  const { dealId } = req.body || {};
+  if (!dealId || typeof dealId !== 'string') {
+    return res.status(400).json({ error: 'Missing dealId' });
+  }
+
+  try {
+    const result = await settleDealCore({ callerUid, dealId, action });
+    if (action === 'accept') {
+      return res.status(200).json({ allowed: true, chatRoomId: result.chatRoomId, expiresAt: result.expiresAt });
+    }
+    return res.status(200).json({ allowed: true });
+  } catch (err) {
+    if (err.code === 'NOT_FOUND')       return res.status(404).json({ error: err.message });
+    if (err.code === 'FORBIDDEN')       return res.status(403).json({ error: err.message });
+    if (err.code === 'ALREADY_SETTLED') return res.status(409).json({ error: err.message, status: err.status });
+    throw err;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// settleDealCore — the ONE real accept/reject/cancel implementation.
+// Auth-agnostic: takes an already-resolved callerUid rather than an idToken,
+// so it can be driven either by a verified end-user token (settleDealHttp
+// above) or by the seller's AI agent acting on the seller's own behalf
+// (called directly by the agent module below). Same transaction, same
+// race-safe re-read, same chat-room creation, same notifications/emails —
+// there is exactly one accept/reject/cancel code path in the whole app.
+//
+// Returns a plain result object (never writes to res) so callers — HTTP or
+// internal — can each shape their own response.
+// Throws Error with .code set to 'NOT_FOUND' | 'FORBIDDEN' | 'ALREADY_SETTLED'
+// on the expected failure paths; callers translate .code to HTTP status
+// (or, for the agent, to a skip/log reason) as appropriate.
+// ─────────────────────────────────────────────────────────────────────────────
+async function settleDealCore({ callerUid, dealId, action }) {
+  const db = getAdminDb();
+  const callerCopyRef = db.collection('users').doc(callerUid).collection('deals').doc(dealId);
+
+  const result = await db.runTransaction(async tx => {
+    const callerSnap = await tx.get(callerCopyRef);
+    if (!callerSnap.exists) {
+      throw Object.assign(new Error('Deal not found'), { code: 'NOT_FOUND' });
+    }
+
+    const deal      = callerSnap.data();
+    const { sellerUid, buyerUid } = deal;
+    const isSeller  = callerUid === sellerUid;
+    const isBuyer   = callerUid === buyerUid;
+
+    if (action === 'accept' || action === 'reject') {
+      if (!isSeller) {
+        throw Object.assign(new Error('Only the seller can do this'), { code: 'FORBIDDEN' });
+      }
+    } else if (action === 'cancel') {
+      if (!isBuyer) {
+        throw Object.assign(new Error('Only the buyer can cancel'), { code: 'FORBIDDEN' });
+      }
+    }
+
+    const sellerRef = db.collection('users').doc(sellerUid).collection('deals').doc(dealId);
+    const buyerRef  = db.collection('users').doc(buyerUid).collection('deals').doc(dealId);
+
+    // Re-read BOTH copies inside the transaction — this is the race-condition
+    // fix. An agent auto-accept, a manual accept/reject, and a buyer cancel
+    // can all be in flight at once, but only the first commit wins.
+    const [sellerSnap, buyerSnap] = await Promise.all([
+      tx.get(sellerRef),
+      tx.get(buyerRef),
+    ]);
+    const sellerStatus = sellerSnap.exists ? sellerSnap.data().status : null;
+    const buyerStatus  = buyerSnap.exists  ? buyerSnap.data().status  : null;
+
+    if (sellerStatus !== 'pending' || buyerStatus !== 'pending') {
+      throw Object.assign(
+        new Error(`Deal already ${sellerStatus || buyerStatus || 'resolved'}`),
+        { code: 'ALREADY_SETTLED', status: sellerStatus || buyerStatus }
+      );
+    }
+
+    if (action === 'accept') {
+      const chatRoomId = 'deal_' + dealId;
+      const expiresAt  = Date.now() + dealExpiryMsForType(deal.listingType);
+      tx.update(sellerRef, { status: 'accepted', read: true, chatRoomId, expiresAt });
+      tx.update(buyerRef,  { status: 'accepted', chatRoomId, expiresAt });
+      return { chatRoomId, expiresAt, deal, sellerUid, buyerUid };
+    }
+
+    if (action === 'reject') {
+      tx.update(sellerRef, { status: 'rejected', read: true });
+      tx.update(buyerRef,  { status: 'rejected' });
+      return { deal, sellerUid, buyerUid };
+    }
+
+    // cancel — remove buyer copy, mark seller copy so they can see it was cancelled
+    tx.delete(buyerRef);
+    tx.update(sellerRef, { status: 'cancelled', cancelledByBuyer: true });
+    return { deal, sellerUid, buyerUid };
+  });
+
+  // Post-transaction side effects (non-critical — deal status is already durable)
+  if (action === 'accept') {
+    await createDealChatRoom(db, {
+      dealId,
+      deal:      result.deal,
+      sellerUid: result.sellerUid,
+      buyerUid:  result.buyerUid,
+      chatRoomId: result.chatRoomId,
+      expiresAt:  result.expiresAt,
+    });
+    if (result.buyerUid !== result.sellerUid) {
+      await db.collection('users').doc(result.buyerUid).collection('notifications').add({
+        type:      'deal_accepted',
+        title:     'Deal accepted',
+        body:      `Your deal for "${result.deal.listingTitle || 'this listing'}" was accepted`,
+        dealId,
+        chatRoomId: result.chatRoomId,
+        sellerUid:  result.sellerUid,
+        buyerUid:   result.buyerUid,
+        expiresAt:  result.expiresAt,
+        read:       false,
+        createdAt:  Date.now(),
+      }).catch(() => {});
+
+      const buyerSnapForEmail = await db.collection('users').doc(result.buyerUid).get();
+      const buyerEmailForNotif = buyerSnapForEmail.exists ? (buyerSnapForEmail.data().email || '') : '';
+      notifyDeal({
+        uid: result.buyerUid,
+        to: buyerEmailForNotif,
+        accentKey: 'success',
+        eyebrow: 'Deal accepted',
+        heading: 'Your deal was accepted! 🎉',
+        bodyHtml: `The seller accepted your deal for <strong>${result.deal.listingTitle || 'this listing'}</strong>. Head to the deal chat to arrange payment into escrow.`,
+        pushBody: `The seller accepted your deal for "${result.deal.listingTitle || 'this listing'}".`,
+        ctaLabel: 'Open deal chat',
+        chatRoomId: result.chatRoomId,
+      }).catch(() => {});
+    }
+
+    // Outbound webhook — fired to the SELLER's own registered endpoints
+    // (they're the one who took the accept action and cares about it
+    // downstream). Fire-and-forget, same non-blocking pattern as the
+    // notifications above — a webhook delivery issue must never affect the
+    // deal's own success response.
+    dispatchWebhook(result.sellerUid, 'deal.accepted', {
+      dealId,
+      listingId:    result.deal.listingId,
+      listingTitle: result.deal.listingTitle,
+      chatRoomId:   result.chatRoomId,
+      buyerUid:     result.buyerUid,
+      sellerUid:    result.sellerUid,
+      offerPrice:   result.deal.offerPrice,
+    }).catch(() => {});
+
+    return { chatRoomId: result.chatRoomId, expiresAt: result.expiresAt, deal: result.deal };
+  }
+
+  if (action === 'reject') {
+    if (result.buyerUid !== result.sellerUid) {
+      await db.collection('users').doc(result.buyerUid).collection('notifications').add({
+        type:      'deal_rejected',
+        title:     'Deal rejected',
+        body:      `Your deal for "${result.deal.listingTitle || 'this listing'}" was declined`,
+        dealId,
+        read:      false,
+        createdAt: Date.now(),
+      }).catch(() => {});
+
+      const buyerSnapForEmail = await db.collection('users').doc(result.buyerUid).get();
+      const buyerEmailForNotif = buyerSnapForEmail.exists ? (buyerSnapForEmail.data().email || '') : '';
+      notifyDeal({
+        uid: result.buyerUid,
+        to: buyerEmailForNotif,
+        accentKey: 'danger',
+        eyebrow: 'Deal declined',
+        heading: 'Your deal was declined',
+        bodyHtml: `The seller declined your deal for <strong>${result.deal.listingTitle || 'this listing'}</strong>. You can browse similar listings or send a new offer.`,
+        pushBody: `The seller declined your deal for "${result.deal.listingTitle || 'this listing'}".`,
+        ctaLabel: 'Browse listings',
+        chatRoomId: null,
+      }).catch(() => {});
+    }
+    dispatchWebhook(result.sellerUid, 'deal.rejected', {
+      dealId,
+      listingId:    result.deal.listingId,
+      listingTitle: result.deal.listingTitle,
+      buyerUid:     result.buyerUid,
+      sellerUid:    result.sellerUid,
+    }).catch(() => {});
+    return { deal: result.deal };
+  }
+
+  // cancel
+  dispatchWebhook(result.sellerUid, 'deal.cancelled', {
+    dealId,
+    listingId:    result.deal.listingId,
+    listingTitle: result.deal.listingTitle,
+    buyerUid:     result.buyerUid,
+    sellerUid:    result.sellerUid,
+  }).catch(() => {});
+  return { deal: result.deal };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Note: there used to be a settleDealInternal() wrapper here for a separate
+// agent.js file to import. Now that the AI agent lives in this same file
+// (see "AI AGENT" section near the bottom), its code calls settleDealCore()
+// above directly — same transaction, chat-room creation, and notification/
+// email logic as a manual accept/reject, just without a cross-file import.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Shared helper: create the deal chat room + thread pointers on accept ─────
+async function createDealChatRoom(db, { dealId, deal, sellerUid, buyerUid, chatRoomId, expiresAt }) {
+  const sellerSnap = await db.collection('users').doc(sellerUid).get();
+  const sellerData = sellerSnap.exists ? sellerSnap.data() : {};
+  const sellerName = sellerData.username || sellerData.displayName || 'Seller';
+  const sellerPic  = sellerData.profilePic || '';
+  const buyerName  = deal.buyerName || 'Buyer';
+  const buyerPic   = deal.buyerPic  || '';
+
+  const now      = Date.now();
+  const autoMsg  = `Your deal for "${deal.listingTitle || 'this listing'}" has been accepted! You have 7 days to resolve. Good luck! 🤝`;
+  const chatName = (deal.listingTitle || 'Untitled').slice(0, 60);
+
+  // The agreed price is the buyer's accepted offer, not the original listing
+  // price — a deal for $100 that the seller accepted at a $50 offer must
+  // carry $50 forward into escrow, not silently revert to the $100 asking
+  // price. Fall back to listingPrice only when no offer was made (i.e. the
+  // buyer accepted the listed price as-is).
+  const agreedPrice = typeof deal.offerPrice === 'number' ? deal.offerPrice
+    : (typeof deal.listingPrice === 'number' ? deal.listingPrice : null);
 
   const batch = db.batch();
-  const archivedAt = FieldValue.serverTimestamp();
-  for (const item of top3) {
-    const archiveRef = db.collection('feedbackArchive').doc();
-    batch.set(archiveRef, {
-      textOriginal: item.data.textOriginal,
-      totalScore: item.totalScore,
-      voteCount: Object.keys(item.data.votes || {}).length,
-      cycleEndedAt: archivedAt,
-      archivedAt,
+
+  batch.set(db.collection('dealChats').doc(chatRoomId), {
+    chatName, chatRoomId, dealId,
+    listingId:    deal.listingId    || '',
+    listingTitle: deal.listingTitle || '',
+    listingImage: deal.listingImage || '',
+    listingPrice: agreedPrice,
+    sellerUid, sellerName, sellerPic,
+    buyerUid,  buyerName,  buyerPic,
+    createdAt: now, expiresAt, active: true,
+    lastMessage: autoMsg, lastAt: now,
+  });
+
+  batch.set(
+    db.collection('dealChats').doc(chatRoomId).collection('messages').doc('system_0'),
+    { uid: 'system', text: autoMsg, type: 'system', createdAt: now }
+  );
+
+  const threadBase = {
+    chatRoomId, chatName, isDealChat: true,
+    listingTitle: deal.listingTitle || '',
+    listingImage: deal.listingImage || '',
+    lastMessage: autoMsg, lastAt: now, expiresAt,
+    sellerUid, buyerUid,
+  };
+
+  batch.set(
+    db.collection('users').doc(sellerUid).collection('threads').doc(chatRoomId),
+    { ...threadBase, partnerUid: buyerUid, partnerName: buyerName, partnerPic: buyerPic, unread: false }
+  );
+  batch.set(
+    db.collection('users').doc(buyerUid).collection('threads').doc(chatRoomId),
+    { ...threadBase, partnerUid: sellerUid, partnerName: sellerName, partnerPic: sellerPic, unread: true, unreadCount: 1 }
+  );
+
+  await batch.commit();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ESCROW LIFECYCLE
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────────────────────────
+// escrow-pay  { idToken, chatRoomId, dealId, amount }
+// Buyer pays wallet → escrow. Atomically:
+//   • Debits buyer walletBalance
+//   • Sets dealChats/{chatRoomId}.paymentStatus = 'funded'
+//   • Writes escrow_hold transaction on buyer
+//   • Mirrors paymentStatus on both users' deal docs
+//   • Notifies seller
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleEscrowPay(req, res, idToken) {
+  const { chatRoomId, dealId, amount } = req.body;
+  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
+  if (!dealId)     return res.status(400).json({ error: 'Missing dealId' });
+
+  const amt = parseFloat(amount);
+  if (!amt || amt <= 0 || !isFinite(amt)) {
+    return res.status(400).json({ error: 'Invalid amount' });
+  }
+
+  const fbUser   = await verifyFirebaseToken(idToken);
+  const buyerUid = fbUser.localId;
+
+  const db       = getAdminDb();
+  const roomRef  = db.collection('dealChats').doc(chatRoomId);
+  const buyerRef = db.collection('users').doc(buyerUid);
+
+  await db.runTransaction(async tx => {
+    const [roomSnap, buyerSnap] = await Promise.all([tx.get(roomRef), tx.get(buyerRef)]);
+
+    if (!roomSnap.exists)  throw new Error('Deal chat not found');
+    if (!buyerSnap.exists) throw new Error('User not found');
+
+    const room = roomSnap.data();
+
+    // Security checks
+    if (room.buyerUid !== buyerUid)              throw new Error('You are not the buyer in this deal');
+    if (room.paymentStatus === 'funded')          throw new Error('This deal is already funded');
+    if (room.paymentStatus === 'complete')        throw new Error('This deal is already complete');
+    if (room.paymentStatus === 'refunded')        throw new Error('This deal has been refunded');
+    if (room.cancelled || room.active === false)  throw new Error('This deal has been cancelled');
+
+    const sellerUid = room.sellerUid;
+    if (!sellerUid) throw new Error('Seller not found on deal');
+
+    const balance = parseFloat((buyerSnap.data().walletBalance || 0).toFixed(2));
+    if (amt > balance) {
+      throw new Error(`Insufficient wallet balance ($${balance.toFixed(2)} available)`);
+    }
+
+    const newBalance = parseFloat((balance - amt).toFixed(2));
+    // Paying into escrow draws down withdrawable dollars first (capped at 0),
+    // same conservative rule used for P2P sends in paypal.js's handleTransfer
+    // — it never lets withdrawableBalance exceed money actually earned. If
+    // the deal is later refunded, _refundEscrowForRoom restores this amount.
+    const buyerWithdrawable    = parseFloat((buyerSnap.data().withdrawableBalance || 0).toFixed(2));
+    const newBuyerWithdrawable = parseFloat(Math.max(0, buyerWithdrawable - amt).toFixed(2));
+
+    // 1. Debit buyer wallet
+    tx.update(buyerRef, { walletBalance: newBalance, withdrawableBalance: newBuyerWithdrawable });
+
+    // 2. Escrow hold transaction record
+    tx.set(buyerRef.collection('transactions').doc(), {
+      type:       'escrow_hold',
+      amount:     -amt,
+      label:      `Escrow hold · ${room.listingTitle || 'Deal'}`,
+      chatRoomId,
+      dealId,
+      sellerUid,
+      status:     'held',
+      createdAt:  FieldValue.serverTimestamp(),
+    });
+
+    // 3. Update room
+    tx.update(roomRef, {
+      paymentStatus:   'funded',
+      escrowAmount:    amt,
+      escrowAt:        FieldValue.serverTimestamp(),
+      escrowBuyerUid:  buyerUid,
+      // Exact amount drawn from withdrawableBalance (may be less than `amt`
+      // if the buyer's withdrawable balance was already partly/fully 0) —
+      // stored so a later refund restores precisely this much, not `amt`
+      // blindly, which would over-credit withdrawableBalance beyond what
+      // the buyer actually had.
+      escrowWithdrawableDebit: parseFloat((buyerWithdrawable - newBuyerWithdrawable).toFixed(2)),
+    });
+
+    // 4 & 5. Mirror status on both deal docs
+    tx.update(db.collection('users').doc(sellerUid).collection('deals').doc(dealId), {
+      paymentStatus: 'funded', escrowAmount: amt,
+    });
+    tx.update(db.collection('users').doc(buyerUid).collection('deals').doc(dealId), {
+      paymentStatus: 'funded', escrowAmount: amt,
+    });
+
+    // 6. Notify seller
+    tx.set(db.collection('users').doc(sellerUid).collection('notifications').doc(), {
+      type:      'escrow_funded',
+      title:     'Payment received into escrow',
+      body:      `$${amt.toLocaleString()} is held in escrow for "${room.listingTitle || 'your deal'}". Deliver to release funds.`,
+      chatRoomId,
+      dealId,
+      read:      false,
+      createdAt: Date.now(),
+    });
+  });
+
+  // System message in chat (non-critical)
+  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
+    uid:       'system',
+    type:      'system',
+    text:      `💰 $${amt.toLocaleString()} has been placed in escrow. The seller can now deliver. Funds will be released once delivery is confirmed.`,
+    createdAt: Date.now(),
+  }).catch(() => {});
+
+  // Notify seller — money is now waiting on them to deliver
+  const roomForEmail = await roomRef.get().catch(() => null);
+  const sellerUidForEmail = roomForEmail?.data()?.sellerUid;
+  if (sellerUidForEmail) {
+    const sellerSnapForEmail = await db.collection('users').doc(sellerUidForEmail).get();
+    const sellerEmailForNotif = sellerSnapForEmail.exists ? (sellerSnapForEmail.data().email || '') : '';
+    notifyDeal({
+      uid: sellerUidForEmail,
+      to: sellerEmailForNotif,
+      accentKey: 'success',
+      eyebrow: 'Payment received',
+      heading: `$${amt.toLocaleString()} is in escrow`,
+      bodyHtml: `The buyer funded escrow for <strong>${roomForEmail.data().listingTitle || 'your deal'}</strong>. Deliver the goods to get paid — funds release once the buyer confirms.`,
+      pushBody: `$${amt.toLocaleString()} is in escrow for "${roomForEmail.data().listingTitle || 'your deal'}". Deliver to get paid.`,
+      ctaLabel: 'Deliver now',
+      chatRoomId,
+    }).catch(() => {});
+  }
+
+  return res.status(200).json({ success: true, escrowAmount: amt });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// escrow-deliver  { idToken, chatRoomId, dealId }
+// Seller marks as delivered. Sets paymentStatus = 'delivered'.
+// Does NOT release funds — buyer must confirm receipt.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleEscrowDeliver(req, res, idToken) {
+  const { chatRoomId, dealId } = req.body;
+  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
+
+  const fbUser    = await verifyFirebaseToken(idToken);
+  const sellerUid = fbUser.localId;
+
+  const db       = getAdminDb();
+  const roomRef  = db.collection('dealChats').doc(chatRoomId);
+  const roomSnap = await roomRef.get();
+
+  if (!roomSnap.exists)                return res.status(404).json({ error: 'Deal not found' });
+  const room = roomSnap.data();
+  if (room.sellerUid !== sellerUid)    return res.status(403).json({ error: 'Only the seller can mark delivery' });
+  if (room.paymentStatus !== 'funded') {
+    return res.status(400).json({ error: `Cannot deliver — status is ${room.paymentStatus || 'unfunded'}` });
+  }
+
+  const now = Date.now();
+  const autoReleaseAt = now + DEAL_AUTO_RELEASE_MS;
+  await roomRef.update({
+    paymentStatus: 'delivered',
+    deliveredAt: FieldValue.serverTimestamp(),
+    deliveredAtMs: now,
+    autoReleaseAt,
+  });
+
+  // Mirror on both deal docs
+  await Promise.all([sellerUid, room.buyerUid].map(uid => {
+    if (!uid || !dealId) return Promise.resolve();
+    return db.collection('users').doc(uid).collection('deals').doc(dealId)
+      .update({ paymentStatus: 'delivered', autoReleaseAt }).catch(() => {});
+  }));
+
+  // Notify buyer
+  if (room.buyerUid) {
+    await db.collection('users').doc(room.buyerUid).collection('notifications').add({
+      type:      'deal_delivered',
+      title:     'Seller marked as delivered',
+      body:      `"${room.listingTitle || 'Your deal'}" has been marked delivered. Confirm to release payment.`,
+      chatRoomId,
+      dealId,
+      read:      false,
+      createdAt: now,
+    }).catch(() => {});
+
+    const buyerSnapForEmail = await db.collection('users').doc(room.buyerUid).get();
+    const buyerEmailForNotif = buyerSnapForEmail.exists ? (buyerSnapForEmail.data().email || '') : '';
+    notifyDeal({
+      uid: room.buyerUid,
+      to: buyerEmailForNotif,
+      accentKey: 'warn',
+      eyebrow: 'Action needed',
+      heading: 'The seller marked your order delivered',
+      bodyHtml: `<strong>${room.listingTitle || 'Your deal'}</strong> has been marked as delivered. Please confirm receipt to release payment, or raise a dispute if there's an issue. You have <strong>72 hours</strong> — after that, funds release automatically.`,
+      pushBody: `"${room.listingTitle || 'Your deal'}" was marked delivered. Confirm receipt within 72 hours to release payment.`,
+      ctaLabel: 'Confirm receipt',
+      chatRoomId,
+    }).catch(() => {});
+  }
+
+  // System message
+  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
+    uid:       'system',
+    type:      'system',
+    text:      'Seller has marked this deal as delivered. Please confirm receipt to release the funds, or raise a dispute if there is an issue. You have 72 hours to verify — if there\'s no response, the funds will be released to the seller automatically. The chat stays open the whole time if you have questions.',
+    createdAt: now,
+  }).catch(() => {});
+
+  return res.status(200).json({ success: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// escrow-get-download-url  { idToken, chatRoomId, dealId, storagePath }
+// Mints a short-lived signed URL for a deal deliverable — BUYER ONLY. The
+// seller (whoever uploaded it) gets no download capability at all here; the
+// frontend renders a read-only badge for them, and this endpoint independently
+// enforces the same restriction server-side (never trust the client alone).
+// Only usable while the deal is still "live" (funded / delivered / disputed).
+// The moment a valid signed URL is issued to the buyer, the underlying file
+// is deleted from storage — this is a ONE-TIME download. If the delete
+// somehow fails, the buyer's link still works for its TTL, but the file
+// won't get a second one after that (see below); any issue should go through
+// a dispute rather than a repeat download.
+// ─────────────────────────────────────────────────────────────────────────────
+const DOWNLOAD_URL_TTL_SECONDS = 300; // 5 minutes
+
+async function handleEscrowGetDownloadUrl(req, res, idToken) {
+  const { chatRoomId, dealId, storagePath } = req.body;
+  if (!chatRoomId)  return res.status(400).json({ error: 'Missing chatRoomId' });
+  if (!storagePath) return res.status(400).json({ error: 'Missing storagePath' });
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid    = fbUser.localId;
+
+  const db       = getAdminDb();
+  const roomRef  = db.collection('dealChats').doc(chatRoomId);
+  const roomSnap = await roomRef.get();
+  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
+
+  const room = roomSnap.data();
+
+  // Buyer only — the seller (or anyone else) gets no download link, ever,
+  // regardless of what the frontend renders. This is the actual enforcement
+  // point; the read-only badge in the chat UI is just a courtesy reflection
+  // of this rule, not the thing that provides it.
+  if (room.buyerUid !== uid) {
+    return res.status(403).json({ error: 'Only the buyer can download this file.' });
+  }
+
+  // storagePath from the (now multi-account) storage.js is formatted
+  // "<accountId>@@<uploaderUid>--filename...", e.g. "3@@abc123--file-....zip".
+  // Split off the account id first so the ownership check below compares
+  // against the actual uid portion, not the whole prefixed string.
+  const pathMatch = storagePath.match(/^(\d+)@@(.+)$/);
+  if (!pathMatch) {
+    return res.status(400).json({ error: 'Malformed storagePath' });
+  }
+  const [, accountId, uidScopedName] = pathMatch;
+
+  // Defense in depth: the file must actually belong to this deal's chat room.
+  // uidScopedName is prefixed "<uploaderUid>--...", and only the seller uploads
+  // transfer deliverables, so require the path to have been uploaded by the
+  // seller on this room — prevents one deal's storagePath being reused to
+  // pull a file from an unrelated deal by guessing/reusing a path string.
+  if (!uidScopedName.startsWith(`${room.sellerUid}--`)) {
+    return res.status(403).json({ error: 'File does not belong to this deal' });
+  }
+
+  const liveStatuses = ['funded', 'delivered', 'disputed'];
+  if (!liveStatuses.includes(room.paymentStatus)) {
+    return res.status(403).json({
+      error: `Download access is no longer available — deal status is ${room.paymentStatus || 'unknown'}.`,
     });
   }
-  // Delete ALL suggestions (including the top 3 just archived, and every
-  // non-top-3 one) — the live board always comes back empty.
-  for (const doc of openSnap.docs) {
-    batch.delete(doc.ref);
-  }
-  // Also sweep any non-open (planned/done/declined) leftovers so the board
-  // fully clears each cycle rather than accumulating old triaged rows.
-  const nonOpenSnap = await db.collection('feedbackSuggestions')
-    .where('status', '!=', 'open')
-    .get();
-  for (const doc of nonOpenSnap.docs) {
-    batch.delete(doc.ref);
-  }
 
-  batch.set(cycleRef, { cycleStart: archivedAt }, { merge: true });
-  await batch.commit();
-
-  const freshCycle = await cycleRef.get();
-  const newStartMs = freshCycle.data().cycleStart.toMillis();
-  return { ranReset: true, archivedCount: top3.length, cycleStart: newStartMs, msRemaining: FB_CYCLE_MS };
-}
-// ════════════════════════════════════════════════════════════════════════
-
-const FB_STOPWORDS = new Set([
-  'a','an','the','is','are','was','were','be','been','being','to','of','in',
-  'on','for','and','or','but','it','this','that','these','those','with',
-  'as','at','by','from','so','if','than','then','there','their','they',
-  'i','we','you','my','our','your','me','us','can','could','would','should',
-  'will','shall','do','does','did','please','pls','plz','add','make','want',
-  'wish','need','like','also','just','really','very','some','more','app',
-  'feature','option','ability','allow','let','have','has','get','when',
-]);
-
-function fbNormalize(text) {
-  return String(text || '')
-    .toLowerCase()
-    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-function fbTokenSet(normText) {
-  return new Set(normText.split(' ').filter(w => w.length > 1 && !FB_STOPWORDS.has(w)));
-}
-function fbJaccard(setA, setB) {
-  if (!setA.size && !setB.size) return 0;
-  let intersection = 0;
-  for (const t of setA) if (setB.has(t)) intersection++;
-  const union = setA.size + setB.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-function fbTrigrams(normText) {
-  const s = `  ${normText.replace(/\s+/g, ' ')} `;
-  const grams = new Set();
-  for (let i = 0; i < s.length - 2; i++) grams.add(s.slice(i, i + 3));
-  return grams;
-}
-function fbSimilarity(textA, textB) {
-  const normA = fbNormalize(textA);
-  const normB = fbNormalize(textB);
-  if (!normA || !normB) return 0;
-  if (normA === normB) return 1;
-  const jac = fbJaccard(fbTokenSet(normA), fbTokenSet(normB));
-  const tri = fbJaccard(fbTrigrams(normA), fbTrigrams(normB));
-  return Math.max(jac, tri);
-}
-
-const FB_DUPLICATE_THRESHOLD = 0.62;
-const FB_GRAY_ZONE_MIN = 0.38;
-
-// Find the best existing match for newText among open suggestions.
-async function fbFindBestMatch(newText) {
-  // where('status', '==', 'open') + orderBy('updatedAt', 'desc') requires a
-  // composite index (same situation as fbGetTopOpen below). Fall back to an
-  // in-memory filter/sort if that index hasn't been created/deployed yet,
-  // so this never hard-fails the request.
-  let snap;
   try {
-    snap = await db.collection('feedbackSuggestions')
-      .where('status', '==', 'open')
-      .orderBy('updatedAt', 'desc')
-      .limit(300) // recent/active window — keeps this cheap as the board grows
-      .get();
+    const account = findAccountById(accountId);
+    const url = await supabaseCreateSignedUrl(account, uidScopedName, DOWNLOAD_URL_TTL_SECONDS);
+
+    // Delete immediately — this is a one-time download. Non-blocking from
+    // the buyer's perspective (the signed URL above is already valid and
+    // will keep working for its TTL regardless of when the delete finishes),
+    // but awaited here so a delete failure can at least be logged rather
+    // than silently lost.
+    deleteFiles(account, [uidScopedName]).catch(e =>
+      console.warn(`[deal.js] failed to auto-delete deal file ${uidScopedName} on account ${accountId} (non-fatal):`, e.message)
+    );
+
+    // Mark the message so a refresh doesn't re-offer a dead download button,
+    // and so support/disputes can see this file was already claimed.
+    // Best-effort — find the message by storagePath and flag it.
+    db.collection('dealChats').doc(chatRoomId).collection('messages')
+      .where('storagePath', '==', storagePath).limit(1).get()
+      .then(snap => { if (!snap.empty) snap.docs[0].ref.update({ downloaded: true, downloadedAt: Date.now() }).catch(() => {}); })
+      .catch(() => {});
+
+    return res.status(200).json({ url, expiresIn: DOWNLOAD_URL_TTL_SECONDS });
   } catch (err) {
-    if (err.message?.includes('requires an index') || err.message?.includes('FAILED_PRECONDITION')) {
-      const allSnap = await db.collection('feedbackSuggestions').get();
-      const docs = allSnap.docs
-        .filter(d => d.data().status === 'open')
-        .sort((a, b) => {
-          const at = a.data().updatedAt?.toMillis?.() ?? 0;
-          const bt = b.data().updatedAt?.toMillis?.() ?? 0;
-          return bt - at;
-        })
-        .slice(0, 300);
-      snap = { forEach: (fn) => docs.forEach(fn) };
-    } else {
-      throw err;
-    }
+    console.error('[deal.js] escrow-get-download-url sign error:', err.message);
+    return res.status(500).json({ error: 'Could not generate download link' });
   }
-
-  let best = null;
-  const grayZoneCandidates = [];
-
-  snap.forEach(doc => {
-    const data = doc.data();
-    const score = fbSimilarity(newText, data.textOriginal);
-    if (score >= FB_DUPLICATE_THRESHOLD) {
-      if (!best || score > best.score) best = { id: doc.id, data, score, viaAi: false };
-    } else if (score >= FB_GRAY_ZONE_MIN) {
-      grayZoneCandidates.push({ id: doc.id, data, score });
-    }
-  });
-
-  if (best) return best;
-
-  // Only escalate to the AI tiebreaker for the single closest gray-zone
-  // candidate — keeps this to at most one extra model call per submission.
-  if (grayZoneCandidates.length) {
-    grayZoneCandidates.sort((a, b) => b.score - a.score);
-    const top = grayZoneCandidates[0];
-    try {
-      const verdict = await handleFeedbackDedupe({ textA: newText, textB: top.data.textOriginal });
-      if (verdict.sameRequest === true) return { id: top.id, data: top.data, score: top.score, viaAi: true };
-    } catch (err) {
-      console.error('[aistudio] feedback tiebreaker failed, treating as distinct:', err.message);
-    }
-  }
-
-  return null;
 }
 
-async function handleFeedbackSubmit({ text, callerUid }) {
-  const trimmed = String(text || '').trim();
-  if (!trimmed) throw httpError(400, 'text required');
-  if (trimmed.length < 4) throw httpError(400, 'Tell us a bit more — a few words is enough.');
-  if (trimmed.length > 500) throw httpError(400, 'Keep it under 500 characters.');
+// ─────────────────────────────────────────────────────────────────────────────
+// Core release logic — shared by the buyer-triggered handler below and the
+// automated 72h sweep. `auto: true` skips the buyer-identity check (the
+// system is acting on the buyer's behalf because they didn't respond in
+// time) and adjusts the system message + label so it's clear this happened
+// automatically rather than by explicit buyer action.
+//
+// Applies the seller's plan-based platform fee (LIMITS.saleFees) here, at
+// release time — not at escrow-pay time — since the full amount needs to sit
+// in escrow untouched while funded/delivered/disputed (a refund must return
+// exactly what the buyer paid). The fee is only actually taken once the sale
+// completes. Seller receives `amt - fee`; the fee itself is credited to the
+// platform admin account (see getPlatformFeeAdminUid) the same way any other
+// wallet credit works — walletBalance + withdrawableBalance, a transaction
+// record, everything auditable, nothing just vanishing into a ledger.
+// ─────────────────────────────────────────────────────────────────────────────
+async function _releaseEscrowForRoom(db, chatRoomId, dealId, { auto = false } = {}) {
+  const roomRef = db.collection('dealChats').doc(chatRoomId);
 
-  // Per-user rate limit: max 20 open suggestions authored per user, so this
-  // can't be spammed into an unusable list.
-  const authoredSnap = await db.collection('feedbackSuggestions')
-    .where('submittedByUid', '==', callerUid)
-    .where('status', '==', 'open')
-    .limit(21)
-    .get();
-  if (authoredSnap.size >= 20) {
-    throw httpError(429, 'You have a lot of open suggestions already — we\'ll get to them! Try again once some are reviewed.');
-  }
+  // Resolved ahead of the transaction — a query-by-email has no place inside
+  // a Firestore transaction alongside doc gets/sets for the buyer/seller.
+  // null means ADMIN_EMAIL is unset/unresolvable — NOT "no fee owed". The
+  // fee is still deducted from the seller either way; this only decides
+  // where it goes (live admin wallet vs the unclaimed-fees ledger).
+  const adminUid = await getPlatformFeeAdminUid(db);
+  let ledgerEntry = null; // set inside the transaction if we need to ledger post-commit
 
-  const match = await fbFindBestMatch(trimmed);
+  await db.runTransaction(async tx => {
+    const roomSnap = await tx.get(roomRef);
+    if (!roomSnap.exists) throw new Error('Deal not found');
+    const room = roomSnap.data();
 
-  if (match) {
-    const existingVotes = match.data.votes || {};
-    const alreadyVoted = Object.prototype.hasOwnProperty.call(existingVotes, callerUid);
-    if (alreadyVoted) {
-      return {
-        merged: true,
-        alreadyCounted: true,
-        suggestionId: match.id,
-        message: 'You already suggested something like this — we\'ve got it noted!',
-      };
+    if (!['delivered', 'funded', 'disputed'].includes(room.paymentStatus)) {
+      throw new Error(`Cannot release — status is ${room.paymentStatus}`);
     }
-    // Merging into an existing suggestion still counts as the submitter
-    // liking it a lot — same +3 "Fantastic" auto-vote as a brand new one.
-    const newVotes = { ...existingVotes, [callerUid]: FB_VOTE_SCORES.fantastic };
-    const ref = db.collection('feedbackSuggestions').doc(match.id);
-    await ref.set({
-      votes: newVotes,
-      voteCount: Object.keys(newVotes).length,
-      totalScore: fbSumVotes(newVotes),
-      updatedAt: FieldValue.serverTimestamp(),
-      lastVotedAt: FieldValue.serverTimestamp(),
-      ...(match.viaAi ? { aiMatchedCount: FieldValue.increment(1) } : {}),
-    }, { merge: true });
-    return {
-      merged: true,
-      alreadyCounted: false,
-      suggestionId: match.id,
-      message: 'Someone already suggested this — we\'ve added your vote!',
+    if (room.paymentStatus === 'complete') throw new Error('Already complete');
+
+    const sellerUid = room.sellerUid;
+    const buyerUid   = room.buyerUid;
+    const amt       = parseFloat(room.escrowAmount || 0);
+    if (!amt) throw new Error('No escrow amount on file');
+
+    const sellerRef  = db.collection('users').doc(sellerUid);
+    const sellerSnap = await tx.get(sellerRef);
+    if (!sellerSnap.exists) throw new Error('Seller not found');
+
+    // ── Plan-based platform fee (LIMITS.saleFees — 30%/24%/18%/12% by plan) ──
+    const sellerPlan = sellerSnap.data().plan || 'free';
+    const feeRate     = LIMITS.saleFees[sellerPlan] ?? LIMITS.saleFees.free;
+    const platformFee = parseFloat((amt * feeRate).toFixed(2));
+    const sellerNet    = parseFloat((amt - platformFee).toFixed(2));
+
+    // Two DISTINCT reasons the seller might keep the full amount — these
+    // must never be conflated:
+    //  - noFeeOwed: the seller IS the platform admin account, or the fee
+    //    rounds to $0. Correctly no fee to collect from anyone.
+    //  - feeOwedButUnroutable: a real fee IS owed and IS deducted from the
+    //    seller below, same as normal — there's just nowhere live to credit
+    //    it (adminUid is null) because ADMIN_EMAIL is unset/misconfigured.
+    //    That fee goes to the unclaimed-fees ledger after this transaction
+    //    commits, not to the seller and not into the void.
+    const noFeeOwed = sellerUid === adminUid || platformFee <= 0;
+    const feeOwedButUnroutable = !noFeeOwed && !adminUid;
+    const applyFeeSplit = !noFeeOwed; // seller pays the fee either way unless noFeeOwed
+
+    // Firestore transactions require every tx.get() to happen before any
+    // tx.update()/tx.set(). Whether we can credit the admin live isn't known
+    // until after the room and seller reads above, so this can't be
+    // front-loaded alongside them in one Promise.all — but it still has to
+    // run here, before the first write below.
+    const adminRef  = (applyFeeSplit && adminUid) ? db.collection('users').doc(adminUid) : null;
+    const adminSnap = adminRef ? await tx.get(adminRef) : null;
+    if (adminRef && !adminSnap.exists) throw new Error('Platform fee admin account not found');
+
+    const sellerBal    = parseFloat((sellerSnap.data().walletBalance || 0).toFixed(2));
+    const creditToSeller = applyFeeSplit ? sellerNet : amt;
+    const newSellerBal = parseFloat((sellerBal + creditToSeller).toFixed(2));
+    // Sale proceeds are withdrawable (unlike a straight PayPal deposit —
+    // see paypal.js's withdrawableBalance model), so escrow release credits
+    // both fields.
+    const sellerWithdrawable    = parseFloat((sellerSnap.data().withdrawableBalance || 0).toFixed(2));
+    const newSellerWithdrawable = parseFloat((sellerWithdrawable + creditToSeller).toFixed(2));
+
+    // 1. Credit seller wallet (net of platform fee), and bump the seller's
+    // lifetime completed-deals counter. This is read directly by the
+    // marketplace frontend (mpGetSeller) to show trust badges next to the
+    // seller's name — computing it here via FieldValue.increment (inside
+    // this same transaction) means the frontend never has to query or
+    // aggregate deals itself, and the count can't drift from the actual
+    // number of completions even under concurrent payouts.
+    tx.update(sellerRef, {
+      walletBalance: newSellerBal,
+      withdrawableBalance: newSellerWithdrawable,
+      dealsCompleted: FieldValue.increment(1),
+    });
+
+    // 2. Seller transaction record — always shows the REAL fee the seller
+    // paid, whether or not we could route it to a live admin wallet. This
+    // is the seller's own auditable record and must never disagree with
+    // what actually left their payout.
+    const sellerTxRecord = {
+      type:       'escrow_release',
+      amount:     creditToSeller,
+      grossAmount: amt,
+      platformFee: applyFeeSplit ? platformFee : 0,
+      feeRate:     applyFeeSplit ? feeRate : 0,
+      plan:        sellerPlan,
+      label:      `Escrow released · ${room.listingTitle || 'Deal'}`,
+      chatRoomId,
+      dealId,
+      buyerUid,
+      auto,
+      status:     'completed',
+      createdAt:  FieldValue.serverTimestamp(),
     };
+    if (applyFeeSplit) {
+      sellerTxRecord.note = `$${amt.toLocaleString()} sale − ${(feeRate * 100).toFixed(feeRate * 100 % 1 === 0 ? 0 : 1)}% platform fee ($${platformFee.toFixed(2)}) = $${sellerNet.toFixed(2)}`
+        + (feeOwedButUnroutable ? ' (fee pending platform reconciliation)' : '');
+    }
+    tx.set(sellerRef.collection('transactions').doc(), sellerTxRecord);
+
+    // 2b. Credit the platform fee to the admin account — only when a real
+    // fee is owed AND we have somewhere live to put it. If a fee is owed
+    // but adminUid is null (feeOwedButUnroutable), the fee has still been
+    // deducted from the seller above — it's queued for the unclaimed-fees
+    // ledger after the transaction commits (see ledgerEntry below), not
+    // dropped here.
+    if (applyFeeSplit && adminRef) {
+      const adminBal    = parseFloat((adminSnap.data().walletBalance || 0).toFixed(2));
+      const newAdminBal = parseFloat((adminBal + platformFee).toFixed(2));
+      const adminWithdrawable    = parseFloat((adminSnap.data().withdrawableBalance || 0).toFixed(2));
+      const newAdminWithdrawable = parseFloat((adminWithdrawable + platformFee).toFixed(2));
+
+      tx.update(adminRef, { walletBalance: newAdminBal, withdrawableBalance: newAdminWithdrawable });
+
+      tx.set(adminRef.collection('transactions').doc(), {
+        type:        'platform_fee',
+        amount:      platformFee,
+        label:       `Platform fee · ${room.listingTitle || 'Deal'}`,
+        note:        `${(feeRate * 100).toFixed(feeRate * 100 % 1 === 0 ? 0 : 1)}% of $${amt.toLocaleString()} (seller plan: ${sellerPlan})`,
+        chatRoomId,
+        dealId,
+        sellerUid,
+        buyerUid,
+        status:      'completed',
+        createdAt:   FieldValue.serverTimestamp(),
+      });
+    } else if (feeOwedButUnroutable) {
+      ledgerEntry = {
+        amount: platformFee,
+        source: 'escrow_release',
+        sourceId: dealId || chatRoomId,
+        payerUid: sellerUid,
+        counterpartyUid: buyerUid,
+        note: `${(feeRate * 100).toFixed(feeRate * 100 % 1 === 0 ? 0 : 1)}% of $${amt.toLocaleString()} (seller plan: ${sellerPlan}) — deducted from seller, held pending ADMIN_EMAIL fix`,
+      };
+    }
+
+    // 3. Buyer transaction record (closes the hold)
+    const buyerRef = db.collection('users').doc(buyerUid);
+    tx.set(buyerRef.collection('transactions').doc(), {
+      type:       'escrow_released',
+      amount:     0,
+      label:      `Escrow released to seller · ${room.listingTitle || 'Deal'}`,
+      chatRoomId,
+      dealId,
+      sellerUid,
+      auto,
+      status:     'completed',
+      createdAt:  FieldValue.serverTimestamp(),
+    });
+
+    // 4. Close the chat room — outcome is "Deal Successful"
+    tx.update(roomRef, {
+      paymentStatus: 'complete',
+      dealOutcome:   'successful',
+      completedAt:   FieldValue.serverTimestamp(),
+      autoCompleted: auto,
+      active:        false,
+    });
+
+    // 5. Mirror on both deal docs. The seller's copy additionally records
+    // completedAt + sellerNetAmount (the actual post-platform-fee credit) —
+    // these two fields are what get-seller-stats reads to compute lifetime/
+    // last-7-days revenue and category breakdowns for the public seller
+    // profile modal, so they need to live on the deal doc itself rather
+    // than only on the (differently-scoped) dealChats room doc.
+    if (dealId) {
+      tx.update(db.collection('users').doc(sellerUid).collection('deals').doc(dealId), {
+        paymentStatus: 'complete', status: 'complete', dealOutcome: 'successful',
+        completedAt: FieldValue.serverTimestamp(),
+        sellerNetAmount: creditToSeller,
+      });
+      tx.update(buyerRef.collection('deals').doc(dealId), {
+        paymentStatus: 'complete', status: 'complete', dealOutcome: 'successful',
+        completedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    // 6. Notify seller
+    tx.set(sellerRef.collection('notifications').doc(), {
+      type:      'escrow_released',
+      title:     'Payment released!',
+      body:      auto
+        ? `$${creditToSeller.toLocaleString()} has been automatically released to your wallet for "${room.listingTitle || 'your deal'}" after the 72-hour verification window passed.${applyFeeSplit ? ` (${(feeRate * 100).toFixed(feeRate * 100 % 1 === 0 ? 0 : 1)}% platform fee already deducted.)` : ''}`
+        : `$${creditToSeller.toLocaleString()} has been added to your wallet for "${room.listingTitle || 'your deal'}'.${applyFeeSplit ? ` (${(feeRate * 100).toFixed(feeRate * 100 % 1 === 0 ? 0 : 1)}% platform fee already deducted.)` : ''}`,
+      chatRoomId,
+      dealId,
+      read:      false,
+      createdAt: Date.now(),
+    });
+
+    // 7. If auto-released, let the buyer know too — they didn't take the action themselves
+    if (auto) {
+      tx.set(buyerRef.collection('notifications').doc(), {
+        type:      'escrow_auto_released',
+        title:     'Deal auto-completed',
+        body:      `The 72-hour verification window for "${room.listingTitle || 'this deal'}" passed, so the funds were automatically released to the seller.`,
+        chatRoomId,
+        dealId,
+        read:      false,
+        createdAt: Date.now(),
+      });
+    }
+  });
+
+  // Ledger the deducted-but-unroutable platform fee (if any) now that the
+  // money-moving transaction above has actually committed — the fee was
+  // already taken from the seller inside that transaction; this just
+  // records where it's sitting until ADMIN_EMAIL is fixed and it can be
+  // swept into the real admin wallet.
+  if (ledgerEntry) {
+    await _ledgerUnclaimedFee(db, ledgerEntry);
   }
 
-  const newRef = db.collection('feedbackSuggestions').doc();
-  const initialVotes = { [callerUid]: FB_VOTE_SCORES.fantastic };
-  await newRef.set({
-    textOriginal: trimmed,
-    textNormalized: fbNormalize(trimmed),
-    votes: initialVotes,
-    voteCount: 1,
-    totalScore: fbSumVotes(initialVotes),
-    status: 'open',
-    submittedByUid: callerUid,
-    aiMatchedCount: 0,
-    createdAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-    lastVotedAt: FieldValue.serverTimestamp(),
-  });
-  return {
-    merged: false,
-    suggestionId: newRef.id,
-    message: 'Thanks — added to the board!',
-  };
-}
+  // System message (outside transaction — non-critical)
+  const roomSnap2 = await roomRef.get().catch(() => null);
+  const amt2      = roomSnap2?.data()?.escrowAmount || '';
+  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
+    uid:       'system',
+    type:      'system',
+    text:      auto
+      ? `⏱ The 72-hour verification window passed without a response, so this deal auto-completed. $${amt2 ? Number(amt2).toLocaleString() : ''} has been released to the seller. Deal Successful!`
+      : `Deal complete! $${amt2 ? Number(amt2).toLocaleString() : ''} has been released to the seller. Thank you for using Siterifty!`,
+    createdAt: Date.now(),
+  }).catch(() => {});
 
-// Public: top open suggestions, ranked by totalScore (highest first), for
-// the board view in the widget. callerUid may be null (signed-out callers
-// can still browse). Also runs the 7-day cycle check first (see
-// fbMaybeRunReset) since this is the read every board-open triggers.
-async function handleFeedbackListTop({ limit, callerUid }) {
-  const cycleInfo = await fbMaybeRunReset();
+  // Notifications — payment landing is the single biggest "big moment" in the
+  // whole deal lifecycle, so both sides get one, on both channels. Re-reads
+  // are cheap and keep this fully outside (and never blocking) the
+  // money-moving transaction.
+  const roomData = roomSnap2?.data();
+  if (roomData) {
+    const listingTitle = roomData.listingTitle || 'your deal';
+    const amtStr = amt2 ? Number(amt2).toLocaleString() : '';
 
-  // where('status', '==', 'open') + orderBy('totalScore', 'desc') requires
-  // a composite Firestore index. If it hasn't been created yet (or is
-  // still building), Firestore throws FAILED_PRECONDITION instead of
-  // silently degrading — fall back to an in-memory filter/sort over the
-  // full collection so this endpoint never crashes the caller's view.
-  // The proper fix is still to create the index via the URL in the
-  // original error message; this is just a safety net.
-  const capLimit = Math.min(limit || 50, 100);
-  let docs;
-  try {
-    const snap = await db.collection('feedbackSuggestions')
-      .where('status', '==', 'open')
-      .orderBy('totalScore', 'desc')
-      .limit(capLimit)
-      .get();
-    docs = snap.docs;
-  } catch (err) {
-    if (err.message?.includes('requires an index') || err.message?.includes('FAILED_PRECONDITION')) {
-      const allSnap = await db.collection('feedbackSuggestions').get();
-      docs = allSnap.docs
-        .filter(d => d.data().status === 'open')
-        .sort((a, b) => (b.data().totalScore || 0) - (a.data().totalScore || 0))
-        .slice(0, capLimit);
-    } else {
-      throw err;
+    if (roomData.sellerUid) {
+      const sellerSnapForEmail = await db.collection('users').doc(roomData.sellerUid).get();
+      const sellerEmailForNotif = sellerSnapForEmail.exists ? (sellerSnapForEmail.data().email || '') : '';
+      notifyDeal({
+        uid: roomData.sellerUid,
+        to: sellerEmailForNotif,
+        accentKey: 'success',
+        eyebrow: 'Payment released',
+        heading: `You've been paid for "${listingTitle}"`,
+        bodyHtml: auto
+          ? `The 72-hour verification window passed, so <strong>$${amtStr}</strong> was automatically released to your wallet.`
+          : `The buyer confirmed receipt — <strong>$${amtStr}</strong> has been added to your wallet.`,
+        pushBody: auto
+          ? `$${amtStr} was auto-released to your wallet for "${listingTitle}".`
+          : `$${amtStr} was released to your wallet for "${listingTitle}".`,
+        ctaLabel: 'View wallet',
+        chatRoomId,
+      }).catch(() => {});
+    }
+
+    // Buyer only gets a notification here if this was an auto-release — if
+    // they clicked "release" themselves, they don't need to be told what
+    // they just did.
+    if (auto && roomData.buyerUid) {
+      const buyerSnapForEmail = await db.collection('users').doc(roomData.buyerUid).get();
+      const buyerEmailForNotif = buyerSnapForEmail.exists ? (buyerSnapForEmail.data().email || '') : '';
+      notifyDeal({
+        uid: roomData.buyerUid,
+        to: buyerEmailForNotif,
+        accentKey: 'info',
+        eyebrow: 'Deal auto-completed',
+        heading: `"${listingTitle}" is complete`,
+        bodyHtml: `The 72-hour verification window passed without a response, so funds were automatically released to the seller.`,
+        pushBody: `"${listingTitle}" auto-completed — funds were released to the seller.`,
+        ctaLabel: 'View deal',
+        chatRoomId,
+      }).catch(() => {});
     }
   }
+}
 
-  return {
-    suggestions: docs.map(d => {
-      const data = d.data();
-      const votes = data.votes || {};
-      return {
-        id: d.id,
-        text: data.textOriginal,
-        totalScore: typeof data.totalScore === 'number' ? data.totalScore : fbSumVotes(votes),
-        voteCount: Object.keys(votes).length,
-        breakdown: fbVoteBreakdown(votes),
-        myVote: callerUid && Object.prototype.hasOwnProperty.call(votes, callerUid) ? votes[callerUid] : null,
-      };
-    }),
-    cycle: {
-      cycleStart: cycleInfo.cycleStart,
-      cycleEnd: cycleInfo.cycleStart + FB_CYCLE_MS,
-      msRemaining: Math.max(0, cycleInfo.msRemaining),
-      serverNow: Date.now(),
-      justReset: !!cycleInfo.ranReset,
+// ─────────────────────────────────────────────────────────────────────────────
+// escrow-release  { idToken, chatRoomId, dealId }
+// Buyer confirms delivery → funds released to seller.
+// Atomically: credits seller wallet, closes deal, writes transaction records.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleEscrowRelease(req, res, idToken) {
+  const { chatRoomId, dealId } = req.body;
+  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
+
+  const fbUser   = await verifyFirebaseToken(idToken);
+  const buyerUid = fbUser.localId;
+
+  const db      = getAdminDb();
+  const roomRef = db.collection('dealChats').doc(chatRoomId);
+  const roomSnap = await roomRef.get();
+  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
+  if (roomSnap.data().buyerUid !== buyerUid) {
+    return res.status(403).json({ error: 'Only the buyer can release funds' });
+  }
+
+  await _releaseEscrowForRoom(db, chatRoomId, dealId, { auto: false });
+
+  return res.status(200).json({ success: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Core refund logic — shared by the participant-triggered handler below and
+// the automated 14-day-hard-cap sweep for deals that were funded but never
+// delivered in time. `auto: true` skips the participant-identity check and
+// adjusts messaging to make clear this happened automatically.
+// ─────────────────────────────────────────────────────────────────────────────
+async function _refundEscrowForRoom(db, chatRoomId, dealId, { auto = false } = {}) {
+  const roomRef = db.collection('dealChats').doc(chatRoomId);
+
+  await db.runTransaction(async tx => {
+    const roomSnap = await tx.get(roomRef);
+    if (!roomSnap.exists) throw new Error('Deal not found');
+    const room = roomSnap.data();
+
+    if (!['funded', 'delivered', 'disputed'].includes(room.paymentStatus)) {
+      throw new Error(`Cannot refund — status is ${room.paymentStatus || 'unfunded'}`);
+    }
+    if (room.paymentStatus === 'complete') throw new Error('Deal already complete');
+
+    const buyerUid = room.buyerUid;
+    const amt      = parseFloat(room.escrowAmount || 0);
+    if (!amt) throw new Error('No escrow amount on file');
+
+    const buyerRef  = db.collection('users').doc(buyerUid);
+    const buyerSnap = await tx.get(buyerRef);
+    if (!buyerSnap.exists) throw new Error('Buyer not found');
+
+    const buyerBal    = parseFloat((buyerSnap.data().walletBalance || 0).toFixed(2));
+    const newBuyerBal = parseFloat((buyerBal + amt).toFixed(2));
+    // Restore exactly what escrow-pay drew from withdrawableBalance (see
+    // escrowWithdrawableDebit on the room) — not the full `amt`, since some
+    // of that money may have come from non-withdrawable (deposited) funds.
+    const withdrawableDebit = parseFloat((room.escrowWithdrawableDebit || 0).toFixed(2));
+    const buyerWithdrawable    = parseFloat((buyerSnap.data().withdrawableBalance || 0).toFixed(2));
+    const newBuyerWithdrawable = parseFloat((buyerWithdrawable + withdrawableDebit).toFixed(2));
+
+    // 1. Refund buyer wallet
+    tx.update(buyerRef, { walletBalance: newBuyerBal, withdrawableBalance: newBuyerWithdrawable });
+
+    // 2. Buyer transaction record
+    tx.set(buyerRef.collection('transactions').doc(), {
+      type:       'escrow_refund',
+      amount:     amt,
+      label:      `Escrow refunded · ${room.listingTitle || 'Deal'}`,
+      chatRoomId,
+      dealId,
+      sellerUid:  room.sellerUid,
+      auto,
+      status:     'completed',
+      createdAt:  FieldValue.serverTimestamp(),
+    });
+
+    // 3. Close room — outcome is "Deal Closed"
+    tx.update(roomRef, {
+      paymentStatus: 'refunded',
+      dealOutcome:   'closed',
+      refundedAt:    FieldValue.serverTimestamp(),
+      autoCancelled: auto,
+      active:        false,
+      cancelled:     true,
+    });
+
+    // 4. Mirror on both deal docs
+    if (dealId) {
+      tx.update(db.collection('users').doc(room.sellerUid).collection('deals').doc(dealId), {
+        paymentStatus: 'refunded', status: 'cancelled', dealOutcome: 'closed',
+      });
+      tx.update(buyerRef.collection('deals').doc(dealId), {
+        paymentStatus: 'refunded', status: 'cancelled', dealOutcome: 'closed',
+      });
+    }
+
+    // 5. Notify buyer — funds back in wallet
+    tx.set(buyerRef.collection('notifications').doc(), {
+      type:      'escrow_refunded',
+      title:     auto ? 'Deal closed — refunded' : 'Escrow refunded',
+      body:      auto
+        ? `The 14-day deadline for "${room.listingTitle || 'this deal'}" passed without delivery, so $${amt.toLocaleString()} was automatically returned to your wallet.`
+        : `$${amt.toLocaleString()} has been returned to your wallet for "${room.listingTitle || 'this deal'}".`,
+      chatRoomId,
+      dealId,
+      read:      false,
+      createdAt: Date.now(),
+    });
+
+    // 6. Notify seller — deal is now closed
+    tx.set(db.collection('users').doc(room.sellerUid).collection('notifications').doc(), {
+      type:      'escrow_refunded',
+      title:     'Deal closed',
+      body:      auto
+        ? `The 14-day deadline for "${room.listingTitle || 'this deal'}" passed without delivery. The deal has closed and escrow was refunded to the buyer.`
+        : `The escrow for "${room.listingTitle || 'this deal'}" was refunded to the buyer. This deal is now closed.`,
+      chatRoomId,
+      dealId,
+      read:      false,
+      createdAt: Date.now(),
+    });
+  });
+
+  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
+    uid:       'system',
+    type:      'system',
+    text:      auto
+      ? '⏱ The 14-day deadline passed without the deal being delivered. Deal Closed — the escrow has been refunded to the buyer.'
+      : 'The escrow has been refunded to the buyer. This deal is now closed.',
+    createdAt: Date.now(),
+  }).catch(() => {});
+
+  // Notifications — refund is money moving, so both sides get told, on both channels.
+  const roomSnapForEmail = await roomRef.get().catch(() => null);
+  const roomForEmail = roomSnapForEmail?.data();
+  if (roomForEmail) {
+    const listingTitle = roomForEmail.listingTitle || 'this deal';
+    const amtStr = roomForEmail.escrowAmount ? Number(roomForEmail.escrowAmount).toLocaleString() : '';
+
+    if (roomForEmail.buyerUid) {
+      const buyerSnapForEmail = await db.collection('users').doc(roomForEmail.buyerUid).get();
+      const buyerEmailForNotif = buyerSnapForEmail.exists ? (buyerSnapForEmail.data().email || '') : '';
+      notifyDeal({
+        uid: roomForEmail.buyerUid,
+        to: buyerEmailForNotif,
+        accentKey: 'info',
+        eyebrow: auto ? 'Deal closed' : 'Refund issued',
+        heading: `$${amtStr} refunded to your wallet`,
+        bodyHtml: auto
+          ? `The 14-day delivery deadline for <strong>${listingTitle}</strong> passed, so your payment was automatically returned to your wallet.`
+          : `Your escrow payment for <strong>${listingTitle}</strong> has been returned to your wallet.`,
+        pushBody: `$${amtStr} was refunded to your wallet for "${listingTitle}".`,
+        ctaLabel: 'View wallet',
+        chatRoomId,
+      }).catch(() => {});
+    }
+    if (roomForEmail.sellerUid) {
+      const sellerSnapForEmail = await db.collection('users').doc(roomForEmail.sellerUid).get();
+      const sellerEmailForNotif = sellerSnapForEmail.exists ? (sellerSnapForEmail.data().email || '') : '';
+      notifyDeal({
+        uid: roomForEmail.sellerUid,
+        to: sellerEmailForNotif,
+        accentKey: 'danger',
+        eyebrow: 'Deal closed',
+        heading: `"${listingTitle}" was refunded to the buyer`,
+        bodyHtml: auto
+          ? `The 14-day delivery deadline passed without delivery, so this deal was automatically closed and escrow refunded to the buyer.`
+          : `This deal has been closed and the escrow payment refunded to the buyer.`,
+        pushBody: `"${listingTitle}" was closed — escrow was refunded to the buyer.`,
+        ctaLabel: 'View deal',
+        chatRoomId,
+      }).catch(() => {});
+    }
+  }
+}
+
+// Cancels a deal that expired before any money was ever put into escrow
+// (paymentStatus is still unfunded/null) — no wallet transaction needed,
+// just close the room and mark both sides' deal docs as closed.
+async function _cancelUnfundedExpiredRoom(db, chatRoomId, dealId, room) {
+  const roomRef = db.collection('dealChats').doc(chatRoomId);
+  await roomRef.update({
+    paymentStatus: room.paymentStatus || 'unfunded',
+    dealOutcome:   'closed',
+    autoCancelled: true,
+    active:        false,
+    cancelled:     true,
+    closedAt:      FieldValue.serverTimestamp(),
+  });
+  if (dealId) {
+    await Promise.all([room.sellerUid, room.buyerUid].map(uid => {
+      if (!uid) return Promise.resolve();
+      return db.collection('users').doc(uid).collection('deals').doc(dealId)
+        .update({ status: 'cancelled', dealOutcome: 'closed' }).catch(() => {});
+    }));
+  }
+  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
+    uid:       'system',
+    type:      'system',
+    text:      '⏱ The delivery deadline passed without payment being finalized. Deal Closed.',
+    createdAt: Date.now(),
+  }).catch(() => {});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// escrow-refund  { idToken, chatRoomId, dealId }
+// Either party triggers a refund. Returns escrow to buyer wallet.
+// Valid from: funded, delivered, or disputed status.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleEscrowRefund(req, res, idToken) {
+  const { chatRoomId, dealId } = req.body;
+  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid    = fbUser.localId;
+
+  const db      = getAdminDb();
+  const roomRef = db.collection('dealChats').doc(chatRoomId);
+  const roomSnap = await roomRef.get();
+  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
+  const room = roomSnap.data();
+  if (room.sellerUid !== uid && room.buyerUid !== uid) {
+    return res.status(403).json({ error: 'Not a participant in this deal' });
+  }
+
+  await _refundEscrowForRoom(db, chatRoomId, dealId, { auto: false });
+
+  return res.status(200).json({ success: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// escrow-dispute  { idToken, chatRoomId, dealId, reason }
+// Either party raises a dispute on a funded/delivered deal.
+// Freezes the escrow and creates a record in /disputes for admin review.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleEscrowDispute(req, res, idToken) {
+  const { chatRoomId, dealId, reason } = req.body;
+  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
+
+  const fbUser      = await verifyFirebaseToken(idToken);
+  const disputerUid = fbUser.localId;
+
+  const db       = getAdminDb();
+  const roomRef  = db.collection('dealChats').doc(chatRoomId);
+  const roomSnap = await roomRef.get();
+
+  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
+  const room = roomSnap.data();
+
+  if (room.sellerUid !== disputerUid && room.buyerUid !== disputerUid) {
+    return res.status(403).json({ error: 'Not a participant in this deal' });
+  }
+  if (!['funded', 'delivered'].includes(room.paymentStatus)) {
+    return res.status(400).json({
+      error: `Cannot dispute — status is ${room.paymentStatus || 'unfunded'}`,
+    });
+  }
+
+  const now            = Date.now();
+  const sanitizedReason = (reason || '').slice(0, 500);
+
+  await roomRef.update({
+    paymentStatus: 'disputed',
+    disputedAt:    FieldValue.serverTimestamp(),
+    disputedBy:    disputerUid,
+    disputeReason: sanitizedReason,
+  });
+
+  // Mirror on both deal docs
+  await Promise.all([room.sellerUid, room.buyerUid].map(uid => {
+    if (!uid || !dealId) return Promise.resolve();
+    return db.collection('users').doc(uid).collection('deals').doc(dealId)
+      .update({ paymentStatus: 'disputed' }).catch(() => {});
+  }));
+
+  // Write dispute record for admin review
+  const disputeRef = await db.collection('disputes').add({
+    chatRoomId,
+    dealId:       dealId || null,
+    sellerUid:    room.sellerUid,
+    buyerUid:     room.buyerUid,
+    disputedBy:   disputerUid,
+    escrowAmount: room.escrowAmount || 0,
+    listingTitle: room.listingTitle || '',
+    reason:       sanitizedReason,
+    status:       'open',
+    createdAt:    FieldValue.serverTimestamp(),
+  });
+
+  // Kick off AI triage (aistudio.js handleTriage) — gives this dispute an
+  // aiVerdict/aiConfidence/aiReasoning pass, and auto-applies high-confidence
+  // low-risk outcomes. Money/ban verdicts get a 48h reversible window rather
+  // than being silently final — see AUTO_APPLY_MONEY_ACTIONS in aistudio.js.
+  // Fire-and-forget: never block the dispute filing on the AI call.
+  triggerAiTriage({
+    kind: 'dispute',
+    id: disputeRef.id,
+    evidence: {
+      chatRoomId,
+      dealId: dealId || null,
+      sellerUid: room.sellerUid,
+      buyerUid: room.buyerUid,
+      disputedBy: disputerUid,
+      escrowAmount: room.escrowAmount || 0,
+      listingTitle: room.listingTitle || '',
+      reason: sanitizedReason,
+      paymentStatus: room.paymentStatus,
     },
-  };
-}
+  });
 
-// Cast or change a vote on an existing suggestion. `score` must be one of
-// the 4 allowed values (3/2/1/-1) — see FB_VOTE_SCORES. One vote per user
-// per suggestion; casting again just overwrites their previous score
-// (so users can change their mind).
-async function handleFeedbackVoteExisting({ suggestionId, callerUid, score }) {
-  if (!suggestionId) throw httpError(400, 'suggestionId required');
-  const allowedScores = Object.values(FB_VOTE_SCORES);
-  if (!allowedScores.includes(score)) {
-    throw httpError(400, `score must be one of: ${allowedScores.join(', ')}`);
+  // Notify the other party
+  const otherUid = disputerUid === room.sellerUid ? room.buyerUid : room.sellerUid;
+  if (otherUid) {
+    await db.collection('users').doc(otherUid).collection('notifications').add({
+      type:      'deal_disputed',
+      title:     'A dispute has been raised',
+      body:      `A dispute was opened on "${room.listingTitle || 'your deal'}". Our team will review within 24–48 hours.`,
+      chatRoomId,
+      dealId,
+      read:      false,
+      createdAt: now,
+    }).catch(() => {});
+
+    const otherSnapForEmail = await db.collection('users').doc(otherUid).get();
+    const otherEmailForNotif = otherSnapForEmail.exists ? (otherSnapForEmail.data().email || '') : '';
+    notifyDeal({
+      uid: otherUid,
+      to: otherEmailForNotif,
+      accentKey: 'danger',
+      eyebrow: 'Dispute raised',
+      heading: 'A dispute was opened on your deal',
+      bodyHtml: `A dispute was opened on <strong>${room.listingTitle || 'your deal'}</strong> and escrow funds are now frozen. Our team will review within <strong>24–48 hours</strong>.`,
+      pushBody: `A dispute was opened on "${room.listingTitle || 'your deal'}". Funds are frozen pending review.`,
+      ctaLabel: 'View deal',
+      chatRoomId,
+    }).catch(() => {});
   }
-  const ref = db.collection('feedbackSuggestions').doc(suggestionId);
-  const snap = await ref.get();
-  if (!snap.exists) throw httpError(404, 'Suggestion not found');
-  const data = snap.data();
-  const votes = { ...(data.votes || {}) };
-  const alreadyCast = Object.prototype.hasOwnProperty.call(votes, callerUid);
-  const previousScore = alreadyCast ? votes[callerUid] : null;
 
-  votes[callerUid] = score;
-  const totalScore = fbSumVotes(votes);
+  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
+    uid:       'system',
+    type:      'system',
+    text:      'A dispute has been raised on this deal. Funds are frozen. The Siterifty team will review and resolve within 24–48 hours.',
+    createdAt: now,
+  }).catch(() => {});
 
-  await ref.set({
-    votes,
-    voteCount: Object.keys(votes).length,
-    totalScore,
-    updatedAt: FieldValue.serverTimestamp(),
-    lastVotedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
-
-  return {
-    voted: true,
-    changed: alreadyCast && previousScore !== score,
-    previousScore,
-    score,
-    totalScore,
-    voteCount: Object.keys(votes).length,
-    breakdown: fbVoteBreakdown(votes),
-  };
+  return res.status(200).json({ success: true });
 }
 
-// Public: the permanent "What We're Working On" archive — every past
-// cycle's top 3, oldest or newest first depending on `order`. Never
-// deleted, only ever appended to (+3 per week).
-async function handleFeedbackListArchive({ limit }) {
-  const snap = await db.collection('feedbackArchive')
-    .orderBy('archivedAt', 'desc')
-    .limit(Math.min(limit || 300, 500))
+// ─────────────────────────────────────────────────────────────────────────────
+// admin-resolve-dispute  { disputeId, outcome: 'release' | 'refund' }
+// ADMIN-ONLY — gated by the admin_session cookie (verifyAdminSession), not a
+// user idToken. Resolves an open dispute one of two ways:
+//   outcome: 'release' — pay the seller (same transaction _releaseEscrowForRoom
+//     already runs for a normal delivery confirmation — fee split, seller
+//     wallet credit, dealsCompleted increment, etc). Requires the escrow
+//     status check inside _releaseEscrowForRoom to accept 'disputed', which
+//     it now does.
+//   outcome: 'refund' — return the funds to the buyer (same transaction
+//     _refundEscrowForRoom already runs for a participant-cancelled refund).
+// Either way, marks the /disputes doc resolved and notifies both parties
+// with the outcome so nobody is left wondering what happened to their money.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleAdminResolveDispute(req, res) {
+  const session = verifyAdminSession(req);
+  if (!session) return res.status(401).json({ error: 'Not authenticated as admin' });
+
+  const { disputeId, outcome } = req.body || {};
+  if (!disputeId) return res.status(400).json({ error: 'Missing disputeId' });
+  if (!['release', 'refund'].includes(outcome)) {
+    return res.status(400).json({ error: 'outcome must be "release" or "refund"' });
+  }
+
+  const db = getAdminDb();
+  const disputeRef = db.collection('disputes').doc(disputeId);
+  const disputeSnap = await disputeRef.get();
+  if (!disputeSnap.exists) return res.status(404).json({ error: 'Dispute not found' });
+  const dispute = disputeSnap.data();
+
+  if (dispute.status === 'resolved') {
+    return res.status(400).json({ error: 'This dispute has already been resolved' });
+  }
+  if (!dispute.chatRoomId) return res.status(400).json({ error: 'Dispute is missing chatRoomId' });
+
+  if (outcome === 'release') {
+    await _releaseEscrowForRoom(db, dispute.chatRoomId, dispute.dealId || null, { auto: false });
+  } else {
+    await _refundEscrowForRoom(db, dispute.chatRoomId, dispute.dealId || null, { auto: false });
+  }
+
+  await disputeRef.update({
+    status: 'resolved',
+    outcome,
+    resolvedAt: FieldValue.serverTimestamp(),
+    resolvedBy: session.email,
+  });
+
+  // Notify both parties with the outcome.
+  const now = Date.now();
+  const winnerUid = outcome === 'release' ? dispute.sellerUid : dispute.buyerUid;
+  const loserUid  = outcome === 'release' ? dispute.buyerUid  : dispute.sellerUid;
+  const dealLabel = dispute.listingTitle || 'your deal';
+
+  await Promise.all([
+    winnerUid ? db.collection('users').doc(winnerUid).collection('notifications').add({
+      type: 'dispute_resolved',
+      title: 'Dispute resolved in your favor',
+      body: outcome === 'release'
+        ? `The dispute on "${dealLabel}" was resolved — funds have been released to you.`
+        : `The dispute on "${dealLabel}" was resolved — you've been refunded.`,
+      chatRoomId: dispute.chatRoomId,
+      dealId: dispute.dealId || null,
+      read: false,
+      createdAt: now,
+    }).catch(() => {}) : Promise.resolve(),
+    loserUid ? db.collection('users').doc(loserUid).collection('notifications').add({
+      type: 'dispute_resolved',
+      title: 'Dispute resolved',
+      body: outcome === 'release'
+        ? `The dispute on "${dealLabel}" was resolved in the seller's favor — funds have been released to them.`
+        : `The dispute on "${dealLabel}" was resolved in the buyer's favor — they've been refunded.`,
+      chatRoomId: dispute.chatRoomId,
+      dealId: dispute.dealId || null,
+      read: false,
+      createdAt: now,
+    }).catch(() => {}) : Promise.resolve(),
+    db.collection('dealChats').doc(dispute.chatRoomId).collection('messages').add({
+      uid: 'system',
+      type: 'system',
+      text: outcome === 'release'
+        ? 'This dispute has been resolved by the Siterifty team — funds have been released to the seller.'
+        : 'This dispute has been resolved by the Siterifty team — funds have been refunded to the buyer.',
+      createdAt: now,
+    }).catch(() => {}),
+  ]);
+
+  return res.status(200).json({ success: true, outcome });
+}
+//   • paymentStatus === 'delivered' and now > autoReleaseAt (72h post-delivery)
+//       → auto-release escrow to seller. Outcome: "Deal Successful".
+//       The chat is NOT locked before this — the buyer can keep asking
+//       questions right up until the window closes.
+//   • paymentStatus is 'unfunded'/'funded' (never delivered) and
+//     now > expiresAt (per-listing-type deadline, capped at 14 days)
+//       → auto-refund (if funded) or auto-cancel (if never funded).
+//       Outcome: "Deal Closed".
+//   • paymentStatus === 'disputed' is NEVER touched — always needs a human.
+//   • paymentStatus === 'complete' / 'refunded' / already closed → skipped.
+//
+// Call modes:
+//   - { chatRoomId: 'deal_xyz' } — resolve just one room. Used by the client
+//     as a lazy fallback (checked whenever a deal chat is opened) so deals
+//     still resolve correctly even before a cron job is wired up.
+//   - {} (no chatRoomId) — sweep ALL active dealChats. Intended to be called
+//     by a scheduled job (e.g. Vercel Cron hitting this endpoint every
+//     15–30 minutes) — see vercel.json `crons` config to wire this up:
+//       { "path": "/api/deal?action=sweep-expired-deals", "schedule": "*/15 * * * *" }
+//     A GET request from Vercel Cron is also accepted for this one action
+//     (see handler() below) since cron jobs can't easily send a POST body.
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared resolution logic for a single dealChats room — used by both the
+// cron-driven full sweep and the client-triggered single-room check.
+async function _resolveExpiredRoomIfDue(db, id, room, now) {
+  if (!room || room.active === false || !room.paymentStatus) return { outcome: 'skipped' };
+  if (room.paymentStatus === 'disputed') return { outcome: 'skipped' };
+  if (['complete', 'refunded'].includes(room.paymentStatus)) return { outcome: 'skipped' };
+
+  // 1. Post-delivery 72h buyer-verify window
+  if (room.paymentStatus === 'delivered') {
+    const deadline = room.autoReleaseAt || null;
+    if (deadline && now > deadline) {
+      await _releaseEscrowForRoom(db, id, room.dealId || null, { auto: true });
+      return { outcome: 'released' };
+    }
+    return { outcome: 'skipped' };
+  }
+
+  // 2. Pre-delivery hard deadline (per listing type, capped at 14 days)
+  if (['unfunded', 'funded'].includes(room.paymentStatus)) {
+    const deadline = room.expiresAt || null;
+    if (deadline && now > deadline) {
+      if (room.paymentStatus === 'funded' && parseFloat(room.escrowAmount || 0) > 0) {
+        await _refundEscrowForRoom(db, id, room.dealId || null, { auto: true });
+        return { outcome: 'refunded' };
+      }
+      await _cancelUnfundedExpiredRoom(db, id, room.dealId || null, room);
+      return { outcome: 'cancelled' };
+    }
+    return { outcome: 'skipped' };
+  }
+
+  return { outcome: 'skipped' };
+}
+
+async function handleSweepExpiredDeals(req, res) {
+  const db = getAdminDb();
+  const chatRoomId = req.body?.chatRoomId || req.query?.chatRoomId || null;
+  const now = Date.now();
+  const results = { released: [], refunded: [], cancelled: [], skipped: 0, errors: [] };
+
+  async function resolveOne(id, room) {
+    try {
+      const { outcome } = await _resolveExpiredRoomIfDue(db, id, room, now);
+      if (outcome === 'released')  results.released.push(id);
+      else if (outcome === 'refunded')  results.refunded.push(id);
+      else if (outcome === 'cancelled') results.cancelled.push(id);
+      else results.skipped++;
+    } catch (err) {
+      results.errors.push({ chatRoomId: id, error: err.message });
+    }
+  }
+
+  if (chatRoomId) {
+    const snap = await db.collection('dealChats').doc(chatRoomId).get();
+    if (!snap.exists) return res.status(404).json({ error: 'Deal not found' });
+    await resolveOne(chatRoomId, snap.data());
+  } else {
+    // Full sweep — only scans rooms still marked active to keep this cheap.
+    const snap = await db.collection('dealChats').where('active', '==', true).get();
+    await Promise.all(snap.docs.map(d => resolveOne(d.id, d.data())));
+  }
+
+  return res.status(200).json({ success: true, ...results });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// invite-github-collaborator  { idToken, chatRoomId, dealId, buyerGithubUsername }
+//
+// Seller-only. If the listing attached to this deal has a GitHub repo
+// (listing.attachedRepo), uses the SELLER's stored GitHub access token
+// (users/{sellerUid}.githubAccessToken) to add the buyer as a collaborator
+// on that repo. This is a manual, seller-triggered action — nothing runs
+// automatically on payment/delivery; the seller must click "Add buyer" in
+// the deal's repo card, same spirit as every other transfer method here.
+//
+// Buyers don't authenticate with GitHub through Siterifty, so we can't look
+// up their username from their Firebase account — they type their own
+// GitHub username once in the deal UI, which is passed in as
+// buyerGithubUsername and stored on the room for future status checks.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleInviteGithubCollaborator(req, res, idToken) {
+  const { chatRoomId, dealId, buyerGithubUsername } = req.body || {};
+  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
+  if (!buyerGithubUsername || !String(buyerGithubUsername).trim()) {
+    return res.status(400).json({ error: 'Missing buyerGithubUsername' });
+  }
+
+  const fbUser    = await verifyFirebaseToken(idToken);
+  const sellerUid = fbUser.localId;
+
+  const db      = getAdminDb();
+  const roomRef = db.collection('dealChats').doc(chatRoomId);
+  const roomSnap = await roomRef.get();
+  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
+  const room = roomSnap.data();
+
+  if (room.sellerUid !== sellerUid) {
+    return res.status(403).json({ error: 'Only the seller can invite a collaborator' });
+  }
+  if (!['funded', 'delivered'].includes(room.paymentStatus)) {
+    return res.status(400).json({ error: `Cannot invite collaborator — deal status is ${room.paymentStatus || 'unfunded'}` });
+  }
+
+  // Look up the listing's attached repo
+  const listingId = room.listingId || null;
+  if (!listingId) return res.status(400).json({ error: 'No listing attached to this deal' });
+  const listingSnap = await db.collection('listings').doc(listingId).get();
+  if (!listingSnap.exists) return res.status(404).json({ error: 'Listing not found' });
+  const listing = listingSnap.data();
+  const repo = listing.attachedRepo || null;
+  if (!repo || !repo.fullName) {
+    return res.status(400).json({ error: 'This listing has no GitHub repository attached' });
+  }
+
+  // Seller's GitHub token
+  const sellerSnap = await db.collection('users').doc(sellerUid).get();
+  const sellerData = sellerSnap.exists ? sellerSnap.data() : {};
+  const githubAccessToken = sellerData.githubAccessToken;
+  if (!githubAccessToken) {
+    return res.status(400).json({ error: 'not_connected', reason: 'Seller has not connected GitHub' });
+  }
+
+  const cleanUsername = String(buyerGithubUsername).trim().replace(/^@/, '');
+
+  const ghRes = await fetch(
+    `https://api.github.com/repos/${repo.fullName}/collaborators/${encodeURIComponent(cleanUsername)}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${githubAccessToken}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ permission: 'pull' }), // read access is enough to review/clone before full handover
+    }
+  );
+
+  if (ghRes.status === 401) {
+    return res.status(400).json({ error: 'not_connected', reason: 'token_revoked' });
+  }
+  if (ghRes.status === 404) {
+    return res.status(404).json({ error: 'github_user_not_found', message: `No GitHub user found with username "${cleanUsername}".` });
+  }
+  if (![201, 204].includes(ghRes.status)) {
+    let detail = '';
+    try { detail = (await ghRes.json())?.message || ''; } catch (e) {}
+    return res.status(500).json({ error: 'github_api_error', message: detail || `GitHub API returned ${ghRes.status}` });
+  }
+
+  // 201 = invitation created (private repo, awaiting acceptance)
+  // 204 = user already had access, or was added directly (rare/public repos)
+  const invitePending = ghRes.status === 201;
+  const now = Date.now();
+
+  const collabState = {
+    githubCollaboratorUsername: cleanUsername,
+    githubCollaboratorStatus: invitePending ? 'invited' : 'added',
+    githubCollaboratorInvitedAt: now,
+  };
+  await roomRef.update(collabState);
+
+  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
+    uid:       'system',
+    type:      'system',
+    text:      invitePending
+      ? `The seller invited GitHub user "${cleanUsername}" to "${repo.fullName}". Check your GitHub notifications to accept.`
+      : `The seller added GitHub user "${cleanUsername}" to "${repo.fullName}".`,
+    createdAt: now,
+  }).catch(() => {});
+
+  if (room.buyerUid) {
+    await db.collection('users').doc(room.buyerUid).collection('notifications').add({
+      type:      'github_collaborator_invited',
+      title:     'GitHub repo access shared',
+      body:      `The seller shared access to "${repo.fullName}". Check your GitHub notifications to accept.`,
+      chatRoomId,
+      dealId,
+      read:      false,
+      createdAt: now,
+    }).catch(() => {});
+  }
+
+  return res.status(200).json({
+    success: true,
+    status: collabState.githubCollaboratorStatus,
+    repoFullName: repo.fullName,
+    repoHtmlUrl: repo.htmlUrl,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// github-collaborator-status  { idToken, chatRoomId }
+// Either participant in the deal can check the current repo-sharing state.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleGithubCollaboratorStatus(req, res, idToken) {
+  const { chatRoomId } = req.body || {};
+  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid    = fbUser.localId;
+
+  const db      = getAdminDb();
+  const roomSnap = await db.collection('dealChats').doc(chatRoomId).get();
+  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
+  const room = roomSnap.data();
+
+  if (room.sellerUid !== uid && room.buyerUid !== uid) {
+    return res.status(403).json({ error: 'Not a participant in this deal' });
+  }
+
+  let repo = null;
+  if (room.listingId) {
+    const listingSnap = await db.collection('listings').doc(room.listingId).get();
+    if (listingSnap.exists) repo = listingSnap.data().attachedRepo || null;
+  }
+
+  return res.status(200).json({
+    success: true,
+    repo,
+    isSeller: room.sellerUid === uid,
+    status: room.githubCollaboratorStatus || 'none',
+    githubCollaboratorUsername: room.githubCollaboratorUsername || null,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// check-deal-expiry  { idToken, chatRoomId }
+// Client-safe fallback: any participant in the room can trigger a
+// check-and-resolve of their own deal if its deadline has passed. Silently
+// no-ops if the deadline hasn't been reached yet — safe to call on every
+// deal chat open.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleCheckDealExpiry(req, res, idToken) {
+  const { chatRoomId } = req.body;
+  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid    = fbUser.localId;
+
+  const db      = getAdminDb();
+  const roomRef = db.collection('dealChats').doc(chatRoomId);
+  const roomSnap = await roomRef.get();
+  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
+  const room = roomSnap.data();
+
+  if (room.sellerUid !== uid && room.buyerUid !== uid) {
+    return res.status(403).json({ error: 'Not a participant in this deal' });
+  }
+
+  const { outcome } = await _resolveExpiredRoomIfDue(db, chatRoomId, room, Date.now());
+  return res.status(200).json({ success: true, outcome });
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// AI AGENT — folded in from the former standalone /api/agent.js, purely to
+// stay under the hobby-plan serverless function count (each separate file
+// under /api counts as its own function/endpoint slot). This section owns:
+// plan eligibility, daily request quota, scheduling (cron sweep + per-deal
+// trigger), and price-drop/auto-relist automations.
+//
+// It does NOT reimplement accept/reject — that's settleDealCore above,
+// the exact same transaction + chat-room + email/notification path a
+// manual seller accept/reject goes through in this file. And it does NOT
+// keep its own AI client — every model call here goes through aistudio.js's
+// 'agent-deal-decision' / 'agent-auto-reply' actions via the shared
+// AISTUDIO_INTERNAL_TOKEN, the same way aistudio.js's own internal actions
+// (triage, feedback-dedupe) authenticate each other.
+//
+// Routes handled by the main `handler` above:
+//   GET  /api/deal?action=agent-sweep            (Vercel Cron, every minute;
+//                                                  reuses CRON_SECRET)
+//   GET  /api/deal?action=agent-limits&uid=...    (public, read-only)
+//   POST /api/deal  { action:'agent-check-key-limit', idToken }
+//   POST /api/deal  { action:'agent-create-key', idToken, label }
+//
+// runAgentForSeller(sellerUid, dealId) is called directly (in-process, no
+// HTTP hop) right after a deal is created, above.
+//
+// The "counter-offer" feature the old agent.js had has been removed: this
+// file has no counterOffer field or negotiation mechanism anywhere in the
+// real deal lifecycle, so it was writing to a field nothing else ever read.
+// If negotiation becomes a real feature here, the agent can re-gain a
+// "counter" action at that point, not before.
+// ═════════════════════════════════════════════════════════════════════════
+
+// ── Siterifty AI bot — auto-accept announcement ─────────────────────────────
+// Posted once into the deal chat immediately after a deal is auto-accepted
+// (never on a manual seller accept). Rendered client-side as a distinct
+// message row (avatar + "Siterifty AI" name) — see DealChatPanel.tsx's
+// isBot branch and deal-chat.css's .bot-msg rules. Uses the site favicon
+// as its avatar, same asset served at /favicon-32x32.png.
+const SITERIFTY_AI_NAME = 'Siterifty AI';
+const SITERIFTY_AI_PIC  = '/favicon-32x32.png';
+
+// Several phrasings per outcome so back-to-back auto-accepts (a busy
+// seller's agent can accept many deals a day) don't all read identically.
+// {buyer} / {title} are substituted below; keep every variant to 1-2
+// short, professional sentences — this is a marketplace notification, not
+// a chat reply.
+const AUTO_ACCEPT_TEMPLATES = [
+  'Hey {buyer}, your deal for "{title}" was auto-accepted. Welcome to the deal chat — the seller will be with you shortly.',
+  'Hi {buyer} — good news, your offer on "{title}" was automatically accepted. You can coordinate next steps here.',
+  '{buyer}, this deal for "{title}" was auto-accepted by the seller\'s agent. You\'re all set to continue in this chat.',
+  'Your deal for "{title}" has been auto-accepted, {buyer}. Feel free to say hello — the seller will follow up soon.',
+];
+
+function pickAutoAcceptMessage({ buyerName, listingTitle }) {
+  const template = AUTO_ACCEPT_TEMPLATES[Math.floor(Math.random() * AUTO_ACCEPT_TEMPLATES.length)];
+  return template
+    .replace('{buyer}', buyerName || 'there')
+    .replace('{title}', listingTitle || 'this listing');
+}
+
+// Fire-and-forget by design (caller doesn't await failures blocking the
+// deal itself) — a missed bot message is cosmetic, never worth failing an
+// otherwise-successful auto-accept over.
+async function postAutoAcceptBotMessage(db, { chatRoomId, buyerName, listingTitle }) {
+  if (!chatRoomId) return;
+  try {
+    const text = pickAutoAcceptMessage({ buyerName, listingTitle });
+    const now  = Date.now();
+    await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
+      uid: 'siterifty_ai',
+      senderName: SITERIFTY_AI_NAME,
+      senderPic:  SITERIFTY_AI_PIC,
+      isBot:      true,
+      text,
+      type:       'text',
+      createdAt:  now,
+    });
+  } catch (err) {
+    console.error('[deal.js] postAutoAcceptBotMessage failed (non-fatal):', err.message);
+  }
+}
+
+
+  free:    { rpd: 5,    maxKeys: 1  },
+  starter: { rpd: 75,   maxKeys: 3  },
+  growth:  { rpd: 350,  maxKeys: 5  },
+  pro:     { rpd: 1000, maxKeys: 10 },
+};
+const AGENT_ALLOWED_PLANS = ['free', 'starter', 'growth', 'pro'];
+
+function agentTodayUTC() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// ── AI Studio client — every model call the agent needs goes through
+// aistudio.js's shared router/fallback-chain/usage-tracking, authenticated
+// as a server-to-server internal call. ──────────────────────────────────────
+async function callAiStudio(action, payload) {
+  if (!process.env.AISTUDIO_INTERNAL_TOKEN) {
+    console.warn(`[deal.js/agent] AISTUDIO_INTERNAL_TOKEN not set — skipping ${action}`);
+    return null;
+  }
+  try {
+    const res = await fetch(`${SITE_ORIGIN}/api/aistudio`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-token': process.env.AISTUDIO_INTERNAL_TOKEN,
+      },
+      body: JSON.stringify({ action, ...payload }),
+    });
+    if (!res.ok) {
+      console.error(`[deal.js/agent] aistudio ${action} returned ${res.status}`);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.error(`[deal.js/agent] aistudio ${action} call failed:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Atomically check + increment the daily usage counter.
+ * Keyed per linked API key (not per user) — a seller with multiple keys
+ * gets an independent rpd budget on each one, since the key selected in
+ * agentConfig.keyId is what the agent actually authenticates its model
+ * calls with. Stored on the key's own doc (apiKeys/{keyId}/usage/daily)
+ * rather than under the user, since a key's usage should follow the key
+ * even if agentConfig.keyId is later switched to a different key.
+ * Never throws — on any Firestore error it allows the action to avoid
+ * blocking users over an infra hiccup.
+ */
+async function agentCheckAndIncrementQuota(db, keyId, plan) {
+  const limits = AGENT_PLAN_LIMITS[plan] ?? AGENT_PLAN_LIMITS.free;
+  const rpd    = limits.rpd;
+  const today  = agentTodayUTC();
+  const metaRef = db.collection('apiKeys').doc(keyId).collection('usage').doc('daily');
+
+  try {
+    let allowed = false;
+    let finalCount = 0;
+    await db.runTransaction(async tx => {
+      const snap = await tx.get(metaRef);
+      const data = snap.exists ? snap.data() : {};
+      const count = (data.date === today) ? (data.count || 0) : 0;
+      if (count >= rpd) { allowed = false; finalCount = count; return; }
+      allowed = true;
+      finalCount = count + 1;
+      tx.set(metaRef, { date: today, count: finalCount, plan, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
+    });
+    return { allowed, used: finalCount, limit: rpd, plan };
+  } catch (err) {
+    console.warn('[deal.js/agent] quota check error (allowing):', err.message);
+    return { allowed: true, used: 0, limit: rpd, plan };
+  }
+}
+
+async function agentVerifyEligible(db, uid, agentConfig) {
+  const userSnap = await db.collection('users').doc(uid).get();
+  if (!userSnap.exists) return { ok: false, reason: 'User not found' };
+
+  const userData = userSnap.data();
+  const plan     = userData.plan || 'free';
+  if (!AGENT_ALLOWED_PLANS.includes(plan)) {
+    return { ok: false, reason: `Unknown plan: ${plan}` };
+  }
+
+  const keyId = agentConfig?.keyId;
+  if (!keyId) return { ok: false, reason: 'No API key linked to agent' };
+
+  const keySnap = await db.collection('apiKeys').doc(keyId).get();
+  if (!keySnap.exists) return { ok: false, reason: 'Linked API key not found' };
+
+  const keyData = keySnap.data();
+  if (keyData.ownerUid !== uid) return { ok: false, reason: 'API key does not belong to this user' };
+  if (keyData.active === false) return { ok: false, reason: 'Linked API key has been revoked' };
+
+  return { ok: true, plan, keyId };
+}
+
+async function agentProcessUser(db, uid, agentConfig, results) {
+  const eligibility = await agentVerifyEligible(db, uid, agentConfig);
+  if (!eligibility.ok) {
+    results.skipped.push({ uid, reason: eligibility.reason });
+    await db.collection('users').doc(uid).collection('agentLog').add({
+      type: 'skipped',
+      msg:  `Agent did not run: ${eligibility.reason}.`,
+      ts:   FieldValue.serverTimestamp(),
+    }).catch(() => {});
+    if (eligibility.reason.includes('API key')) {
+      await db.collection('users').doc(uid).update({ 'agentConfig.active': false }).catch(() => {});
+      await db.collection('users').doc(uid).collection('agentLog').add({
+        type: 'deactivated',
+        msg:  `Agent auto-deactivated: ${eligibility.reason}`,
+        ts:   FieldValue.serverTimestamp(),
+      }).catch(() => {});
+    }
+    return;
+  }
+
+  const quota = await agentCheckAndIncrementQuota(db, eligibility.keyId, eligibility.plan);
+  if (!quota.allowed) {
+    results.skipped.push({ uid, reason: `Daily limit reached (${quota.used}/${quota.limit} requests used on this API key · ${eligibility.plan} plan)` });
+    const today   = agentTodayUTC();
+    const metaRef = db.collection('apiKeys').doc(eligibility.keyId).collection('usage').doc('daily');
+    const meta    = (await metaRef.get()).data() || {};
+    if (meta.lastQuotaLogDate !== today) {
+      await metaRef.set({ lastQuotaLogDate: today }, { merge: true }).catch(() => {});
+      await db.collection('users').doc(uid).collection('agentLog').add({
+        type: 'quota_hit',
+        msg:  `Daily request limit reached on this API key (${quota.limit} RPD on ${eligibility.plan} plan). Resets tomorrow UTC.`,
+        ts:   FieldValue.serverTimestamp(),
+      }).catch(() => {});
+    }
+    return;
+  }
+
+  try {
+    await agentHandlePendingDeals(db, uid, agentConfig, results);
+    if (agentConfig.priceDrop?.enabled)  await agentHandlePriceDrop(db, uid, agentConfig, results);
+    if (agentConfig.autoRelist?.enabled) await agentHandleAutoRelist(db, uid, agentConfig, results);
+  } catch (err) {
+    results.errors.push({ uid, error: err.message });
+    await db.collection('users').doc(uid).collection('agentLog').add({
+      type: 'error',
+      msg:  `Agent run failed: ${err.message}`,
+      ts:   FieldValue.serverTimestamp(),
+    }).catch(() => {});
+  }
+}
+
+// Called directly (in-process) right after create-deal, above — lets the
+// seller's agent look at the new deal immediately instead of waiting for
+// the next cron tick.
+export async function runAgentForSeller(sellerUid, dealId) {
+  const db = getAdminDb();
+  const sellerSnap = await db.collection('users').doc(sellerUid).get();
+  if (!sellerSnap.exists) return;
+  const agentConfig = sellerSnap.data().agentConfig;
+  if (!agentConfig?.active) return;
+  const results = { processed: [], errors: [], skipped: [] };
+  await agentProcessUser(db, sellerUid, agentConfig, results);
+  return results;
+}
+
+// ── A. Pending deals — decide via aistudio.js, settle via settleDealCore ────
+async function agentHandlePendingDeals(db, uid, agentConfig, results) {
+  const snap = await db.collection('users').doc(uid)
+    .collection('deals')
+    .where('status', '==', 'pending')
+    .where('agentHandled', '==', false)
+    .orderBy('createdAt', 'desc')
+    .limit(10)
     .get();
-  return {
-    items: snap.docs.map(d => {
-      const data = d.data();
-      return {
-        id: d.id,
-        text: data.textOriginal,
-        totalScore: data.totalScore || 0,
-        voteCount: data.voteCount || 0,
-        archivedAt: data.archivedAt ? data.archivedAt.toMillis() : null,
-      };
-    }),
-  };
-}
+  if (snap.empty) return;
 
-// Public: current cycle countdown info, without necessarily loading the
-// full suggestion list (used to paint the countdown/header even before the
-// board tab is opened). Also safe to call to trigger the reset check on
-// its own.
-async function handleFeedbackGetCycle() {
-  const cycleInfo = await fbMaybeRunReset();
-  return {
-    cycleStart: cycleInfo.cycleStart,
-    cycleEnd: cycleInfo.cycleStart + FB_CYCLE_MS,
-    msRemaining: Math.max(0, cycleInfo.msRemaining),
-    serverNow: Date.now(),
-    justReset: !!cycleInfo.ranReset,
-  };
-}
+  for (const docSnap of snap.docs) {
+    const dealId = docSnap.id;
+    const deal   = docSnap.data();
+    if (deal.buyerUid === uid) continue;
 
-// Admin-only: review queue sorted by votes, for the team to triage.
-async function handleFeedbackListForReview({ callerData, status }) {
-  if (!callerData?.isAdmin) throw httpError(403, 'Admin only');
-  const effectiveStatus = status || 'open';
-  let docs;
-  try {
-    const snap = await db.collection('feedbackSuggestions')
-      .where('status', '==', effectiveStatus)
-      .orderBy('totalScore', 'desc')
-      .limit(100)
-      .get();
-    docs = snap.docs;
-  } catch (err) {
-    if (err.message?.includes('requires an index') || err.message?.includes('FAILED_PRECONDITION')) {
-      const allSnap = await db.collection('feedbackSuggestions').get();
-      docs = allSnap.docs
-        .filter(d => d.data().status === effectiveStatus)
-        .sort((a, b) => (b.data().totalScore || 0) - (a.data().totalScore || 0))
-        .slice(0, 100);
-    } else {
-      throw err;
-    }
-  }
-  return { suggestions: docs.map(d => ({ id: d.id, ...d.data() })) };
-}
+    try {
+      const decision = await agentDecideDeal(deal, agentConfig);
 
-async function handleFeedbackSetStatus({ callerData, suggestionId, status }) {
-  if (!callerData?.isAdmin) throw httpError(403, 'Admin only');
-  if (!['open', 'planned', 'done', 'declined'].includes(status)) {
-    throw httpError(400, 'Invalid status');
-  }
-  await db.collection('feedbackSuggestions').doc(suggestionId).set({
-    status,
-    updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
-  return { ok: true };
-}
-
-// ── Daily nudge eligibility ──
-// Decided server-side and stamped once per user per day, so the same user
-// can't get re-rolled by reloading the page — but the outcome itself is a
-// random-looking per-day coin flip (not always the same clock time), and
-// only fires on ~1 in 3 active days so it doesn't feel naggy.
-async function handleFeedbackCheckNudge({ callerUid, recentAction }) {
-  if (!callerUid) return { shouldShow: false, alreadyDecidedToday: false, shown: false };
-
-  const bucket = new Date().toISOString().slice(0, 10); // UTC day bucket
-  const ref = db.collection('feedbackNudges').doc(`${callerUid}__${bucket}`);
-  const snap = await ref.get();
-
-  if (snap.exists) {
-    const data = snap.data();
-    return { shouldShow: false, alreadyDecidedToday: true, shown: !!data.shown };
-  }
-
-  const seed = `${callerUid}__${bucket}`;
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  const showProbability = 0.35;
-  const willShow = (hash % 1000) / 1000 < showProbability;
-
-  await ref.set({
-    createdAt: FieldValue.serverTimestamp(),
-    shown: willShow,
-    recentAction: recentAction || null,
-  });
-
-  return { shouldShow: willShow, alreadyDecidedToday: false, shown: willShow };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE — Seller AI Agent's model calls (formerly a standalone agent.js
-// file's own Groq client; the agent module is now folded into api/deal.js).
-// That module still owns eligibility, quota,
-// scheduling, and — since the deal.js refactor — the actual accept/reject
-// transaction (via deal.js's settleDealInternal). This file's job is only
-// the "what should the agent do" judgment call and reply drafting, so
-// every AI feature on the platform goes through the same router, fallback
-// chain, and usage tracking rather than that module keeping its own separate
-// Groq instance and model list.
-// ════════════════════════════════════════════════════════════════════════
-
-const AGENT_DEAL_DECISION_SYSTEM = `
-You are a marketplace seller's AI agent on Siterifty, evaluating one pending deal offer.
-
-Respond ONLY with strict JSON, no markdown:
-{"action":"accept"|"reject"|"hold","reason":"<one short sentence>"}
-
-Rules:
-- "accept" only if the offer is reasonable relative to the listed price and the buyer's message reads as genuine interest, not a lowball or spam.
-- "reject" if the offer is far below the listed price with no justification, or the message reads as spam/abusive.
-- "hold" if you're not confident either way — a human seller should decide. Prefer "hold" over guessing.
-- There is no counter-offer mechanism on this platform — do not invent one or mention negotiating a specific alternate price.
-`;
-
-async function handleAgentDealDecision({ listingTitle, listingPrice, offerPrice, buyerMessage, autoAcceptMinPercent, autoRejectFloor }) {
-  // Deterministic fast paths — skip the model call entirely when the
-  // seller's own configured thresholds already give a clear answer.
-  const offer = typeof offerPrice === 'number' ? offerPrice : listingPrice ?? 0;
-
-  // autoAcceptMinPercent is a percentage of the listing's own price (e.g.
-  // 80 = must offer >= 80% of listed price) rather than a flat dollar
-  // figure, so one seller's threshold works across listings of very
-  // different prices.
-  if (
-    typeof autoAcceptMinPercent === 'number' &&
-    typeof listingPrice === 'number' &&
-    listingPrice > 0 &&
-    offer >= listingPrice * (autoAcceptMinPercent / 100)
-  ) {
-    return { action: 'accept', reason: 'Meets your configured minimum offer percentage.', model: null };
-  }
-  if (typeof autoRejectFloor === 'number' && offer < autoRejectFloor) {
-    return { action: 'reject', reason: 'Below your configured floor price.', model: null };
-  }
-
-  const result = await callWithFallback(CHAINS.agentDealDecision, {
-    messages: [
-      { role: 'system', content: AGENT_DEAL_DECISION_SYSTEM },
-      { role: 'user', content: `Listing: "${listingTitle || 'Unknown'}"
-Listed price: ${listingPrice != null ? `$${listingPrice}` : 'not set'}
-Buyer offer: ${offerPrice != null ? `$${offerPrice}` : 'no specific offer, asking about listed price'}
-Buyer message: "${buyerMessage || ''}"` },
-    ],
-    temperature: 0.2,
-    max_tokens: 120,
-  });
-
-  let parsed;
-  try {
-    parsed = JSON.parse((result.content || '').replace(/```json|```/g, '').trim());
-  } catch {
-    parsed = { action: 'hold', reason: 'Could not parse agent decision — defaulting to hold for human review.' };
-  }
-  if (!['accept', 'reject', 'hold'].includes(parsed.action)) parsed.action = 'hold';
-  return { action: parsed.action, reason: parsed.reason || '', model: result.usedModel };
-}
-
-// NOTE: no longer called by anything (deal.js's agentHandleUnrepliedMessages,
-// the only caller, was removed — the agent now only posts a one-shot bot
-// announcement on auto-accept, see postAutoAcceptBotMessage in deal.js).
-// Left in place rather than deleted since it's inert and harmless; safe to
-// remove entirely in a later cleanup pass.
-async function handleAgentAutoReply({ listingTitle, buyerMessage, tone }) {
-  if (!buyerMessage) throw httpError(400, 'buyerMessage required');
-  const useTone = tone || 'professional';
-
-  const result = await callWithFallback(CHAINS.agentAutoReply, {
-    messages: [
-      { role: 'system', content: `You are an AI agent replying for a marketplace seller on Siterifty. Reply in a ${useTone} tone. Keep it 2-4 sentences. Listing: "${listingTitle || 'your listing'}". Respond ONLY with JSON: {"reply":"<your message>"}` },
-      { role: 'user', content: `Buyer sent: "${buyerMessage}"\nWrite a ${useTone} seller reply.` },
-    ],
-    temperature: 0.4,
-    max_tokens: 200,
-  });
-
-  let parsed;
-  try {
-    parsed = JSON.parse((result.content || '').replace(/```json|```/g, '').trim());
-  } catch {
-    parsed = { reply: '' };
-  }
-  return { reply: parsed.reply || '', model: result.usedModel };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// HTTP HANDLER
-// ════════════════════════════════════════════════════════════════════════
-
-function httpError(status, message) {
-  const err = new Error(message);
-  err.status = status;
-  return err;
-}
-
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
-  try {
-    const body = req.body || {};
-    const action = body.action;
-    if (!action) return res.status(400).json({ error: 'action is required' });
-
-    // ── Auth ──
-    // Normal path: verify the caller's Firebase ID token (all user-facing
-    // actions require login).
-    // Internal path: deal.js/listings.js call triage-report/triage-dispute/
-    // analyze-reported-image right after filing a report/dispute — there is
-    // no logged-in "caller" for that server-to-server call, so it
-    // authenticates with a shared secret instead. Restricted to these three
-    // system-triggered actions; every other action still requires a real
-    // Firebase ID token.
-    const internalToken = req.headers['x-internal-token'];
-    const INTERNAL_ACTIONS = ['triage-report', 'triage-dispute', 'analyze-reported-image', 'feedback-dedupe', 'agent-deal-decision', 'agent-auto-reply'];
-    const isInternalTriageCall = internalToken
-      && process.env.AISTUDIO_INTERNAL_TOKEN
-      && internalToken === process.env.AISTUDIO_INTERNAL_TOKEN
-      && INTERNAL_ACTIONS.includes(action);
-
-    // These must work fully signed-out (browsing the archive and the
-    // countdown doesn't require an account — only submitting/voting does).
-    const PUBLIC_ACTIONS = ['feedback-list-archive', 'feedback-get-cycle'];
-    const isPublicAction = PUBLIC_ACTIONS.includes(action);
-
-    // recommendations is a user-facing action that must also work
-    // signed-out (the panel shows non-personalized results in that case) —
-    // so it verifies a token if one was sent, but doesn't require it.
-    // check-nudge similarly degrades gracefully to "no nudge" if signed out.
-    // feedback-list-top is the same story: signed-out callers can still
-    // browse the board, but if a token IS sent we decode it so each
-    // suggestion can report the caller's own already-cast vote (myVote).
-    const OPTIONAL_AUTH_ACTIONS = ['recommendations', 'check-nudge', 'feedback-list-top'];
-    const isOptionalAuthAction = OPTIONAL_AUTH_ACTIONS.includes(action);
-
-    let callerUid = null;
-    let callerName = 'System';
-    let callerData = {};
-
-    if (!isInternalTriageCall && !isPublicAction) {
-      const authHeader = req.headers.authorization || '';
-      const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-
-      if (!idToken && !isOptionalAuthAction) {
-        return res.status(401).json({ error: 'Missing auth token' });
+      if (decision.action === 'hold') {
+        await db.collection('users').doc(uid).collection('agentLog').add({
+          type: 'hold',
+          msg:  `Agent left deal from ${deal.buyerName || 'buyer'} for "${deal.listingTitle}" pending for your review: ${decision.reason || 'not confident enough to decide automatically'}.`,
+          ts:   FieldValue.serverTimestamp(),
+        });
+        results.processed.push({ uid, dealId, action: 'hold' });
+        continue;
       }
 
-      if (idToken) {
-        let decoded;
-        try {
-          decoded = await admin.auth().verifyIdToken(idToken);
-        } catch {
-          if (isOptionalAuthAction) {
-            decoded = null; // bad/expired token on an optional-auth action -> treat as signed-out, don't fail the request
-          } else {
-            return res.status(401).json({ error: 'Invalid or expired auth token' });
-          }
+      let settleResult;
+      try {
+        settleResult = await settleDealCore({ callerUid: uid, dealId, action: decision.action });
+      } catch (err) {
+        if (err.code === 'ALREADY_SETTLED') {
+          results.skipped.push({ uid, dealId, reason: `Deal already ${err.status || 'resolved'} before agent could act` });
+          continue;
         }
-        if (decoded) {
-          callerUid = decoded.uid;
-          const callerSnap = await db.collection('users').doc(callerUid).get();
-          callerData = callerSnap.exists ? callerSnap.data() : {};
-          callerName = callerData.username || callerData.displayName || 'there';
-        }
+        throw err;
       }
-    }
 
-    let result;
-    switch (action) {
-      case 'chat':
-        result = await handleChat({ messages: body.messages, callerUid, callerName });
-        break;
-      case 'scam-check':
-        result = await handleScamCheck({ text: body.text, callerUid, chatId: body.chatId });
-        break;
-      case 'auto-description':
-        result = await handleAutoDescription({
-          title: body.title,
-          targetLength: body.targetLength,
-          plan: body.plan || callerData.plan || 'free',
-          callerUid,
+      if (decision.action === 'accept') {
+        await postAutoAcceptBotMessage(db, {
+          chatRoomId:   settleResult?.chatRoomId,
+          buyerName:    deal.buyerName,
+          listingTitle: deal.listingTitle,
         });
-        break;
-      case 'deal-message-assist':
-        result = await handleDealMessageAssist({
-          listingTitle: body.listingTitle,
-          listingSummary: body.listingSummary,
-          offerAmount: body.offerAmount,
-          userDraft: body.userDraft,
-          callerUid,
-        });
-        break;
-      case 'triage-report':
-        result = await handleTriage({ kind: 'report', reportId: body.reportId, evidence: body.evidence, callerUid });
-        break;
-      case 'triage-dispute':
-        result = await handleTriage({ kind: 'dispute', disputeId: body.disputeId, evidence: body.evidence, callerUid });
-        break;
-      case 'read-image':
-        result = await handleImageRead({ imageBase64: body.imageBase64, mimeType: body.mimeType, question: body.question });
-        break;
-      case 'analyze-reported-image':
-        result = await handleAnalyzeReportedImage({ imageUrl: body.imageUrl, context: body.context, reportId: body.reportId, disputeId: body.disputeId });
-        break;
-      case 'feedback-dedupe':
-        result = await handleFeedbackDedupe({ textA: body.textA, textB: body.textB });
-        break;
-      case 'agent-deal-decision':
-        result = await handleAgentDealDecision({
-          listingTitle: body.listingTitle,
-          listingPrice: body.listingPrice,
-          offerPrice: body.offerPrice,
-          buyerMessage: body.buyerMessage,
-          autoAcceptMinPercent: body.autoAcceptMinPercent,
-          autoRejectFloor: body.autoRejectFloor,
-        });
-        break;
-      case 'agent-auto-reply':
-        result = await handleAgentAutoReply({ listingTitle: body.listingTitle, buyerMessage: body.buyerMessage, tone: body.tone });
-        break;
-      case 'recommendations':
-        result = await handleRecommendations({ callerUid });
-        break;
-      case 'feedback-submit':
-        result = await handleFeedbackSubmit({ text: body.text, callerUid });
-        break;
-      case 'feedback-list-top':
-        result = await handleFeedbackListTop({ limit: body.limit, callerUid });
-        break;
-      case 'feedback-vote-existing':
-        result = await handleFeedbackVoteExisting({ suggestionId: body.suggestionId, callerUid, score: body.score });
-        break;
-      case 'feedback-list-archive':
-        result = await handleFeedbackListArchive({ limit: body.limit });
-        break;
-      case 'feedback-get-cycle':
-        result = await handleFeedbackGetCycle();
-        break;
-      case 'feedback-list-for-review':
-        result = await handleFeedbackListForReview({ callerData, status: body.status });
-        break;
-      case 'feedback-set-status':
-        result = await handleFeedbackSetStatus({ callerData, suggestionId: body.suggestionId, status: body.status });
-        break;
-      case 'check-nudge':
-        result = await handleFeedbackCheckNudge({ callerUid, recentAction: body.recentAction });
-        break;
-      default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
-    }
+      }
 
-    return res.status(200).json(result);
-  } catch (err) {
-    console.error('aistudio handler error:', err);
-    const status = err.status || 500;
-    return res.status(status).json({ error: err.message || 'Internal server error' });
+      await db.collection('users').doc(uid).collection('deals').doc(dealId)
+        .update({ agentHandled: true, agentAction: decision.action }).catch(() => {});
+
+      await db.collection('users').doc(uid).collection('agentLog').add({
+        type: decision.action === 'accept' ? 'auto_accept' : 'auto_reject',
+        msg:  decision.action === 'accept'
+          ? `Agent auto-accepted deal from ${deal.buyerName || 'buyer'} for "${deal.listingTitle}".`
+          : `Agent auto-rejected deal from ${deal.buyerName || 'buyer'} for "${deal.listingTitle}". Reason: ${decision.reason || 'below floor'}.`,
+        ts: FieldValue.serverTimestamp(),
+      });
+
+      results.processed.push({ uid, dealId, action: decision.action, chatRoomId: settleResult?.chatRoomId });
+    } catch (err) {
+      results.errors.push({ uid, dealId, error: err.message });
+      await db.collection('users').doc(uid).collection('agentLog').add({
+        type: 'error',
+        msg:  `Agent failed to process deal for "${deal.listingTitle || 'a listing'}": ${err.message}`,
+        ts:   FieldValue.serverTimestamp(),
+      }).catch(() => {});
+    }
   }
 }
+
+async function agentDecideDeal(deal, agentConfig) {
+  const { autoAccept, autoReject } = agentConfig;
+  const offerPrice  = deal.offerPrice   ?? deal.listingPrice ?? 0;
+  const listedPrice = deal.listingPrice ?? 0;
+
+  // minPercent is a percentage of the listing's own price (e.g. 80 = must
+  // offer >= 80% of listed price), not a flat dollar figure — a single
+  // seller's listings can range from a $200 site to a $50k app, so a fixed
+  // minPrice would either block everything on the cheap listing or accept
+  // lowball offers on the expensive one.
+  const minPercent = autoAccept?.minPercent ?? 100;
+  const minAcceptAmount = listedPrice > 0 ? listedPrice * (minPercent / 100) : null;
+
+  if (autoAccept?.enabled && minAcceptAmount != null && offerPrice >= minAcceptAmount) {
+    return { action: 'accept', reason: 'Meets minimum offer percentage' };
+  }
+  if (autoReject?.enabled && offerPrice < (autoReject.floor ?? 0)) {
+    return { action: 'reject', reason: 'Below floor price' };
+  }
+
+  const aiResult = await callAiStudio('agent-deal-decision', {
+    listingTitle: deal.listingTitle,
+    listingPrice: listedPrice,
+    offerPrice,
+    buyerMessage: deal.message || deal.introMessage || '',
+    autoAcceptMinPercent: autoAccept?.minPercent ?? null,
+    autoRejectFloor: autoReject?.floor ?? null,
+  });
+
+  if (!aiResult || !aiResult.action) {
+    return { action: 'hold', reason: 'AI Studio unavailable — left for manual review' };
+  }
+  return { action: aiResult.action, reason: aiResult.reason };
+}
+
+// ── B. (removed) Auto-reply to unread buyer messages ────────────────────
+// This used to have the agent draft and send a live AI reply into the
+// deal chat for any unread buyer message, on a timer/cron pass — no
+// delay, no signal of whether the seller was already about to answer.
+// Replaced by the "Siterifty AI" auto-accept announcement above
+// (postAutoAcceptBotMessage): the bot now only ever posts once, right
+// when a deal is auto-accepted, and never stands in for the seller in
+// an ongoing negotiation. agentConfig.autoReply is kept in the config
+// shape (toggle still exists in the UI) but is currently a no-op here.
+
+// ── C. Price drop ────────────────────────────────────────────────────────
+async function agentHandlePriceDrop(db, uid, agentConfig, results) {
+  const pct      = agentConfig.priceDrop?.pct  || 10;
+  const days     = agentConfig.priceDrop?.days || 7;
+  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
+
+  const snap = await db.collection('listings')
+    .where('ownerId', '==', uid)
+    .where('status',  '==', 'active')
+    .get();
+
+  for (const docSnap of snap.docs) {
+    const listing   = docSnap.data();
+    const createdAt = listing.createdAt?.toMillis?.() ?? listing.createdAt ?? Date.now();
+    const price     = listing.financials?.price ?? listing.price ?? null;
+    if (price == null || createdAt > cutoffMs) continue;
+    if (listing.lastPriceDropAt && listing.lastPriceDropAt > cutoffMs) continue;
+
+    const newPrice = Math.max(1, Math.round(price * (1 - pct / 100)));
+    await db.collection('listings').doc(docSnap.id).update({
+      'financials.price': newPrice,
+      price:              newPrice,
+      lastPriceDropAt:    Date.now(),
+    });
+    await db.collection('users').doc(uid).collection('agentLog').add({
+      type: 'price_drop',
+      msg:  `Agent dropped "${listing.title}" $${price} → $${newPrice} (${pct}% after ${days} days).`,
+      ts:   FieldValue.serverTimestamp(),
+    });
+    results.processed.push({ uid, listingId: docSnap.id, action: 'price_drop', from: price, to: newPrice });
+  }
+}
+
+// ── D. Auto-relist ───────────────────────────────────────────────────────
+async function agentHandleAutoRelist(db, uid, agentConfig, results) {
+  const maxCount = agentConfig.autoRelist?.maxCount || 3;
+
+  const snap = await db.collection('listings')
+    .where('ownerId', '==', uid)
+    .where('status',  '==', 'inactive')
+    .get();
+
+  for (const docSnap of snap.docs) {
+    const listing     = docSnap.data();
+    const relistCount = listing.relistCount || 0;
+    if (relistCount >= maxCount) continue;
+
+    await db.collection('listings').doc(docSnap.id).update({
+      status:      'active',
+      relistCount: relistCount + 1,
+      relistedAt:  Date.now(),
+    });
+    await db.collection('users').doc(uid).collection('agentLog').add({
+      type: 'relist',
+      msg:  `Agent re-listed "${listing.title}" (${relistCount + 1}/${maxCount} relists used).`,
+      ts:   FieldValue.serverTimestamp(),
+    });
+    results.processed.push({ uid, listingId: docSnap.id, action: 'relist', count: relistCount + 1 });
+  }
+}
+
+// ── Route handlers, wired into the main `handler` switch above ──────────
+
+// GET /api/deal?action=agent-sweep — Vercel Cron, every minute. Reuses
+// CRON_SECRET (same secret as sweep-expired-deals) rather than introducing
+// a second cron secret for what is, from an auth standpoint, an identical
+// "trusted scheduler" situation.
+async function handleAgentSweep(req, res) {
+  const db = getAdminDb();
+  const results = { processed: [], errors: [], skipped: [] };
+
+  const usersSnap = await db.collection('users').where('agentConfig.active', '==', true).get();
+  if (usersSnap.empty) return res.status(200).json({ msg: 'No active agents' });
+
+  await Promise.all(usersSnap.docs.map(async userDoc => {
+    const uid         = userDoc.id;
+    const agentConfig = userDoc.data().agentConfig;
+    if (!agentConfig?.active) return;
+    await agentProcessUser(db, uid, agentConfig, results);
+  }));
+
+  return res.status(200).json(results);
+}
+
+// GET /api/deal?action=agent-limits&uid=... — public, read-only. Populates
+// the plan/usage cards in the frontend without hardcoding limits there.
+async function handleAgentLimits(req, res) {
+  const { uid } = req.query || {};
+  if (!uid) return res.status(400).json({ error: 'Missing uid' });
+
+  const db       = getAdminDb();
+  const userSnap = await db.collection('users').doc(uid).get();
+  if (!userSnap.exists) return res.status(404).json({ error: 'User not found' });
+
+  const userData = userSnap.data();
+  const plan  = userData.plan || 'free';
+  const today = agentTodayUTC();
+
+  // Usage is tracked per linked API key (see agentCheckAndIncrementQuota),
+  // not per user — each key has its own independent rpd budget. The usage
+  // bar shown here reflects whichever key is currently linked to the
+  // agent; if no key is linked yet (agent not configured), usedToday is 0.
+  const linkedKeyId = userData.agentConfig?.keyId || null;
+  let usedToday = 0;
+  if (linkedKeyId) {
+    try {
+      const metaSnap = await db.collection('apiKeys').doc(linkedKeyId).collection('usage').doc('daily').get();
+      if (metaSnap.exists && metaSnap.data().date === today) usedToday = metaSnap.data().count || 0;
+    } catch {}
+  }
+
+  let keyCount = 0;
+  try {
+    const keyIds = userData.apiKeyIds || [];
+    if (keyIds.length) {
+      const snaps = await Promise.all(keyIds.map(id => db.collection('apiKeys').doc(id).get()));
+      keyCount = snaps.filter(s => s.exists && s.data().active).length;
+    }
+  } catch {}
+
+  const planLimits = AGENT_PLAN_LIMITS[plan] ?? AGENT_PLAN_LIMITS.free;
+  return res.status(200).json({
+    plan, rpd: planLimits.rpd, maxKeys: planLimits.maxKeys, usedToday, keyCount,
+    linkedKeyId,
+    allPlans: AGENT_PLAN_LIMITS,
+  });
+}
+
+// POST /api/deal  { action:'agent-check-key-limit', idToken }
+async function handleAgentCheckKeyLimit(req, res, idToken) {
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid    = fbUser.localId;
+  const db     = getAdminDb();
+
+  const userSnap = await db.collection('users').doc(uid).get();
+  if (!userSnap.exists) return res.status(404).json({ error: 'User not found' });
+
+  const plan   = userSnap.data().plan || 'free';
+  const keyIds = userSnap.data().apiKeyIds || [];
+  const limits = AGENT_PLAN_LIMITS[plan] ?? AGENT_PLAN_LIMITS.free;
+
+  let activeCount = 0;
+  if (keyIds.length) {
+    const snaps = await Promise.all(keyIds.map(id => db.collection('apiKeys').doc(id).get()));
+    activeCount = snaps.filter(s => s.exists && s.data().active).length;
+  }
+
+  return res.status(200).json({ allowed: activeCount < limits.maxKeys, activeCount, maxKeys: limits.maxKeys, plan });
+}
+
+// POST /api/deal  { action:'agent-create-key', idToken, label }
+function agentRandomKeySuffix() {
+  return Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+}
+
+async function agentGenerateUniqueKey(db, uname) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const ts      = Date.now().toString(36);
+    const fullKey = `srf_${uname}_${ts}_${agentRandomKeySuffix()}`;
+    const dupe    = await db.collection('apiKeys').where('key', '==', fullKey).limit(1).get();
+    if (dupe.empty) return fullKey;
+  }
+  throw new Error('Could not generate a unique API key, please try again');
+}
+
+async function handleAgentCreateKey(req, res, idToken) {
+  const { label } = req.body || {};
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid    = fbUser.localId;
+  const db     = getAdminDb();
+
+  const userSnap = await db.collection('users').doc(uid).get();
+  if (!userSnap.exists) return res.status(404).json({ error: 'User not found' });
+  const userData = userSnap.data();
+
+  const plan   = userData.plan || 'free';
+  const keyIds = userData.apiKeyIds || [];
+  const limits = AGENT_PLAN_LIMITS[plan] ?? AGENT_PLAN_LIMITS.free;
+
+  let activeCount = 0;
+  if (keyIds.length) {
+    const snaps = await Promise.all(keyIds.map(id => db.collection('apiKeys').doc(id).get()));
+    activeCount = snaps.filter(s => s.exists && s.data().active).length;
+  }
+  if (activeCount >= limits.maxKeys) {
+    return res.status(403).json({ error: 'Key limit reached', activeCount, maxKeys: limits.maxKeys, plan });
+  }
+
+  const uname   = (userData.username || 'user').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 8) || 'user';
+  const fullKey = await agentGenerateUniqueKey(db, uname);
+  const prefix  = fullKey.slice(0, 16) + '…';
+  const keyName = (label || 'My Key').toString().slice(0, 60);
+
+  const keyRef = await db.collection('apiKeys').add({
+    ownerUid: uid, ownerUsername: uname, key: fullKey, prefix, label: keyName,
+    active: true, createdAt: FieldValue.serverTimestamp(),
+    capabilities: ['auto_accept_deals', 'group_management', 'message_moderate'],
+  });
+  await db.collection('users').doc(uid).update({ apiKeyIds: FieldValue.arrayUnion(keyRef.id) });
+
+  return res.status(200).json({
+    id: keyRef.id, label: keyName, prefix,
+    created: new Date().toISOString().slice(0, 10), active: true,
+  });
+}
+
+export const config = {
+  api: { bodyParser: { sizeLimit: '16kb' } },
+};
