@@ -48,7 +48,6 @@ interface AgentLimitsData {
   maxKeys: number;
   usedToday: number;
   keyCount: number;
-  linkedKeyId?: string | null;
   allPlans: Record<string, { rpd: number; maxKeys: number }>;
 }
 
@@ -419,7 +418,7 @@ export default function AgentModal({ open, onClose }: { open: boolean; onClose: 
 
             <div id="agentUsageCard">
               <div id="agentUsageTop">
-                <div id="agentUsageLabel">Daily requests used {limits?.linkedKeyId ? "(this key)" : ""}</div>
+                <div id="agentUsageLabel">Daily requests used</div>
                 <div id="agentUsageCount">
                   {usedToday.toLocaleString()} / {rpd.toLocaleString()}
                 </div>
@@ -431,11 +430,7 @@ export default function AgentModal({ open, onClose }: { open: boolean; onClose: 
                   style={{ width: usagePct + "%" }}
                 />
               </div>
-              <div id="agentUsageReset">
-                {limits?.linkedKeyId
-                  ? "Each linked API key gets its own daily quota \u00b7 resets at midnight UTC"
-                  : "Link an API key to start tracking usage \u00b7 resets at midnight UTC"}
-              </div>
+              <div id="agentUsageReset">Resets at midnight UTC</div>
             </div>
 
             <div id="agentKeyCard">
