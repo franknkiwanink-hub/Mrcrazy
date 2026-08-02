@@ -77,6 +77,7 @@ export default function ScrollToTop() {
   // position rather than whatever scroll a later effect might see.
   useEffect(() => {
     const onClickCapture = () => {
+      if (prevPathname.current === "/discover") return;
       saveScrollPos(prevPathname.current);
     };
     document.addEventListener("click", onClickCapture, true);
@@ -85,9 +86,18 @@ export default function ScrollToTop() {
 
   useEffect(() => {
     if (isPopState.current) {
+      isPopState.current = false;
+      // Discover always opens at the top on Back, regardless of where the
+      // user had scrolled to (e.g. down in the sellers rail) before
+      // tapping into a seller/listing/blog — never restores a saved
+      // "near the footer" position for this route.
+      if (pathname === "/discover") {
+        window.scrollTo(0, 0);
+        prevPathname.current = pathname;
+        return;
+      }
       // Browser back/forward — restore OUR remembered position for
       // the page being returned to, not the browser's native one.
-      isPopState.current = false;
       const saved = readScrollPos(pathname);
       window.scrollTo(0, saved);
       prevPathname.current = pathname;
