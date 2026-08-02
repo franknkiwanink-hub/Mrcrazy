@@ -79,20 +79,42 @@
 
 .disc-section:last-child { margin-bottom: 8px; }
 
-.disc-section-title {
-               font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
-               color: var(--mp-text-sec); margin: 0 0 14px;
+.disc-section-head {
+               display: flex; align-items: center; justify-content: space-between;
+               margin: 0 0 14px;
                }
 
-/* Blog cards — 16:9 media, title, description, date, mirrors
-                  the standalone /blog page's .sr-blog-card sizing but with
-                  its own class names since this needs a description line
-                  the base blog grid card doesn't render. */
-.disc-blog-grid {
-               display: grid;
-               grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
-               gap: 16px;
+.disc-section-title {
+               font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+               color: var(--mp-text-sec); margin: 0;
                }
+
+.disc-view-all {
+               background: none; border: none; cursor: pointer; font-family: inherit;
+               font-size: 12.5px; font-weight: 700; color: var(--mp-accent, #f5a623);
+               padding: 4px 0; white-space: nowrap;
+               }
+
+.disc-view-all:hover { text-decoration: underline; }
+
+/* Each section scrolls independently — horizontal rail, never wraps to a
+                  new row and never shares scroll state with the other sections. */
+.disc-rail {
+               display: flex;
+               flex-wrap: nowrap;
+               gap: 16px;
+               overflow-x: auto;
+               overflow-y: hidden;
+               scroll-snap-type: x proximity;
+               -webkit-overflow-scrolling: touch;
+               padding-bottom: 4px;
+               }
+
+.disc-rail::-webkit-scrollbar { height: 6px; }
+.disc-rail::-webkit-scrollbar-thumb { background: var(--mp-border-hover); border-radius: 3px; }
+.disc-rail::-webkit-scrollbar-track { background: transparent; }
+
+.disc-rail > * { scroll-snap-align: start; flex: 0 0 auto; }
 
 .disc-blog-card {
                display: flex; flex-direction: column;
@@ -103,6 +125,7 @@
                cursor: pointer; text-align: left;
                font-family: inherit; color: inherit;
                padding: 0;
+               width: 260px;
                transition: border-color var(--mp-transition), transform var(--mp-transition);
                }
 
@@ -135,22 +158,13 @@
                }
 
 /* Listings — reuses the real marketplace card components via
-                  ListingCard, just needs a grid wrapper here. */
-.disc-listing-grid {
-               display: grid;
-               grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
-               gap: 14px;
-               }
+                  ListingCard; each item gets a fixed rail width so
+                  ListingCard's own internal layout is untouched. */
+.disc-rail-listing-item { width: 220px; }
 
 /* Sellers — mirrors .mp-ts-card's avatar/name/stars layout
                   from the Premium sellers strip, as its own vertical card
                   instead of a horizontal scroll-track item. */
-.disc-seller-grid {
-               display: grid;
-               grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
-               gap: 14px;
-               }
-
 .disc-seller-card {
                display: flex; flex-direction: column; align-items: center; text-align: center;
                gap: 8px;
@@ -158,6 +172,7 @@
                border: 1px solid var(--mp-border);
                border-radius: var(--mp-radius);
                padding: 18px 12px;
+               width: 160px;
                cursor: pointer; font-family: inherit; color: inherit;
                transition: border-color var(--mp-transition), transform var(--mp-transition);
                }
@@ -184,8 +199,8 @@
 .disc-seller-stars { display: flex; align-items: center; gap: 2px; }
 
 @media (max-width: 360px) {
-                 .disc-blog-grid { grid-template-columns: 1fr; }
-                 .disc-listing-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-                 .disc-seller-grid { grid-template-columns: repeat(2, 1fr); }
+                 .disc-blog-card { width: 220px; }
+                 .disc-rail-listing-item { width: 180px; }
+                 .disc-seller-card { width: 130px; }
                }
 
