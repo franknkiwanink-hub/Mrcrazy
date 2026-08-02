@@ -520,6 +520,8 @@ export function isPaymentRequestOnCooldown(paymentRequestedAt: number | null): b
   if (!paymentRequestedAt) return false;
   return Date.now() - paymentRequestedAt < PAYMENT_REQUEST_COOLDOWN_MS;
 }
+
+export function deleteCountdownText(deleteAt: number): string {
   const ms = deleteAt - Date.now();
   if (ms <= 0) return "deleting chat…";
   const s = Math.floor(ms / 1000);
