@@ -1,2040 +1,2463 @@
-// /api/aistudio.js
-// Siterifty AI Studio — single entry point for every AI feature on the
-// platform, plus a couple of non-AI features folded in here purely to
-// stay under the hobby-plan serverless function count:
-//   1. Support chat ("Chay")               action: 'chat'
-//   2. User-to-user chat scam guard        action: 'scam-check'
-//   3. Listing auto-description generator  action: 'auto-description'
-//   4. Send-deal message assist            action: 'deal-message-assist'
-//   5. Reports/disputes auto-triage        action: 'triage-report' | 'triage-dispute'
-//   6. Feedback suggestion dedupe          action: 'feedback-dedupe' (gray-zone tiebreaker only)
-//   7. "Recommended for you" listings      action: 'recommendations' (no AI call — folded in from old /api/aisearch.js)
-//   8. In-app feedback board               action: 'feedback-submit' | 'feedback-list-top' | 'feedback-vote-existing' | 'feedback-list-archive' | 'feedback-get-cycle' | 'feedback-list-for-review' | 'feedback-set-status' | 'check-nudge' (folded in from old /api/feedback.js; weekly 7-day cycle with a permanent top-3-per-week archive, see the FEATURE comment block below for the full schema)
-//   9. Seller AI agent's model calls       action: 'agent-deal-decision' | 'agent-auto-reply' (internal-token only — called by the AI agent module folded into api/deal.js, which owns eligibility/quota/scheduling and settles deals via its own settleDealCore)
+// /api/paypal.js — Siterifty server-side PayPal handler
+// All money operations go through here. Frontend never touches Firestore for money.
 //
-// Providers: Groq (GROQ_API_KEY) + Google AI Studio / Gemini (GEMINI_API_KEY).
-// Every feature has a PRIMARY model and an ordered FALLBACK chain. If a call
-// fails (rate limit, 5xx, timeout) we automatically try the next model in the
-// chain. This matters because several Groq free-tier models here are capped
-// at ~1K requests/day — a single point of failure would take the feature down
-// for the rest of the day.
+// Actions (POST body: { action, ...params }):
+//   create-order   → DISABLED. PayPal deposits are no longer offered — Siterifty
+//                    holds user balances (escrow, wallet), and running that kind
+//                    of money transmission through PayPal's standard checkout
+//                    violates their acceptable-use terms for platforms holding
+//                    customer funds. PayPal is still used for the Pro
+//                    subscription only (get-plan-id/activate-sub/cancel-sub
+//                    below), which is a normal recurring charge to Siterifty,
+//                    not custody of user funds. See handleCreateOrder for the
+//                    stub response. A new deposit provider will replace this.
+//   capture-order  → DISABLED, same reasoning as create-order. Also stops
+//                    issuing/saving PayPal vault tokens — Auto Top-Up (which
+//                    depended on the vault) is removed along with it.
+//   get-plan-id    → subscription: return plan_id (never exposed in HTML)
+//   activate-sub   → subscription: verify ACTIVE with PayPal, write plan to Firestore
+//   cancel-sub     → subscription: cancel PayPal billing + downgrade to free
+//   withdraw       → wallet: debit balance, write pending withdrawal record.
+//                    method is 'paypal' | 'bank' | 'bitcoin' — payout itself is
+//                    always a manual step done outside this codebase (see
+//                    handleWithdraw's own comment); this just validates the
+//                    right fields for the chosen method and records the request.
+//   lookup-recipient → wallet: resolve a user by email for P2P transfer (server-side only —
+//                      the client never queries the users collection directly for this)
+//   transfer       → wallet: server-validated P2P balance transfer between two users
+//   boost-listing  → marketplace: debit wallet, set listings/{id}.boostedUntil so the
+//                     listing surfaces first in its type group in the feed algorithm.
+//                     Price is looked up server-side from BOOST_PLANS — the client only
+//                     ever sends `days`, never a price, so it cannot pay less than listed.
+//   [webhook]      → PayPal billing events: renewals, cancellations, payment failures
 //
-// Env vars required: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL,
-// FIREBASE_PRIVATE_KEY, GROQ_API_KEY, GEMINI_API_KEY
+// ── Auto Top-Up ────────────────────────────────────────────────────────────
+//   REMOVED. Auto Top-Up charged a saved PayPal vault token whenever the
+//   balance dropped below a threshold — it only made sense while PayPal
+//   deposits existed. autotopup-get/autotopup-save actions and
+//   maybeAutoTopUp are gone (call sites that used to await maybeAutoTopUp
+//   after a debit now simply don't — nothing else depended on its return
+//   value, since it was always fire-and-forget).
+//
+// ── Auto Send (recurring P2P payments) ────────────────────────────────────
+//   autosend-create   → schedule a repeating transfer to another user every
+//                        N days (1, 3, 7, 14, 21, or 30) until cancelled
+//   autosend-list     → list the caller's active/paused/cancelled schedules
+//   autosend-cancel   → cancel a schedule (no further charges)
+//   autosend-run      → cron entry point (see config.autoSendCronSecret) —
+//                        processes every schedule whose nextRunAt is due,
+//                        deducts from the payer, credits the payee, and logs
+//                        success/failure (insufficient balance, missing
+//                        recipient, etc.) to both users' transaction logs
+//
+// ── Auto Withdrawal (wallet settings) ─────────────────────────────────────
+//   autowithdraw-get   → read the caller's auto withdrawal settings
+//   autowithdraw-save  → enable/disable + set threshold/keepBalance/payout
+//                         method (PayPal email, bank details, or BTC address
+//                         on file)
+//   Like auto top-up used to, auto withdrawal is not a separate action the
+//   client calls to "run" it — it runs server-side (maybeAutoWithdraw) right
+//   after any successful credit to withdrawableBalance (referral bonus, P2P
+//   transfer received, auto send received — and escrow release, called from
+//   /api/deal). If the resulting withdrawable balance is at/above the user's
+//   threshold, it automatically files a payout request for everything above
+//   their configured "keep" floor, using the exact same pending-withdrawal
+//   pipeline as a manual withdraw request (same `withdrawals` collection,
+//   same transaction record shape) — it just skips the manual button tap.
+//
+// ── Escrow actions ──────────────────────────────────────────────────────────
+// escrow-pay / escrow-deliver / escrow-release / escrow-refund / escrow-dispute
+// have been moved to /api/deal (deal.js) alongside the deal lifecycle actions.
+// Update frontend callers to POST to /api/deal for all escrow actions.
 
-import admin from 'firebase-admin';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { LIMITS } from '../_lib/limits.js';
+import crypto from 'crypto';
 
-// ── Firebase Admin init (singleton across invocations) ──
-//
-// During `next build`, Next.js imports/parses every API route module as
-// part of the build's collection phase — even though this handler never
-// actually runs at build time. Vercel's build container does not have the
-// production Firebase env vars populated then, so admin.credential.cert()
-// would throw ("Service account object must contain a string 'project_id'
-// property.") purely from module evaluation and crash the whole build.
-// Fall back to a dummy credential in that case so the module can load; any
-// real Firestore call made through this dummy credential at runtime would
-// still fail loudly (as it should) if the real env vars are truly missing
-// in production.
-if (!admin.apps.length) {
-  let credential;
-  if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-    credential = admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+// ── Plan IDs hardcoded here (private repo) — not in frontend HTML ────────────
+// Replace these with your real PayPal plan IDs from developer.paypal.com
+const PLAN_IDS = {
+  starter: 'P-1PS58089939783309NJRHMJQ',
+  growth:  'P-5DY44028H9297735ENJRHNNA',
+  pro:     'P-3W326687TA376614CNJRHOJQ',
+};
+
+// ── Boost Listing pricing — single source of truth is LIMITS.boost.plans in
+//    limits.js (mirrored to frontend for display only; this file is still
+//    what actually gets enforced — it never trusts a client-sent price).
+//    Reshaped here into a days -> price lookup map for handleBoostListing. ───
+const BOOST_PLANS = Object.fromEntries(LIMITS.boost.plans.map(p => [p.days, p.price]));
+
+// ── Auto Send: allowed recurring intervals, in days — from limits.js ────────
+const AUTOSEND_INTERVALS = LIMITS.autoSend.intervals;
+
+// Auto Top-Up (and its bounds constants) removed along with PayPal deposits.
+
+// ── Auto Withdrawal: sane server-side bounds, mirroring auto top-up's
+//    pattern. Ideally sourced from LIMITS.autoWithdraw in limits.js (add it
+//    there alongside autoTopUp/autoSend for a single source of truth shared
+//    with the frontend); falls back to reasonable defaults if that block
+//    doesn't exist yet so this doesn't hard-crash on deploy. ─────────────────
+const AUTOWITHDRAW_MIN_THRESHOLD = LIMITS.autoWithdraw?.minThreshold ?? 10;
+const AUTOWITHDRAW_MAX_THRESHOLD = LIMITS.autoWithdraw?.maxThreshold ?? 10000;
+const AUTOWITHDRAW_MIN_KEEP      = LIMITS.autoWithdraw?.minKeepBalance ?? 0;
+const AUTOWITHDRAW_MAX_KEEP      = LIMITS.autoWithdraw?.maxKeepBalance ?? 10000;
+// Debounce window, same idea as autoTopUp.lastAttemptAt — stops several
+// credits landing in quick succession from firing overlapping payouts.
+const AUTOWITHDRAW_DEBOUNCE_MS = 2 * 60 * 1000;
+
+// ── Cron secret for the autosend-run sweep. Set AUTOSEND_CRON_SECRET in env
+//    and point your scheduler (Vercel Cron / cron-job.org / etc.) at
+//    POST /api/paypal { action: 'autosend-run', cronSecret }
+//    on whatever cadence you like (hourly is plenty since nextRunAt is
+//    checked against "now" — a schedule only actually fires once it's due).
+const AUTOSEND_CRON_SECRET = process.env.AUTOSEND_CRON_SECRET || null;
+
+
+// ── Firebase Admin singleton ─────────────────────────────────────────────────
+function getAdminDb() {
+  if (!getApps().length) {
+    initializeApp({
+      credential: cert({
+        projectId:   process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      }),
     });
-  } else {
-    credential = {
-      getAccessToken: () => Promise.resolve({ access_token: 'dummy', expires_in: 3600 }),
-    };
   }
-  admin.initializeApp({ credential });
+  return getFirestore();
 }
-// Lazy so `admin.firestore()` — which throws immediately if the credential
-// isn't a real cert/ADC credential — never runs at module-import time (e.g.
-// during `next build` page-data collection). It only runs the first time a
-// request handler actually touches `db`, by which point real env vars are
-// present in production.
-let _db;
-const db = new Proxy({}, {
-  get(_target, prop) {
-    if (!_db) _db = admin.firestore();
-    return _db[prop];
-  },
-});
-const FieldValue = admin.firestore.FieldValue;
 
-// ════════════════════════════════════════════════════════════════════════
-// PROVIDER ROUTER
-//
-// A "model spec" is { provider: 'groq' | 'gemini', model: '<id>' }.
-// callModel() normalizes both providers to the same shape the rest of this
-// file uses: { content, tool_calls } — so feature code never has to know
-// which provider actually answered.
-//
-// IMPORTANT: model ID strings below are taken directly from the rate-limit
-// table provided when this router was built. Verify exact API model-ID
-// strings (they can differ slightly from dashboard display names) against
-// https://console.groq.com/docs/models and Google AI Studio before relying
-// on this in production — some names here (Gemini 3.x line) could not be
-// independently verified at the time this file was written.
-// ════════════════════════════════════════════════════════════════════════
+// ── Admin session verification ───────────────────────────────────────────────
+// Mirrors admin.js's cookie sign/verify exactly (same COOKIE_NAME, same
+// SESSION_SECRET, same HMAC-SHA256 format: base64url(payload) + "." + hex
+// sig) so a session created by logging into admin.html is valid here too,
+// without needing a second login or a cross-file import (each Vercel
+// function is bundled independently). Used to gate admin-only actions in
+// this file (payout approve/reject) that must NOT be reachable with a
+// regular user's Firebase idToken.
+const ADMIN_COOKIE_NAME = 'admin_session';
+function verifyAdminSession(req) {
+  const header = req.headers.cookie || '';
+  const cookies = {};
+  header.split(';').forEach((part) => {
+    const idx = part.indexOf('=');
+    if (idx === -1) return;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (k) cookies[k] = decodeURIComponent(v);
+  });
+  const raw = cookies[ADMIN_COOKIE_NAME];
+  if (!raw) return null;
+  const dotIdx = raw.lastIndexOf('.');
+  if (dotIdx === -1) return null;
+  const payloadB64 = raw.slice(0, dotIdx);
+  const sig = raw.slice(dotIdx + 1);
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) return null;
+  const expectedSig = crypto.createHmac('sha256', secret).update(payloadB64).digest('hex');
+  const a = Buffer.from(sig, 'hex');
+  const b = Buffer.from(expectedSig, 'hex');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (!payload.exp || Date.now() > payload.exp) return null;
+  return payload; // { email, iat, exp }
+}
 
-const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GEMINI_URL = (model) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+// ── PayPal OAuth token (cached per cold-start) ───────────────────────────────
+let _ppToken = null;
+let _ppTokenExp = 0;
 
-async function callGroq({ model, messages, tools, temperature, max_tokens }) {
-  const res = await fetch(GROQ_URL, {
+async function getPayPalToken() {
+  if (_ppToken && Date.now() < _ppTokenExp) return _ppToken;
+  const base = ppBase();
+  const res = await fetch(`${base}/v1/oauth2/token`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      'Authorization': 'Basic ' + Buffer.from(
+        `${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
+      ).toString('base64'),
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'grant_type=client_credentials',
+  });
+  if (!res.ok) throw new Error(`PayPal OAuth failed: ${res.status}`);
+  const data = await res.json();
+  _ppToken    = data.access_token;
+  _ppTokenExp = Date.now() + (data.expires_in - 60) * 1000;
+  return _ppToken;
+}
+
+function ppBase() {
+  return 'https://api-m.paypal.com';
+}
+
+// ── Firebase ID token verification via REST ──────────────────────────────────
+// Using the public web API key — already hardcoded in index.html, not a secret
+const FIREBASE_WEB_API_KEY = 'AIzaSyCMdI_bIYse6j3GyGDBnbE6FoGNnPKaMao';
+
+async function verifyFirebaseToken(idToken) {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_WEB_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    }
+  );
+  if (!res.ok) throw new Error('Invalid Firebase token');
+  const data = await res.json();
+  const user = data.users?.[0];
+  if (!user) throw new Error('User not found');
+  return user; // { localId, email, ... }
+}
+
+// ── Platform fee recipient (P2P transfer fee, donations) ─────────────────────
+// handleTransfer's TRANSFER_FEE_RATE cut (and handleDonate's flat rate) is
+// credited to this account's wallet rather than just being deducted and
+// going nowhere. The account is identified by email, set via the
+// ADMIN_EMAIL environment variable (set in Vercel → Project → Settings →
+// Environment Variables) — never hardcoded here, so the fee recipient can
+// be changed without touching code or redeploying from source.
+// Resolved once by email and cached in memory for the life of the serverless
+// instance — same pattern used for the escrow platform fee in deal.js. A
+// query-by-email has no place inside the money-moving transaction below, so
+// this resolves ahead of time instead.
+//
+// Lowercased at read time: Firebase Auth normalizes user emails to lowercase
+// on the users/{uid} doc, but there's nothing stopping ADMIN_EMAIL from being
+// entered with different casing in Vercel (e.g. 'Siterifty@gmail.com') — a
+// Firestore '==' query is case-sensitive, so that mismatch alone silently
+// fails the lookup even though the account exists. Normalizing here means
+// casing in the env var can never cause this again. Same fix as deal.js —
+// both files must stay in sync on this.
+//
+// Returns null (does NOT throw) if ADMIN_EMAIL is unset or the account can't
+// be found — transfers/donations must never block over a platform
+// misconfiguration. Callers fall back to crediting the fee into the
+// platformFeesUnclaimed ledger (see _ledgerUnclaimedFee below) instead of a
+// live wallet when this returns null, so the fee is still deducted and
+// fully accounted for per-user, just not yet delivered anywhere — nothing
+// is silently discarded.
+const PLATFORM_FEE_ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase() || null;
+let _platformFeeAdminUidCache = null;
+
+async function getPlatformFeeAdminUid(db) {
+  if (_platformFeeAdminUidCache) return _platformFeeAdminUidCache;
+  if (!PLATFORM_FEE_ADMIN_EMAIL) {
+    console.error('[paypal.js] ADMIN_EMAIL is not set — platform fees will be ledgered as unclaimed instead of credited live. Set it in Vercel → Project → Settings → Environment Variables.');
+    return null;
+  }
+  const snap = await db.collection('users')
+    .where('email', '==', PLATFORM_FEE_ADMIN_EMAIL)
+    .limit(1)
+    .get();
+  if (snap.empty) {
+    console.error(`[paypal.js] Platform fee admin account (${PLATFORM_FEE_ADMIN_EMAIL}) not found — platform fees will be ledgered as unclaimed instead of credited live.`);
+    return null;
+  }
+  _platformFeeAdminUidCache = snap.docs[0].id;
+  return _platformFeeAdminUidCache;
+}
+
+// ── Unclaimed platform fees ledger ───────────────────────────────────────────
+// Used whenever a platform fee is correctly computed and deducted from the
+// paying party, but there's nowhere to credit it live (ADMIN_EMAIL unset or
+// unresolvable). The fee is NEVER silently discarded and the payer's own
+// transaction record always shows the real amount they were charged — this
+// ledger exists purely so the *platform's* side of that same fee isn't lost
+// while the admin account is misconfigured. Each doc is one such instance,
+// fully attributed (who, what transfer/donation, how much, when) so a
+// follow-up script can sweep platformFeesUnclaimed into the real admin
+// wallet once ADMIN_EMAIL is fixed, crediting the exact right historical
+// amount. Same shape/collection as deal.js's copy of this helper — both
+// files write into the same 'platformFeesUnclaimed' collection.
+async function _ledgerUnclaimedFee(db, { amount, source, sourceId, payerUid, counterpartyUid, note }) {
+  try {
+    await db.collection('platformFeesUnclaimed').add({
+      amount,
+      source,          // 'p2p_transfer' | 'donation' | 'escrow_release'
+      sourceId,
+      payerUid,
+      counterpartyUid,
+      note,
+      claimed: false,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  } catch (err) {
+    // Ledger write is best-effort logging on top of a fee that's already
+    // been correctly deducted inside the real transaction — never let a
+    // ledger failure retroactively break or reverse that.
+    console.error('[paypal.js] failed to write unclaimed-fee ledger entry (non-fatal)', err.message);
+  }
+}
+
+// ── PayPal webhook signature verification ────────────────────────────────────
+async function verifyWebhookSignature(headers, rawBody) {
+  const token = await getPayPalToken();
+  const res = await fetch(`${ppBase()}/v1/notifications/verify-webhook-signature`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type':  'application/json',
     },
     body: JSON.stringify({
-      model,
-      messages,
-      ...(tools ? { tools, tool_choice: 'auto' } : {}),
-      temperature: temperature ?? 0.4,
-      max_tokens: max_tokens ?? 1000,
+      auth_algo:         headers['paypal-auth-algo'],
+      cert_url:          headers['paypal-cert-url'],
+      transmission_id:   headers['paypal-transmission-id'],
+      transmission_sig:  headers['paypal-transmission-sig'],
+      transmission_time: headers['paypal-transmission-time'],
+      webhook_id:        process.env.PAYPAL_WEBHOOK_ID,
+      webhook_event:     JSON.parse(rawBody),
     }),
   });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`groq:${model} ${res.status} ${errText}`);
-  }
+  if (!res.ok) return false;
   const data = await res.json();
-  const choice = data.choices?.[0];
-  return {
-    content: choice?.message?.content ?? '',
-    tool_calls: choice?.message?.tool_calls ?? null,
-    raw_message: choice?.message ?? null,
-  };
+  return data.verification_status === 'SUCCESS';
 }
 
-// Gemini's REST shape differs from OpenAI's. We translate a plain
-// system+messages array into Gemini's { systemInstruction, contents } shape.
-// Tool-calling on Gemini uses a different schema (functionDeclarations); for
-// simplicity/reliability, Gemini is used here as a TEXT/VISION fallback
-// (no tool-calls) — if a Groq tool-calling model chain is fully exhausted,
-// the feature falls back to a plain-text Gemini answer instead of erroring.
-async function callGemini({ model, messages, temperature, max_tokens, imageParts }) {
-  const systemMsg = messages.find(m => m.role === 'system');
-  const rest = messages.filter(m => m.role !== 'system' && m.role !== 'tool');
-
-  const contents = rest.map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }],
-  }));
-
-  // Attach images (for vision use-cases) to the final user turn.
-  if (imageParts?.length && contents.length) {
-    contents[contents.length - 1].parts.push(...imageParts);
+// ── Main handler ─────────────────────────────────────────────────────────────
+export default async function handler(req, res) {
+  // PayPal webhook calls arrive without an action field but with PayPal headers
+  if (req.headers['paypal-transmission-id']) {
+    return handleWebhook(req, res);
   }
 
-  const body = {
-    contents,
-    ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
-    generationConfig: {
-      temperature: temperature ?? 0.4,
-      maxOutputTokens: max_tokens ?? 1000,
-    },
-  };
-
-  const res = await fetch(GEMINI_URL(model), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`gemini:${model} ${res.status} ${errText}`);
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
-  const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || '';
-  return { content: text, tool_calls: null, raw_message: null };
-}
 
-// ── Daily usage tracking ──
-// Each provider resets its daily (RPD) quota at a different clock boundary:
-//   - Google AI Studio: midnight Pacific Time, every day, regardless of when
-//     you hit the cap.
-//   - Groq: daily quotas reset on a rolling 24h-from-first-use / UTC daily
-//     cycle per Groq's own docs. We bucket Groq by UTC calendar day here;
-//     adjust getDateBucket() if Groq's dashboard shows a different boundary
-//     for your account tier.
-// RPM/TPM (per-minute) limits are NOT tracked here — those are rolling
-// windows, not daily, so a 429 on those is handled by the reactive catch in
-// callWithFallback() rather than by this proactive counter.
-function getDateBucket(provider) {
-  const now = new Date();
-  if (provider === 'gemini') {
-    // Convert to Pacific Time (UTC-8 standard / UTC-7 daylight). Using
-    // Intl so DST is handled correctly rather than a fixed offset.
-    const pt = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(now);
-    return pt; // 'YYYY-MM-DD' in Pacific time
-  }
-  // Groq: bucket by UTC calendar day.
-  return now.toISOString().slice(0, 10);
-}
+  const { action } = req.body || {};
 
-async function getUsageCount(provider, model) {
-  const bucket = getDateBucket(provider);
-  const docId = `${provider}__${model.replace(/\//g, '_')}__${bucket}`;
   try {
-    const snap = await db.collection('aiUsage').doc(docId).get();
-    return snap.exists ? (snap.data().count || 0) : 0;
+    switch (action) {
+      case 'create-order':      return await handleCreateOrder(req, res);
+      case 'capture-order':     return await handleCaptureOrder(req, res);
+      case 'get-plan-id':       return await handleGetPlanId(req, res);
+      case 'activate-sub':      return await handleActivateSub(req, res);
+      case 'cancel-sub':        return await handleCancelSub(req, res);
+      case 'withdraw':          return await handleWithdraw(req, res);
+      case 'admin-resolve-withdrawal': return await handleAdminResolveWithdrawal(req, res);
+      case 'lookup-recipient':  return await handleLookupRecipient(req, res);
+      case 'transfer':          return await handleTransfer(req, res);
+      case 'donate':            return await handleDonate(req, res);
+      case 'get-donations':     return await handleGetDonations(req, res);
+      case 'boost-listing':     return await handleBoostListing(req, res);
+      case 'wallet-summary':    return await handleWalletSummary(req, res);
+      // autotopup-get / autotopup-save removed — Auto Top-Up depended on the
+      // PayPal vault, which no longer exists now that deposits are disabled.
+      case 'autowithdraw-get':  return await handleAutoWithdrawGet(req, res);
+      case 'autowithdraw-save': return await handleAutoWithdrawSave(req, res);
+      case 'autosend-create':   return await handleAutoSendCreate(req, res);
+      case 'autosend-list':     return await handleAutoSendList(req, res);
+      case 'autosend-cancel':   return await handleAutoSendCancel(req, res);
+      case 'autosend-run':      return await handleAutoSendRun(req, res);
+      default:
+        return res.status(400).json({ error: 'Unknown action' });
+    }
   } catch (err) {
-    console.error('[aistudio] usage read failed, assuming 0:', err.message);
-    return 0; // fail open — don't block calls if Firestore hiccups
+    console.error('[paypal.js]', action, err.message);
+    return res.status(500).json({ error: err.message || 'Internal error' });
   }
 }
 
-async function incrementUsageCount(provider, model) {
-  const bucket = getDateBucket(provider);
-  const docId = `${provider}__${model.replace(/\//g, '_')}__${bucket}`;
-  try {
-    await db.collection('aiUsage').doc(docId).set({
-      provider, model, bucket,
-      count: FieldValue.increment(1),
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
-  } catch (err) {
-    console.error('[aistudio] usage increment failed (non-fatal):', err.message);
-  }
-}
-
-// Try each model in `chain` in order until one succeeds. `chain` is an array
-// of model specs: [{provider:'groq', model:'...', rpd:N}, ...].
-// Before calling a model we check its counted usage today against its rpd
-// cap (90% safety margin) and skip straight to the next model if it's
-// likely exhausted — this avoids wasting a round-trip on a call we can
-// already predict will 429. We still catch actual 429s as a fallback for
-// cases where our counter is out of sync (e.g. other traffic hitting the
-// same key outside this app).
-async function callWithFallback(chain, params, { requireContent = false } = {}) {
-  let lastErr;
-  for (const spec of chain) {
-    if (spec.rpd) {
-      const used = await getUsageCount(spec.provider, spec.model);
-      if (used >= spec.rpd * 0.9) {
-        console.warn(`[aistudio] skipping ${spec.provider}:${spec.model} — ${used}/${spec.rpd} daily requests used`);
-        continue;
-      }
-    }
-    try {
-      const out = spec.provider === 'groq'
-        ? { ...(await callGroq({ ...params, model: spec.model })), usedModel: `groq:${spec.model}` }
-        : { ...(await callGemini({ ...params, model: spec.model })), usedModel: `gemini:${spec.model}` };
-      // Some callers (e.g. auto-description) need actual prose back — a model
-      // can return HTTP 200 with empty/blank content (max_tokens hit before
-      // any text, a safety filter emptying the candidate, tool-call-only
-      // response with no message text, etc.). Without this check that was
-      // treated as a *success* with an empty string, so the description box
-      // silently stayed blank with no error shown anywhere. Treat it as a
-      // failure here so we fall through to the next model in the chain, and
-      // only give up (with a real error message) once every model has either
-      // errored or come back empty.
-      if (requireContent && !(out.content || '').trim()) {
-        lastErr = new Error(`${out.usedModel} returned an empty response`);
-        console.error('[aistudio] model returned empty content, trying next:', out.usedModel);
-        continue;
-      }
-      incrementUsageCount(spec.provider, spec.model); // fire-and-forget, don't block the response
-      return out;
-    } catch (err) {
-      lastErr = err;
-      const isRateLimit = /429|rate.?limit|resource_exhausted/i.test(err.message);
-      if (isRateLimit) {
-        // Our counter may be stale (e.g. shared key usage elsewhere) — mark
-        // this model as maxed for the rest of today so we stop retrying it.
-        await db.collection('aiUsage').doc(`${spec.provider}__${spec.model.replace(/\//g, '_')}__${getDateBucket(spec.provider)}`)
-          .set({ count: spec.rpd || 999999 }, { merge: true }).catch(() => {});
-      }
-      console.error('[aistudio] model failed, trying next:', err.message);
-    }
-  }
-  throw new Error(`All models in chain exhausted. Last error: ${lastErr?.message}`);
-}
-
-// ── Per-feature model chains ──
-// NOTE ON PROMPT GUARD: meta-llama/llama-prompt-guard-2-* is a jailbreak /
-// prompt-injection CLASSIFIER, not a scam-detector — it's trained to catch
-// attempts to manipulate an LLM, not human-to-human "pay me outside escrow"
-// scams. For the marketplace scam-guard we use it only as a cheap first-pass
-// filter on the incoming text, then run the actual scam judgment through
-// gpt-oss-safeguard-20b (a policy-classification model) with a scam-specific
-// policy. Both run before a message is ever delivered.
-// `rpd` = requests/day cap from the provider table used to build this router.
-// Used by the usage tracker below to proactively skip a model BEFORE it 429s,
-// instead of waiting for a failed call. Gemini models reset at midnight
-// Pacific Time; Groq resets on its own daily cycle (UTC) per Groq's docs —
-// see getDateBucket() below for how each is computed.
-const CHAINS = {
-  chat: [
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'groq', model: 'openai/gpt-oss-120b', rpd: 1000 },
-    { provider: 'groq', model: 'qwen/qwen3-32b', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash', rpd: 20 },
-  ],
-  scamGuardClassifier: [ // fast first pass, injection/jailbreak style signals
-    { provider: 'groq', model: 'meta-llama/llama-prompt-guard-2-86m', rpd: 14400 },
-    { provider: 'groq', model: 'meta-llama/llama-prompt-guard-2-22m', rpd: 14400 },
-  ],
-  scamGuardJudge: [ // actual scam-pattern judgment
-    { provider: 'groq', model: 'openai/gpt-oss-safeguard-20b', rpd: 1000 },
-    { provider: 'groq', model: 'qwen/qwen3-32b', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  autoDescription: [
-    { provider: 'groq', model: 'openai/gpt-oss-20b', rpd: 1000 },
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  dealMessageAssist: [
-    { provider: 'groq', model: 'openai/gpt-oss-20b', rpd: 1000 },
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  reportsTriage: [
-    { provider: 'groq', model: 'openai/gpt-oss-120b', rpd: 1000 },
-    { provider: 'groq', model: 'qwen/qwen3-32b', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash', rpd: 20 },
-  ],
-  vision: [ // image reading (listing photos, dispute evidence) — Groq has no
-            // vision-capable text model in our current lineup, so this is
-            // Gemini-only.
-    { provider: 'gemini', model: 'gemini-2.5-flash', rpd: 20 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  feedbackDedupe: [ // tiny yes/no classification — feedback.js's local text
-                     // similarity handles almost every case on its own; this
-                     // chain only gets called for the rare gray-zone pair
-                     // that local scoring can't confidently call, so it's
-                     // fine to put on the smallest/cheapest models.
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'groq', model: 'qwen/qwen3-32b', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  agentDealDecision: [ // seller AI agent: accept/reject/hold judgment on a
-                        // pending deal — see handleAgentDealDecision below
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'groq', model: 'openai/gpt-oss-120b', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-  agentAutoReply: [ // seller AI agent: drafts a reply in a deal chat
-    { provider: 'groq', model: 'openai/gpt-oss-20b', rpd: 1000 },
-    { provider: 'groq', model: 'llama-3.3-70b-versatile', rpd: 1000 },
-    { provider: 'gemini', model: 'gemini-2.5-flash-lite', rpd: 20 },
-  ],
-};
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 1 — Support chat ("Chay")
-// ════════════════════════════════════════════════════════════════════════
-
-const PLATFORM_INFO = `
-You are Siterifty Support, the friendly, knowledgeable AI assistant for Siterifty — a marketplace where small developers buy and sell websites, apps, and games.
-
-🎯 YOUR JOB:
-- Welcome users by name.
-- Answer any question about how the platform works in clear, step‑by‑step detail.
-- Look up the CALLER'S OWN deals when asked (use get_my_deals tool).
-- File a report against another user via the report_user tool only when the caller explicitly asks to report someone.
-- If you cannot do something, don't just say "I can't". Explain exactly why, and suggest what the user CAN do instead.
-- NEVER invent data or claim you looked up something you didn't fetch.
-
-📚 PLATFORM DETAILS:
-- Sellers list a website/app/game with a price.
-- Buyers send a "deal" (offer/intro message) on a listing.
-- The seller can Accept or Reject the deal.
-- Accepting creates a private chat named "Deal · <first two words>…" between buyer and seller.
-- That chat auto‑locks (read‑only) 7 days after acceptance. Both sides must complete handover/payment within that window.
-- Users can report others for bad behaviour. If someone types "@username" while asking you to report, use the report_user tool. Do NOT ask them to report manually.
-
-🔒 PRIVACY RULES:
-- You can see only the CALLER'S own profile and deals.
-- You CANNOT see other users' private info (email, deals, messages).
-- If asked to reveal another user's details, politely decline and offer to help with their own account or suggest filing a report if appropriate.
-
-🗣️ TONE:
-- Be warm, concise, and helpful — like a real support person.
-- Break down complex answers into numbered steps.
-- Use examples when it helps.
-`;
-
-const CHAT_TOOLS = [
-  {
-    type: 'function',
-    function: {
-      name: 'report_user',
-      description: 'File a report against another user (by @username) and notify them. Use ONLY when the caller clearly asks to report someone. Returns the report ID if successful.',
-      parameters: {
-        type: 'object',
-        properties: {
-          username: { type: 'string', description: 'The username being reported, without the @ symbol.' },
-          reason: { type: 'string', description: 'Short summary of why they are being reported.' },
-        },
-        required: ['username', 'reason'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_my_deals',
-      description: "Fetch the CALLER'S own deals (buyer or seller) including status, expiration, and listing title. Returns only the caller's data.",
-      parameters: { type: 'object', properties: {}, required: [] },
-    },
-  },
-];
-
-async function resolveUsernamePublic(username) {
-  const clean = username.replace(/^@/, '').trim().toLowerCase();
-  if (!clean) return null;
-  const snap = await db.collection('users').where('usernameLower', '==', clean).limit(1).get();
-  if (snap.empty) {
-    const snap2 = await db.collection('users').where('username', '==', clean).limit(1).get();
-    if (snap2.empty) return null;
-    const d = snap2.docs[0];
-    return { uid: d.id, username: d.data().username || clean };
-  }
-  const d = snap.docs[0];
-  return { uid: d.id, username: d.data().username || clean };
-}
-
-async function toolReportUser({ username, reason }, callerUid, callerName) {
-  const target = await resolveUsernamePublic(username);
-  if (!target) return { ok: false, message: `I couldn't find a user named @${username.replace(/^@/, '')}.` };
-  if (target.uid === callerUid) return { ok: false, message: "You can't report yourself." };
-
-  const reportRef = db.collection('reports').doc();
-  const now = FieldValue.serverTimestamp();
-  await reportRef.set({
-    reportedUid: target.uid,
-    reportedUsername: target.username,
-    reporterUid: callerUid,
-    reporterName: callerName || 'A user',
-    reason: reason || 'No reason provided',
-    status: 'open',
-    source: 'ai_support',
-    createdAt: now,
-  });
-
-  await db.collection('users').doc(target.uid).collection('notifications').add({
-    type: 'report_filed',
-    title: 'You were reported',
-    body: `Someone reported your account. Our team will review it. If you believe this was a mistake, you can contact support.`,
-    read: false,
-    createdAt: now,
-  });
-
-  return { ok: true, message: `Filed a report against @${target.username} and notified them. Report ID: ${reportRef.id}` };
-}
-
-async function toolGetMyDeals(callerUid) {
-  const snap = await db.collection('users').doc(callerUid).collection('deals')
-    .orderBy('createdAt', 'desc').limit(20).get();
-  const deals = snap.docs.map(d => {
-    const v = d.data();
-    return {
-      id: d.id,
-      listingTitle: v.listingTitle || 'Untitled',
-      status: v.status || 'pending',
-      role: v.sellerUid === callerUid ? 'seller' : 'buyer',
-      expiresAt: v.expiresAt || null,
-      createdAt: v.createdAt?.toMillis ? v.createdAt.toMillis() : null,
-    };
-  });
-  return { deals };
-}
-
-async function handleChat({ messages, callerUid, callerName }) {
-  if (!Array.isArray(messages) || !messages.length) {
-    throw httpError(400, 'messages array required');
-  }
-
-  const systemPrompt = `${PLATFORM_INFO}\n\nThe person you're talking to is logged in as "${callerName}" (uid: ${callerUid}). Greet them warmly and use the tools available to look up their own deals or file a report. If you cannot do something, explain exactly why and suggest what they CAN do.`;
-
-  const chatMessages = [
-    { role: 'system', content: systemPrompt },
-    ...messages.slice(-20),
-  ];
-
-  let result = await callWithFallback(CHAINS.chat, { messages: chatMessages, tools: CHAT_TOOLS });
-
-  let loopGuard = 0;
-  while (result.tool_calls && result.tool_calls.length && loopGuard < 3) {
-    loopGuard++;
-    chatMessages.push(result.raw_message);
-
-    for (const call of result.tool_calls) {
-      let args = {};
-      try { args = JSON.parse(call.function.arguments || '{}'); } catch { /* default {} */ }
-
-      let toolResult;
-      if (call.function.name === 'report_user') {
-        toolResult = await toolReportUser(args, callerUid, callerName);
-      } else if (call.function.name === 'get_my_deals') {
-        toolResult = await toolGetMyDeals(callerUid);
-      } else {
-        toolResult = { ok: false, message: 'Unknown tool' };
-      }
-
-      chatMessages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(toolResult) });
-    }
-
-    result = await callWithFallback(CHAINS.chat, { messages: chatMessages, tools: CHAT_TOOLS });
-  }
-
-  return {
-    reply: result.content || "I'm not sure how to help with that — could you rephrase? I'm here to assist with your account, deals, and platform questions.",
-    model: result.usedModel,
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 2 — User-to-user chat scam guard
+// ─────────────────────────────────────────────────────────────────────────────
+// create-order  { idToken, amount, useVault? }  →  { orderID, usedVault }
 //
-// Behavior (per product decision): auto-delete on HIGH-confidence scam
-// signals (off-platform payment requests, phishing links, fake escrow
-// impersonation, etc). On LOWER-confidence/ambiguous signals, deliver the
-// message but attach a warning banner instead of deleting it.
-// Every check is logged to `moderationLogs` regardless of outcome, so
-// patterns and false-positives can be audited later.
-// ════════════════════════════════════════════════════════════════════════
+// Two paths:
+//   A) Normal (first deposit or no vault on file):
+//      Creates order with store_in_vault: "ON_SUCCESS" so PayPal silently vaults
+//      the payment method if the buyer consents. No extra friction for the buyer.
+//      The vault ID (if issued) is saved during capture-order.
+//
+//   B) Vault token reuse (repeat deposits, useVault: true):
+//      If paypalVaultId is stored on the user doc, we pass it directly as
+//      payment_source.token — the buyer skips the PayPal popup entirely.
+//      Falls back to path A if the stored token is stale or invalid.
+// ─────────────────────────────────────────────────────────────────────────────
+// PayPal deposits are disabled — see the top-of-file comment. Left as a
+// named stub (rather than deleting the case label) so a re-enable, or
+// swapping in the new deposit provider, is a small diff instead of
+// reconstructing routing/validation from scratch.
+async function handleCreateOrder(req, res) {
+  return res.status(410).json({
+    error: 'PayPal deposits are no longer available. Adding funds will use a new payment provider — check back soon.',
+  });
+}
 
-const SCAM_POLICY = `
-You are a scam-detection classifier for Siterifty, a marketplace where users chat 1:1 to complete deals (buying/selling websites, apps, games) through escrow-protected transactions.
+// ─────────────────────────────────────────────────────────────────────────────
+// capture-order  { idToken, orderID }  →  { success, amount, newBalance, vaultSaved? }
+//
+// After a successful capture we check the PayPal response for a vault token.
+// PayPal includes payment_source.paypal.attributes.vault.id when it has vaulted
+// the buyer's payment method (i.e. the buyer consented during checkout).
+// We save paypalVaultId + paypalVaultEmail on the user doc so future deposits
+// can use Path B in create-order (no popup, instant charge).
+// ─────────────────────────────────────────────────────────────────────────────
+// PayPal deposits are disabled — see the top-of-file comment.
+async function handleCaptureOrder(req, res) {
+  return res.status(410).json({
+    error: 'PayPal deposits are no longer available. Adding funds will use a new payment provider — check back soon.',
+  });
+}
 
-Classify the message below for SCAM RISK. Common scam patterns on this platform:
-- Asking to pay or communicate "outside the platform" / "off Siterifty" to avoid fees or escrow protection.
-- Sharing external payment links, wallet addresses, or "faster" payment methods that bypass escrow.
-- Impersonating Siterifty staff, support, or escrow/admin.
-- Urgency/pressure tactics ("deal expires in 5 minutes, pay now via this link").
-- Requesting sensitive credentials (passwords, 2FA codes, hosting/domain logins) outside the normal secure handover flow.
-- Fake "buyer already paid, just send the code first" pressure before funds actually clear.
+// maybeAutoTopUp (and the PayPal vault it charged) has been removed along
+// with PayPal deposits — see the top-of-file comment. Its former call
+// sites (withdraw, transfer, donate, autosend-run, boost-listing) simply
+// no longer call it; none of them used its return value.
 
-Respond ONLY with strict JSON, no markdown, no commentary:
-{"risk": "high" | "low" | "none", "reason": "<one short sentence>"}
-
-"high" = confident this is a scam attempt, message should be blocked.
-"low" = suspicious pattern but not conclusive, message should be delivered with a warning.
-"none" = normal deal conversation, no concern.
-`;
-
-async function classifyScamRisk(text) {
-  // First pass: cheap injection/jailbreak-style classifier as a quick filter.
-  // (Prompt Guard scores adversarial-prompt patterns; we treat a high score
-  // here only as a signal to weight the judge step more heavily, not as a
-  // verdict on its own — it isn't trained on marketplace scam language.)
-  let guardFlag = false;
+// ─────────────────────────────────────────────────────────────────────────────
+// maybeAutoWithdraw(db, uid)
+//
+// The credit-side mirror of maybeAutoTopUp. Called (awaited, but never
+// allowed to throw back to the caller) right after any successful credit to
+// withdrawableBalance — referral bonus (activate-sub), P2P transfer received
+// (transfer), auto send received (autosend-run), and escrow release (called
+// from /api/deal's handleEscrowRelease — see note in handleWithdraw's doc
+// comment above). Checks whether the resulting withdrawable balance is at or
+// above the user's configured threshold, and if so, automatically files a
+// payout request for the amount above their configured "keep" floor.
+//
+// This deliberately reuses the exact same mechanics as a manual withdraw
+// request (handleWithdraw): debit walletBalance/withdrawableBalance, credit
+// pendingBalance, write a `withdraw` transaction record, and write a
+// `withdrawals` collection doc with status 'pending' — so an auto-filed
+// withdrawal is indistinguishable from a manual one anywhere downstream
+// (admin payout tooling, History list, etc.) except for its `auto: true`
+// flag and `autowithdraw` transaction type.
+//
+// Settings live at users/{uid}.autoWithdraw =
+//   { enabled, threshold, keepBalance, method, paypalEmail }
+// Runs OUTSIDE the caller's transaction (own fresh read + own transaction),
+// same reasoning as maybeAutoTopUp — an auto-withdraw failure must never
+// roll back the credit that triggered it. Every attempt is logged to the
+// transactions subcollection so History shows exactly what happened.
+// ─────────────────────────────────────────────────────────────────────────────
+async function maybeAutoWithdraw(db, uid) {
   try {
-    const guardRes = await callWithFallback(CHAINS.scamGuardClassifier, {
-      messages: [{ role: 'user', content: text }],
-      max_tokens: 20,
+    const userRef  = db.collection('users').doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) return;
+    const data = userSnap.data();
+
+    const cfg = data.autoWithdraw;
+    if (!cfg || !cfg.enabled) return;
+
+    const threshold   = Number(cfg.threshold || 0);
+    const keepBalance = Number(cfg.keepBalance || 0);
+    const paypalEmail = cfg.paypalEmail;
+    const method      = cfg.method === 'bank' ? 'bank' : 'paypal';
+    if (!threshold || !paypalEmail) return;
+
+    const withdrawable = Number(data.withdrawableBalance || 0);
+    if (withdrawable < threshold) return; // below threshold — nothing to do
+
+    // Debounce: don't fire again within the window of the last attempt, in
+    // case several credits land in quick succession before the first
+    // auto-withdrawal has finished writing.
+    const lastAttempt = cfg.lastAttemptAt?.toMillis?.() || 0;
+    if (Date.now() - lastAttempt < AUTOWITHDRAW_DEBOUNCE_MS) return;
+
+    await userRef.update({ 'autoWithdraw.lastAttemptAt': FieldValue.serverTimestamp() });
+
+    // Withdraw everything above the configured "keep" floor.
+    const amt = parseFloat((withdrawable - keepBalance).toFixed(2));
+    if (!amt || amt < 1) return; // not enough above the floor to bother with
+
+    const fee     = parseFloat((amt * 0.05).toFixed(2));
+    const receive = parseFloat((amt - fee).toFixed(2));
+
+    await db.runTransaction(async tx => {
+      const freshSnap = await tx.get(userRef);
+      if (!freshSnap.exists) return;
+      const freshData = freshSnap.data();
+
+      const bal            = parseFloat((freshData.walletBalance || 0).toFixed(2));
+      const freshWithdrawable = parseFloat((freshData.withdrawableBalance || 0).toFixed(2));
+
+      // Re-check against the fresh read — balance may have moved between
+      // the initial check above and this transaction acquiring its lock.
+      if (amt > freshWithdrawable || amt > bal) return;
+
+      const updatedBal         = parseFloat((bal - amt).toFixed(2));
+      const updatedWithdrawable = parseFloat((freshWithdrawable - amt).toFixed(2));
+      const pending             = parseFloat(((freshData.pendingBalance || 0) + amt).toFixed(2));
+
+      tx.update(userRef, {
+        walletBalance:       updatedBal,
+        withdrawableBalance: updatedWithdrawable,
+        pendingBalance:      pending,
+      });
+
+      tx.set(userRef.collection('transactions').doc(), {
+        type:      'autowithdraw',
+        amount:    -amt,
+        fee,
+        label:     `Auto withdrawal via ${method === 'bank' ? 'Bank Transfer' : 'PayPal'}`,
+        note:      `Withdrawable balance reached your $${threshold.toFixed(2)} threshold — automatically requested $${amt.toFixed(2)}, keeping $${keepBalance.toFixed(2)} in your wallet.`,
+        method,
+        auto:      true,
+        status:    'pending',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+
+      tx.set(db.collection('withdrawals').doc(), {
+        uid,
+        paypalEmail,
+        method,
+        amount:  amt,
+        fee,
+        receive,
+        auto:    true,
+        status:  'pending',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+
+      tx.set(userRef.collection('notifications').doc(), {
+        type:      'auto_withdrawal',
+        title:     'Auto withdrawal requested',
+        body:      `Your withdrawable balance hit your $${threshold.toFixed(2)} threshold, so we requested a $${amt.toFixed(2)} payout automatically.`,
+        read:      false,
+        createdAt: Date.now(),
+      });
     });
-    guardFlag = /malicious|injection|jailbreak/i.test(guardRes.content || '');
-  } catch (err) {
-    console.error('[aistudio] prompt-guard pass failed, continuing to judge step:', err.message);
-  }
 
-  const judgeRes = await callWithFallback(CHAINS.scamGuardJudge, {
-    messages: [
-      { role: 'system', content: SCAM_POLICY },
-      { role: 'user', content: `Message to classify:\n"""${text}"""${guardFlag ? '\n\n(Note: an upstream filter flagged this text as containing adversarial/manipulative patterns — weigh that in your judgment.)' : ''}` },
-    ],
-    temperature: 0.1,
-    max_tokens: 150,
+    console.log(`[autowithdraw] Filed $${amt} payout for uid=${uid}`);
+  } catch (err) {
+    // Never let an auto withdrawal failure surface to or block the caller's
+    // original request (transfer/autosend-run/escrow-release) — just log it.
+    console.error('[autowithdraw] unexpected error', uid, err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// get-plan-id  { idToken, plan }  →  { planId }
+// Plan IDs never go in HTML — they live in PLAN_IDS above (private repo)
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleGetPlanId(req, res) {
+  const { idToken, plan } = req.body;
+  if (!idToken)         return res.status(401).json({ error: 'Missing auth token' });
+  if (!PLAN_IDS[plan])  return res.status(400).json({ error: 'Invalid plan key' });
+
+  await verifyFirebaseToken(idToken);
+  return res.status(200).json({ planId: PLAN_IDS[plan] });
+}
+
+// ── Referral commission rates (% of plan's first payment) ────────────────────
+const REFERRAL_COMMISSION_RATE = 0.30; // 30% flat for all plans
+
+// ── Plan prices (mirror limits.js — single change point if prices change) ────
+const PLAN_PRICES = { starter: 15, growth: 30, pro: 60 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// activate-sub  { idToken, plan, subscriptionID }  →  { success }
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleActivateSub(req, res) {
+  const { idToken, plan, subscriptionID } = req.body;
+  if (!idToken)        return res.status(401).json({ error: 'Missing auth token' });
+  if (!plan)           return res.status(400).json({ error: 'Missing plan' });
+  if (!subscriptionID) return res.status(400).json({ error: 'Missing subscriptionID' });
+  if (!PLAN_IDS[plan]) return res.status(400).json({ error: 'Invalid plan key' });
+
+  // 1. Verify Firebase identity
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  // 2. Verify subscription status with PayPal — must be ACTIVE
+  const token = await getPayPalToken();
+  const subRes = await fetch(`${ppBase()}/v1/billing/subscriptions/${subscriptionID}`, {
+    headers: { 'Authorization': `Bearer ${token}` },
   });
 
-  let parsed;
-  try {
-    const cleaned = (judgeRes.content || '').replace(/```json|```/g, '').trim();
-    parsed = JSON.parse(cleaned);
-  } catch {
-    parsed = { risk: 'low', reason: 'Could not parse classifier output — defaulting to warn.' };
-  }
-  return { ...parsed, model: judgeRes.usedModel };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// SCAM GUARD ESCALATION — YouTube-style strike system
-//
-// Policy (product decision):
-//   • 3 'warned' verdicts within a rolling 24h window  → 1 strike
-//   • 2 'blocked' verdicts within a rolling 24h window → 1 strike (harsher,
-//     since a block is already a higher-confidence signal than a warn)
-//   • Strike 1                                          → 1 hour suspension
-//   • Strike 2, if within 48h of the oldest active strike → 5 hour suspension
-//   • Strike 3, if within 72h of the oldest active strike → PERMANENT BAN
-//   • Strikes older than 72h (measured from the oldest strike still in the
-//     window) expire and drop off the list — this demotes the severity of
-//     whatever strike comes next rather than keeping someone banned forever
-//     for one bad week. There is no ban-equivalent "4th strike"; ban is the
-//     ceiling for scam-guard violations — accounts are never banned outright
-//     by this system without passing through the suspension ladder first.
-//
-// All of this lives on users/{uid}.moderation, written in the SAME schema
-// maintenance-banned.js already reads (banned/banReason/suspended/
-// suspendedUntil/suspendReason) so the existing full-screen account-status
-// overlay picks this up with zero front-end changes.
-// ════════════════════════════════════════════════════════════════════════
-
-const SCAM_WARN_WINDOW_MS    = 24 * 60 * 60 * 1000; // 3 warns within this window = 1 strike
-const SCAM_WARN_THRESHOLD    = 3;
-const SCAM_BLOCK_WINDOW_MS   = 24 * 60 * 60 * 1000; // 2 blocks within this window = 1 strike
-const SCAM_BLOCK_THRESHOLD   = 2;
-const SCAM_STRIKE2_WINDOW_MS = 48 * 60 * 60 * 1000; // strike 2 must land within this of strike 1 to count as strike 2
-const SCAM_STRIKE3_WINDOW_MS = 72 * 60 * 60 * 1000; // strike 3 must land within this of the oldest strike to trigger a ban
-
-const SCAM_SUSPEND_MS_BY_STRIKE = {
-  1: 60 * 60 * 1000,       // strike 1 → 1 hour
-  2: 5 * 60 * 60 * 1000,   // strike 2 → 5 hours
-};
-
-// Drop any timestamps older than `windowMs` relative to `now`, keeping the
-// array sorted ascending (oldest first) — used for both the warn/block
-// event lists and the strikes list itself.
-function _scamPruneOld(timestamps, windowMs, now) {
-  return (timestamps || []).filter(ts => now - ts <= windowMs).sort((a, b) => a - b);
-}
-
-// Given the user's current moderation state and a new event ('warned' or
-// 'blocked') just recorded at `now`, returns the updated moderation object
-// plus any account-status change that should be applied (suspend/ban), or
-// null if no threshold was crossed.
-function _scamApplyEscalation(moderation, eventType, now) {
-  const mod = {
-    warnEvents:  _scamPruneOld(moderation?.warnEvents,  SCAM_WARN_WINDOW_MS,  now),
-    blockEvents: _scamPruneOld(moderation?.blockEvents, SCAM_BLOCK_WINDOW_MS, now),
-    strikes:     _scamPruneOld(moderation?.strikes,     SCAM_STRIKE3_WINDOW_MS, now),
-  };
-
-  if (eventType === 'warned') mod.warnEvents.push(now);
-  else if (eventType === 'blocked') mod.blockEvents.push(now);
-
-  let newStrike = false;
-  if (eventType === 'warned' && mod.warnEvents.length >= SCAM_WARN_THRESHOLD) {
-    mod.warnEvents = []; // consumed into a strike
-    newStrike = true;
-  } else if (eventType === 'blocked' && mod.blockEvents.length >= SCAM_BLOCK_THRESHOLD) {
-    mod.blockEvents = []; // consumed into a strike
-    newStrike = true;
+  if (!subRes.ok) {
+    return res.status(502).json({ error: 'Could not verify subscription with PayPal' });
   }
 
-  let statusChange = null;
-  if (newStrike) {
-    mod.strikes.push(now);
-    // Re-prune: the strike we just pushed may make an old one fall outside
-    // the 72h window relative to itself — but the correct reference point
-    // is the OLDEST strike still being counted, so prune once more here
-    // using that oldest timestamp rather than `now`.
-    const oldest = mod.strikes[0];
-    mod.strikes = mod.strikes.filter(ts => ts - oldest <= SCAM_STRIKE3_WINDOW_MS);
+  const sub = await subRes.json();
 
-    const strikeNumber = mod.strikes.length; // 1, 2, or 3 (post-prune, post-push)
-
-    if (strikeNumber >= 3) {
-      // Third strike within the 72h window from the oldest strike → permanent ban.
-      statusChange = { type: 'ban', reason: '3 scam-guard strikes within 72 hours.' };
-      mod.strikes = []; // banned — no further strikes need tracking
-    } else if (strikeNumber === 2) {
-      // Strike 2 only counts as strike 2 if it's within 48h of strike 1
-      // (mod.strikes[0] is strike 1's timestamp at this point).
-      const withinEscalationWindow = (now - mod.strikes[0]) <= SCAM_STRIKE2_WINDOW_MS;
-      if (withinEscalationWindow) {
-        statusChange = { type: 'suspend', ms: SCAM_SUSPEND_MS_BY_STRIKE[2], reason: '2nd scam-guard strike within 48 hours.' };
-      } else {
-        // Strike 1 aged out of relevance for escalation purposes — treat
-        // this as a fresh strike 1 instead of a harsher strike 2.
-        mod.strikes = [now];
-        statusChange = { type: 'suspend', ms: SCAM_SUSPEND_MS_BY_STRIKE[1], reason: '1st scam-guard strike.' };
-      }
-    } else {
-      // strikeNumber === 1
-      statusChange = { type: 'suspend', ms: SCAM_SUSPEND_MS_BY_STRIKE[1], reason: '1st scam-guard strike.' };
-    }
+  if (sub.status !== 'ACTIVE') {
+    return res.status(400).json({ error: `Subscription not active (status: ${sub.status})` });
   }
 
-  return { moderation: mod, statusChange };
-}
+  // 3. Confirm plan_id matches — blocks plan-swapping attacks
+  if (sub.plan_id !== PLAN_IDS[plan]) {
+    console.error(`Plan ID mismatch: PayPal returned ${sub.plan_id}, expected ${PLAN_IDS[plan]}`);
+    return res.status(400).json({ error: 'Plan mismatch. Contact support.' });
+  }
 
-// Applies a scam-guard verdict's consequence (if any) to users/{uid} inside
-// a transaction, so concurrent messages from the same user can't race each
-// other's strike math. Writes suspended/suspendedUntil/suspendReason or
-// banned/banReason using the exact field names maintenance-banned.js reads.
-async function applyScamGuardEscalation(uid, action) {
-  if (action !== 'warned' && action !== 'blocked') return null; // 'allowed' never escalates
-  if (!uid) return null;
-
-  const now = Date.now();
+  // 4. Write to Firestore via Admin SDK
+  const db = getAdminDb();
   const userRef = db.collection('users').doc(uid);
+  let paidReferrerUid = null; // set inside the tx if a referral bonus is paid
 
-  return db.runTransaction(async tx => {
-    const snap = await tx.get(userRef);
-    const data = snap.exists ? snap.data() : {};
-    const { moderation, statusChange } = _scamApplyEscalation(data.moderation, action, now);
+  await db.runTransaction(async tx => {
+    const userSnap = await tx.get(userRef);
+    if (!userSnap.exists) throw new Error('User not found');
+    const userData = userSnap.data();
 
-    const update = { moderation };
+    // Guard: only pay referral once (on first-ever paid plan activation)
+    const alreadyPaidReferral = userData.referralBonusPaid === true;
+    const referredBy = userData.referredBy || null;
+    const planPrice  = PLAN_PRICES[plan] || 0;
+    const bonus      = parseFloat((planPrice * REFERRAL_COMMISSION_RATE).toFixed(2));
+    const oldPlan    = userData.plan || 'free';
 
-    if (statusChange?.type === 'ban') {
-      update.banned = true;
-      update.banReason = statusChange.reason;
-      // A ban supersedes any active suspension — clear it so the overlay
-      // shows the (permanent) ban state, not a suspension countdown.
-      update.suspended = false;
-      update.suspendedUntil = null;
-    } else if (statusChange?.type === 'suspend') {
-      update.suspended = true;
-      update.suspendedUntil = new Date(now + statusChange.ms);
-      update.suspendReason = statusChange.reason;
-    }
-
-    tx.set(userRef, update, { merge: true });
-    return statusChange; // null if this event didn't cross a strike threshold
-  });
-}
-
-async function handleScamCheck({ text, callerUid, chatId }) {
-  if (!text || typeof text !== 'string') throw httpError(400, 'text required');
-
-  const verdict = await classifyScamRisk(text);
-  const action = verdict.risk === 'high' ? 'blocked' : verdict.risk === 'low' ? 'warned' : 'allowed';
-
-  await db.collection('moderationLogs').add({
-    type: 'scam_guard',
-    chatId: chatId || null,
-    userId: callerUid,
-    textSample: text.slice(0, 500),
-    risk: verdict.risk,
-    reason: verdict.reason,
-    action,
-    model: verdict.model,
-    createdAt: FieldValue.serverTimestamp(),
-  });
-
-  // Feed this verdict into the strike/escalation ladder. Returns null if no
-  // strike threshold was crossed this time, or the resulting suspend/ban
-  // decision if one was — surfaced below so the client can react instantly
-  // (e.g. force the account-status overlay) instead of waiting for the next
-  // auth-state refresh to notice suspended/banned flipped true.
-  let statusChange = null;
-  try {
-    statusChange = await applyScamGuardEscalation(callerUid, action);
-  } catch (err) {
-    console.error('[aistudio] scam-guard escalation failed:', err.message);
-    // Fail open — a broken escalation write should never block the
-    // underlying blocked/warned/allowed message decision above.
-  }
-
-  return {
-    action,               // 'blocked' | 'warned' | 'allowed'
-    risk: verdict.risk,
-    reason: verdict.reason,
-    warningText: action === 'warned'
-      ? `⚠️ Heads up — this message has patterns common in scams (${verdict.reason}). Never pay or share credentials outside Siterifty's escrow flow.`
-      : null,
-    accountStatusChange: statusChange, // null | { type: 'suspend', ms, reason } | { type: 'ban', reason }
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 3 — Listing auto-description generator
-//
-// Plan-based char limits (minimum the USER can request; user still picks
-// within their plan's ceiling):
-//   Free: up to 100   Start: up to 500   Growth: up to 1500   Pro: up to 5000
-// The user supplies the listing TITLE + desired length; AI writes the
-// description scoped to that length.
-// ════════════════════════════════════════════════════════════════════════
-
-const PLAN_LIMITS = { free: 100, start: 500, growth: 1500, pro: 5000 };
-
-const DESCRIPTION_SYSTEM = `
-You are a marketplace listing copywriter for Siterifty (buy/sell websites, apps, games).
-Given a listing TITLE and a target length, write a compelling, honest, specific product description.
-Rules:
-- Do not invent fake stats, revenue figures, user counts, or technical claims not implied by the title.
-- Write in an active, confident tone aimed at a buyer evaluating a small digital asset.
-- Stay as close as possible to the requested character count without going over it.
-- No markdown, no headers, no emoji spam — plain prose paragraphs suitable for a listing page.
-- Do not include placeholder text like "[insert detail]" — write naturally around missing specifics instead.
-`;
-
-async function handleAutoDescription({ title, targetLength, plan, callerUid }) {
-  if (!title || typeof title !== 'string' || !title.trim()) {
-    throw httpError(400, 'title is required so the AI knows what it is describing');
-  }
-  const cap = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
-  const requested = Math.max(20, Math.min(Number(targetLength) || cap, cap));
-
-  const result = await callWithFallback(CHAINS.autoDescription, {
-    messages: [
-      { role: 'system', content: DESCRIPTION_SYSTEM },
-      { role: 'user', content: `Listing title: "${title.trim()}"\nTarget length: approximately ${requested} characters (plan cap: ${cap}).\nWrite the description now.` },
-    ],
-    temperature: 0.6,
-    max_tokens: Math.ceil(requested / 3) + 100, // rough token headroom for char budget
-  }, { requireContent: true });
-
-  let description = (result.content || '').trim();
-  if (!description) {
-    // Should be unreachable now that callWithFallback enforces requireContent,
-    // but keep this as a hard backstop so the client never silently gets an
-    // empty description with a 200 OK — it always either gets real text or a
-    // thrown error the UI can show.
-    throw new Error('AI returned an empty description — please try again.');
-  }
-  if (description.length > cap) description = description.slice(0, cap).replace(/\s+\S*$/, '') + '…';
-
-  return { description, charCount: description.length, cap, model: result.usedModel };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 4 — Send-deal message assist
-// Helps a buyer/seller write their deal intro/offer message.
-// ════════════════════════════════════════════════════════════════════════
-
-const DEAL_MESSAGE_SYSTEM = `
-You help a user write a short, effective message when sending a "deal" (an offer/intro) on a Siterifty listing.
-Write ONE message option (2-5 sentences) that is:
-- Polite, direct, and specific to the listing context given.
-- States genuine interest and, if a price/offer was given, references it naturally.
-- Does not invent details about the listing that weren't provided.
-- Does not pressure, guarantee, or make claims about payment happening outside the platform's escrow flow.
-Return ONLY the message text — no preamble, no quotes around it.
-`;
-
-async function handleDealMessageAssist({ listingTitle, listingSummary, offerAmount, userDraft, callerUid }) {
-  const context = [
-    listingTitle ? `Listing: "${listingTitle}"` : null,
-    listingSummary ? `Listing summary: ${listingSummary}` : null,
-    offerAmount ? `Offer amount: ${offerAmount}` : null,
-    userDraft ? `User's rough draft to improve: "${userDraft}"` : 'User has not written a draft yet — write one from scratch.',
-  ].filter(Boolean).join('\n');
-
-  const result = await callWithFallback(CHAINS.dealMessageAssist, {
-    messages: [
-      { role: 'system', content: DEAL_MESSAGE_SYSTEM },
-      { role: 'user', content: context },
-    ],
-    temperature: 0.6,
-    max_tokens: 300,
-  });
-
-  return { message: (result.content || '').trim(), model: result.usedModel };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 5 — Reports/disputes support-assist triage
-//
-// Per product decision: the AI does NOT move money, ban users, or change
-// dispute/report status on its own — a marketplace refund/ban is too
-// consequential to hand to an LLM's judgment call unsupervised, especially
-// since verifying "who's actually at fault" often requires checking whether
-// delivered code/product genuinely works, which text analysis can't confirm.
-// Instead, the AI reads the last 10 TEXT messages of the deal chat (image/
-// file messages are skipped from its input — token budget — but counted so
-// the agent knows more evidence exists) and writes a severity flag + plain-
-// English summary + suggested next step onto the report/dispute doc. A
-// human on the support team still makes and executes the actual call.
-// ════════════════════════════════════════════════════════════════════════
-
-// SUPPORT-ASSIST TRIAGE — this does NOT move money, ban users, or change
-// dispute/report status. It reads the last 10 TEXT messages of the deal
-// chat (skipping images/files — just noting they exist) plus the filed
-// reason, and writes a support-facing summary: severity flag + a plain-
-// English recap + a suggested next step. A human on the support team reads
-// this and decides/executes the actual action. This keeps the AI's job to
-// what it can reliably do (summarize a conversation) rather than what it
-// can't safely verify alone (whether delivered code/product actually works,
-// or who's "at fault" in a way that should move real money automatically).
-const TRIAGE_SYSTEM = `
-You are a support-assist triage tool for Siterifty, an escrow-based marketplace. You are NOT deciding the outcome — a human support agent will read your summary and decide. Your job is to make their job fast.
-
-You'll be given: the dispute/report reason, and the last up to 10 text messages exchanged between the buyer and seller in their deal chat (if available).
-
-Respond ONLY with strict JSON, no markdown:
-{
-  "severity": "low" | "medium" | "high",
-  "summary": "<3-5 sentence plain-English recap of what happened, from the chat evidence, written for a support agent who hasn't read the chat yet>",
-  "suggestedAction": "<one short sentence: what a reasonable next step looks like, e.g. 'Ask seller for delivery proof' or 'Likely straightforward refund — buyer never received access'>",
-  "flags": ["<short tag>", ...]
-}
-
-Guidance:
-- "high" severity = large sums, clear-cut bad behavior (ghosting, credential theft, abusive language), or urgent buyer/seller safety concern.
-- "low" severity = minor miscommunication, first-time/small dispute, or insufficient info to tell.
-- flags examples: "no_delivery", "seller_unresponsive", "buyer_pressuring", "credential_request_offplatform", "possible_scam_language", "insufficient_evidence".
-- Do NOT recommend refunding or releasing funds as a final decision — only as a suggestion for the agent to verify. Do NOT claim to know whether delivered code/product actually works — you cannot verify that from chat text alone.
-- Be honest if the chat evidence is too thin to say anything useful — a short accurate "not enough information" is better than a confident guess.
-`;
-
-// Fetch the last N TEXT-only messages from a deal chat, oldest-first, for
-// the AI to read. Images/files are skipped from the model input (it can't
-// see them) but we note how many existed so the agent knows evidence exists.
-async function getRecentChatTextMessages(chatRoomId, limit = 10) {
-  if (!chatRoomId) return { messages: [], nonTextCount: 0 };
-  try {
-    const snap = await db.collection('dealChats').doc(chatRoomId).collection('messages')
-      .orderBy('createdAt', 'desc').limit(40).get(); // pull a bit extra so we can filter to text-only and still get `limit`
-    let nonTextCount = 0;
-    const textMsgs = [];
-    for (const d of snap.docs) {
-      const v = d.data();
-      if (v.type && v.type !== 'text') { nonTextCount++; continue; }
-      if (!v.text) continue;
-      textMsgs.push({ uid: v.uid, text: String(v.text).slice(0, 600), createdAt: v.createdAt || null });
-      if (textMsgs.length >= limit) break;
-    }
-    return { messages: textMsgs.reverse(), nonTextCount }; // oldest-first for the model
-  } catch (err) {
-    console.error('[aistudio] failed to read chat history for triage:', err.message);
-    return { messages: [], nonTextCount: 0 };
-  }
-}
-
-async function handleTriage({ kind, reportId, disputeId, evidence, callerUid }) {
-  const docId = reportId || disputeId;
-  if (!docId || !evidence) throw httpError(400, 'reportId/disputeId and evidence are required');
-
-  const collection = kind === 'dispute' ? 'disputes' : 'reports';
-
-  const { messages: chatMessages, nonTextCount } = await getRecentChatTextMessages(evidence.chatRoomId, 10);
-  const transcript = chatMessages.length
-    ? chatMessages.map(m => `[${m.uid === evidence.sellerUid ? 'seller' : m.uid === evidence.buyerUid ? 'buyer' : m.uid}]: ${m.text}`).join('\n')
-    : '(no text messages available)';
-
-  const result = await callWithFallback(CHAINS.reportsTriage, {
-    messages: [
-      { role: 'system', content: TRIAGE_SYSTEM },
-      { role: 'user', content: `Case type: ${kind}\nFiled reason/evidence:\n${JSON.stringify(evidence, null, 2)}\n\nLast ${chatMessages.length} text messages in the deal chat (oldest first)${nonTextCount ? ` — plus ${nonTextCount} non-text message(s) (image/file) not shown here` : ''}:\n${transcript}` },
-    ],
-    temperature: 0.2,
-    max_tokens: 400,
-  });
-
-  let analysis;
-  try {
-    analysis = JSON.parse((result.content || '').replace(/```json|```/g, '').trim());
-  } catch {
-    analysis = { severity: 'medium', summary: 'Could not parse AI output — please review manually.', suggestedAction: 'Manual review needed.', flags: ['ai_parse_error'] };
-  }
-
-  // Support-facing fields only — status is deliberately left untouched so a
-  // human on the team still opens and resolves this the normal way. No money
-  // moves, no bans, nothing auto-applied.
-  await db.collection(collection).doc(docId).set({
-    aiSeverity: analysis.severity || 'medium',
-    aiSummary: analysis.summary || '',
-    aiSuggestedAction: analysis.suggestedAction || '',
-    aiFlags: Array.isArray(analysis.flags) ? analysis.flags : [],
-    aiModel: result.usedModel,
-    aiTriagedAt: FieldValue.serverTimestamp(),
-    aiChatMessagesSeen: chatMessages.length,
-    aiNonTextMessagesSkipped: nonTextCount,
-  }, { merge: true });
-
-  return {
-    severity: analysis.severity,
-    summary: analysis.summary,
-    suggestedAction: analysis.suggestedAction,
-    flags: analysis.flags,
-    model: result.usedModel,
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE 6 (bonus) — Image reading
-// For listing screenshots or dispute evidence photos. Gemini-only (vision).
-// ════════════════════════════════════════════════════════════════════════
-
-async function handleImageRead({ imageBase64, mimeType, question }) {
-  if (!imageBase64) throw httpError(400, 'imageBase64 required');
-  const result = await callWithFallback(CHAINS.vision, {
-    messages: [
-      { role: 'system', content: 'You read images uploaded to a marketplace (listing screenshots or dispute evidence). Describe factually what you see. Do not speculate about intent beyond what is visibly shown.' },
-      { role: 'user', content: question || 'Describe what is shown in this image, factually and concisely.' },
-    ],
-    imageParts: [{ inline_data: { mime_type: mimeType || 'image/png', data: imageBase64 } }],
-    max_tokens: 500,
-  });
-  return { description: result.content, model: result.usedModel };
-}
-
-// ── Reported-content image check ──
-// Deliberately scoped tight: ONE image, only for content that a human has
-// already flagged (a reported listing, or dispute evidence) — never run
-// across every image on every new listing. Vision (Gemini) daily quotas here
-// are ~20 requests/day per model in the fallback chain, so this only stays
-// usable if call volume matches "occasional reported item," not "every
-// upload." Callers must pass a single imageUrl; this function does not
-// accept or loop over an array, by design.
-async function handleAnalyzeReportedImage({ imageUrl, context, reportId, disputeId }) {
-  if (!imageUrl || typeof imageUrl !== 'string') throw httpError(400, 'imageUrl (single URL) is required');
-
-  let imageBase64, mimeType;
-  try {
-    const imgRes = await fetch(imageUrl);
-    if (!imgRes.ok) throw new Error(`image fetch failed: ${imgRes.status}`);
-    mimeType = imgRes.headers.get('content-type') || 'image/jpeg';
-    const buf = Buffer.from(await imgRes.arrayBuffer());
-    imageBase64 = buf.toString('base64');
-  } catch (err) {
-    throw httpError(502, `Could not fetch image for analysis: ${err.message}`);
-  }
-
-  const result = await callWithFallback(CHAINS.vision, {
-    messages: [
-      { role: 'system', content: `You review a single image from a marketplace listing that has been reported or is part of a dispute. Judge ONLY appropriateness/policy concerns — not whether the underlying product is good. Respond ONLY with strict JSON, no markdown:
-{"appropriate": true|false, "concerns": ["<short tag>", ...], "summary": "<1-2 sentence factual description>"}
-Concern tags to use when relevant: "explicit_content", "violence", "misleading_stock_photo", "unrelated_to_listing", "contains_personal_info", "copyright_watermark_mismatch", "none".
-Be factual — do not guess intent beyond what's visibly in the image.` },
-      { role: 'user', content: context ? `Context: ${context}\n\nReview this image.` : 'Review this image.' },
-    ],
-    imageParts: [{ inline_data: { mime_type: mimeType, data: imageBase64 } }],
-    max_tokens: 300,
-  });
-
-  let analysis;
-  try {
-    analysis = JSON.parse((result.content || '').replace(/```json|```/g, '').trim());
-  } catch {
-    analysis = { appropriate: null, concerns: ['ai_parse_error'], summary: 'Could not parse AI output — please review manually.' };
-  }
-
-  // Write the verdict back onto whichever doc this check was triggered for,
-  // same pattern as handleTriage — support-facing only, no auto-action.
-  const docId = reportId || disputeId;
-  if (docId) {
-    const collection = disputeId ? 'disputes' : 'reports';
-    await db.collection(collection).doc(docId).set({
-      aiImageAppropriate: analysis.appropriate,
-      aiImageConcerns: Array.isArray(analysis.concerns) ? analysis.concerns : [],
-      aiImageSummary: analysis.summary || '',
-      aiImageModel: result.usedModel,
-      aiImageCheckedAt: FieldValue.serverTimestamp(),
-    }, { merge: true }).catch(err => console.error('[aistudio] failed to write image verdict:', err.message));
-  }
-
-  return { ...analysis, model: result.usedModel };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE — Feedback suggestion dedupe tiebreaker
-//
-// feedback.js does all duplicate-detection with free local text similarity
-// (token overlap + character trigrams) and only calls this when two
-// suggestions score in a genuine gray zone — not obviously the same idea,
-// not obviously different. This keeps the call rare and the prompt trivial:
-// a single yes/no judgment on two short strings.
-// ════════════════════════════════════════════════════════════════════════
-
-const FEEDBACK_DEDUPE_SYSTEM = `
-You compare two short user-submitted feature/change suggestions for a marketplace app and judge whether they are asking for the SAME underlying change, even if worded differently.
-
-Respond ONLY with strict JSON, no markdown:
-{"sameRequest": true|false, "reason": "<one short sentence>"}
-
-Treat them as the SAME request if a developer would reasonably build one fix/feature that satisfies both. Treat them as DIFFERENT if they target different parts of the product, or one is clearly broader/narrower in a way that isn't just phrasing.
-`;
-
-async function handleFeedbackDedupe({ textA, textB }) {
-  if (!textA || !textB) throw httpError(400, 'textA and textB are required');
-
-  const result = await callWithFallback(CHAINS.feedbackDedupe, {
-    messages: [
-      { role: 'system', content: FEEDBACK_DEDUPE_SYSTEM },
-      { role: 'user', content: `Suggestion A: "${textA}"\nSuggestion B: "${textB}"` },
-    ],
-    temperature: 0.1,
-    max_tokens: 60,
-  });
-
-  let parsed;
-  try {
-    const cleaned = (result.content || '').replace(/```json|```/g, '').trim();
-    parsed = JSON.parse(cleaned);
-  } catch {
-    parsed = { sameRequest: false, reason: 'Could not parse classifier output — defaulting to distinct.' };
-  }
-  return { sameRequest: !!parsed.sameRequest, reason: parsed.reason || '', model: result.usedModel };
-}
-
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE — "Recommended for you" listings panel (formerly /api/aisearch.js)
-//
-// Zero-input personalized recommender, NOT a text query box — plain
-// keyword/type search still lives in the regular search bar. No text-model
-// call here at all; ranking is a plain in-memory score over Firestore
-// listings, so it's folded in here purely to stay under the hobby-plan
-// serverless function count, not because it shares any model/provider code
-// with the rest of aistudio.js.
-//
-// Ranking signals combined into one score per listing:
-//   - recency:  freshness boost that decays over ~14 days
-//   - saves:    log-scaled popularity (so one viral listing can't dominate
-//               every ranking)
-//   - boost:    sellers with an active `boostedUntil` get a flat multiplier
-//   - affinity: if the caller is signed in, bonus for listing types/
-//               categories matching their users/{uid}/savedListings.
-//               Signed-out callers just get the non-personalized ranking.
-//
-// Results are then diversified (round-robin across types) so the first
-// page doesn't clump same-type listings together.
-//
-// Base (non-personalized) scores are cached for BASE_CACHE_MS so repeated
-// opens don't re-scan Firestore every time; affinity is cheap and always
-// computed fresh per request since it depends on the caller.
-// ════════════════════════════════════════════════════════════════════════
-
-const RECS_RESULT_LIMIT = 24;
-const RECS_BASE_CACHE_MS = 60 * 1000;
-const RECS_RECENCY_HALFLIFE_DAYS = 14;
-const RECS_BOOST_MULTIPLIER = 1.6;
-const RECS_AFFINITY_BONUS = 0.9;
-
-function recsToMillis(v) {
-  if (!v) return 0;
-  if (typeof v === 'number') return v;
-  if (typeof v.toMillis === 'function') return v.toMillis();
-  if (typeof v.seconds === 'number') return v.seconds * 1000;
-  return 0;
-}
-function recsIsBoostedNow(listing) {
-  return recsToMillis(listing.boostedUntil) > Date.now();
-}
-function recsRecencyScore(listing) {
-  const createdMs = recsToMillis(listing.createdAt);
-  if (!createdMs) return 0;
-  const ageDays = Math.max(0, (Date.now() - createdMs) / 86400000);
-  return Math.pow(0.5, ageDays / RECS_RECENCY_HALFLIFE_DAYS);
-}
-function recsSavesScore(listing) {
-  const saves = typeof listing.saves === 'number' ? listing.saves : 0;
-  return Math.log10(saves + 1);
-}
-function recsListingCategory(v) {
-  return v.category || v.tech?.frontend || v.tech?.backend || '';
-}
-function recsToLite(id, v) {
-  return {
-    id,
-    title: v.title || 'Untitled',
-    type: v.type || 'website',
-    price: typeof v.financials?.price === 'number' ? v.financials.price : null,
-    saves: typeof v.saves === 'number' ? v.saves : 0,
-    boosted: recsIsBoostedNow(v),
-  };
-}
-
-let _recsBaseCache = null; // { at, scored: [{id, v, base}] }
-
-async function recsGetBaseScored() {
-  if (_recsBaseCache && Date.now() - _recsBaseCache.at < RECS_BASE_CACHE_MS) {
-    return _recsBaseCache.scored;
-  }
-  const snap = await db.collection('listings').where('status', '==', 'active').get();
-  const scored = snap.docs.map(d => {
-    const v = d.data();
-    const base = recsRecencyScore(v) + recsSavesScore(v) * (recsIsBoostedNow(v) ? RECS_BOOST_MULTIPLIER : 1);
-    return { id: d.id, v, base };
-  });
-  _recsBaseCache = { at: Date.now(), scored };
-  return scored;
-}
-
-async function recsGetUserAffinity(uid) {
-  const types = new Map();
-  const categories = new Map();
-  try {
-    const snap = await db.collection('users').doc(uid).collection('savedListings').get();
-    snap.forEach(d => {
-      const v = d.data();
-      if (v.type) types.set(v.type, (types.get(v.type) || 0) + 1);
-      if (v.category) categories.set(v.category, (categories.get(v.category) || 0) + 1);
+    tx.update(userRef, {
+      plan:                 plan,
+      paypalSubscriptionId: subscriptionID,
+      planActivatedAt:      FieldValue.serverTimestamp(),
+      planRenewedAt:        FieldValue.serverTimestamp(),
+      planStatus:           'active',
     });
-  } catch (err) {
-    console.error('[aistudio] recommendations affinity lookup failed', err.message);
-  }
-  return { types, categories };
-}
 
-function recsDiversify(scoredSorted, limit) {
-  const byType = new Map();
-  for (const item of scoredSorted) {
-    const t = item.v.type || 'website';
-    if (!byType.has(t)) byType.set(t, []);
-    byType.get(t).push(item);
-  }
-  const buckets = [...byType.values()];
-  const out = [];
-  let i = 0;
-  while (out.length < limit && buckets.some(b => i < b.length)) {
-    for (const bucket of buckets) {
-      if (i < bucket.length) out.push(bucket[i]);
-      if (out.length >= limit) break;
+    // Keep planIndex/{free,premium} in sync with the plan write above — see
+    // listings.js's handlePremiumSellers, which reads planIndex/premium
+    // instead of scanning the whole users collection. starter/growth/pro
+    // all share one 'premium' bucket (the strip doesn't distinguish
+    // between paid tiers), so a starter→pro upgrade, for example, is a
+    // no-op here — the uid was already in planIndex/premium. Only a
+    // free→paid transition actually needs to move the uid between docs.
+    if (oldPlan === 'free') {
+      tx.set(db.collection('planIndex').doc('free'), {
+        uids: FieldValue.arrayRemove(uid),
+      }, { merge: true });
+      tx.set(db.collection('planIndex').doc('premium'), {
+        uids: FieldValue.arrayUnion(uid),
+      }, { merge: true });
     }
-    i++;
-  }
-  return out;
-}
 
-// callerUid may be null here (signed-out callers still get non-personalized
-// recommendations) — this is the one action in this file where auth is
-// optional rather than required; see OPTIONAL_AUTH_ACTIONS in the handler.
-async function handleRecommendations({ callerUid }) {
-  const baseScored = await recsGetBaseScored();
+    // ── Pay referrer 30% of plan price (first activation only) ──
+    if (!alreadyPaidReferral && referredBy && bonus > 0) {
+      // Look up referrer by username (stored as usernameLower on signup)
+      const refSnap = await db.collection('users')
+        .where('usernameLower', '==', referredBy)
+        .limit(1)
+        .get();
 
-  if (!baseScored.length) {
-    return {
-      mode: 'recommendations',
-      reply: "No active listings yet — check back soon.",
-      listingIds: [],
-      listings: [],
-      personalized: false,
-    };
-  }
+      if (!refSnap.empty) {
+        const refDoc  = refSnap.docs[0];
+        const refRef  = refDoc.ref;
+        const refData = refDoc.data();
 
-  let affinity = null;
-  if (callerUid) affinity = await recsGetUserAffinity(callerUid);
+        // Credit referrer wallet — referral earnings are withdrawable, so
+        // both walletBalance and withdrawableBalance are credited.
+        const refBal    = parseFloat((refData.walletBalance || 0).toFixed(2));
+        const newRefBal = parseFloat((refBal + bonus).toFixed(2));
+        const refWithdrawable    = parseFloat((refData.withdrawableBalance || 0).toFixed(2));
+        const newRefWithdrawable = parseFloat((refWithdrawable + bonus).toFixed(2));
 
-  const scored = baseScored.map(item => {
-    let score = item.base;
-    if (affinity) {
-      const t = item.v.type;
-      const c = recsListingCategory(item.v);
-      if (t && affinity.types.has(t)) score += RECS_AFFINITY_BONUS;
-      if (c && affinity.categories.has(c)) score += RECS_AFFINITY_BONUS;
+        tx.update(refRef, {
+          walletBalance:       newRefBal,
+          withdrawableBalance: newRefWithdrawable,
+          referralCount:       FieldValue.increment(1),
+          referralEarned:      FieldValue.increment(bonus),
+        });
+
+        // Referrer transaction record
+        tx.set(refRef.collection('transactions').doc(), {
+          type:      'referral_bonus',
+          amount:    bonus,
+          label:     `Referral bonus · ${plan} plan (${(REFERRAL_COMMISSION_RATE * 100).toFixed(0)}%)`,
+          referredUid: uid,
+          status:    'completed',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+
+        // Notify referrer
+        tx.set(refRef.collection('notifications').doc(), {
+          type:      'referral_earned',
+          title:     'Referral bonus received! 🎉',
+          body:      `Someone you referred just subscribed to the ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan. +$${bonus.toFixed(2)} added to your wallet.`,
+          read:      false,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+
+        // Mark bonus as paid on the new subscriber's doc so we never double-pay
+        tx.update(userRef, { referralBonusPaid: true });
+
+        paidReferrerUid = refDoc.id;
+        console.log(`[referral] Paid $${bonus} to referrer uid=${refDoc.id} for new ${plan} subscriber uid=${uid}`);
+      } else {
+        console.warn(`[referral] Referrer username="${referredBy}" not found — no bonus paid`);
+      }
     }
-    return { ...item, score };
   });
 
-  scored.sort((a, b) => b.score - a.score);
-  const picked = recsDiversify(scored, RECS_RESULT_LIMIT);
-  const listings = picked.map(item => recsToLite(item.id, item.v));
-  const personalized = !!(affinity && (affinity.types.size || affinity.categories.size));
+  if (paidReferrerUid) await maybeAutoWithdraw(db, paidReferrerUid);
 
-  return {
-    mode: 'recommendations',
-    reply: personalized
-      ? 'Recommended for you, based on what you\u2019ve saved.'
-      : 'Recommended listings for you right now.',
-    listingIds: listings.map(l => l.id),
-    listings,
-    personalized,
-  };
+  return res.status(200).json({ success: true, plan });
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE — In-app feedback suggestion board (formerly /api/feedback.js)
-//
-// Folded in here for the same hobby-plan function-count reason as
-// recommendations above — this one DOES touch the feedback-dedupe AI
-// tiebreaker, but since it now lives in the same process/file, that call
-// is a direct function call below, not an HTTP round-trip to itself.
-//
-// What this does:
-//   1. Users submit short feature/change suggestions.
-//   2. Before saving, compare the new text against existing OPEN
-//      suggestions using cheap local text-similarity (no external API
-//      call, no cost, no embeddings). Clear duplicates bump the existing
-//      suggestion's voteCount instead of creating a new row.
-//   3. Only a genuine gray-zone pair (not obviously same, not obviously
-//      different) calls handleFeedbackDedupe() as a tiebreaker — rare, so
-//      it stays cheap.
-//   4. Popular suggestions bubble to the top for the team via
-//      'list-for-review' (admin-only).
-//
-// Firestore collections:
-//
-// "feedbackSuggestions" (the live, weekly-reset board)
-//   { textNormalized, textOriginal, votes: { [uid]: score }, voteCount
-//     (= number of voters), totalScore (= sum of votes), status:
-//     'open'|'planned'|'done'|'declined', createdAt, updatedAt,
-//     lastVotedAt, submittedByUid, aiMatchedCount }
-//
-//   Voting scale (each voter can cast ONE vote per suggestion, changeable):
-//     3  = "Fantastic idea"
-//     2  = "Nice idea"
-//     1  = "Average"
-//    -1  = "Bad idea"
-//   totalScore is just the sum of every cast vote. Suggestions are ranked
-//   by totalScore, highest first.
-//
-// "feedbackArchive" ("What We're Working On" — permanent, never deleted)
-//   { textOriginal, totalScore, voteCount, cycleEndedAt, archivedAt }
-//   Written to (never overwritten) every time a 7-day cycle ends — the
-//   week's top 3 open suggestions get appended here, so this list only
-//   ever grows, +3 per week, regardless of how large the live board gets.
-//
-// "feedbackCycle/current" (single doc — the 7-day cycle clock)
-//   { cycleStart: Timestamp }
-//   cycleStart is set the first time anyone hits the board (effectively
-//   "when this feature goes live"), and again every time a cycle resets.
-//   The countdown shown to users is always cycleStart + 7 days.
-// ════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// Webhook — PayPal calls this monthly for renewals, cancellations, failures
+// Register URL in PayPal Developer Dashboard: https://siterifty.com/api/paypal
+// Events to subscribe: PAYMENT.SALE.COMPLETED, BILLING.SUBSCRIPTION.*
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleWebhook(req, res) {
+  const rawBody = typeof req.body === 'string'
+    ? req.body
+    : JSON.stringify(req.body);
 
-const FB_CYCLE_DAYS = 7;
-const FB_CYCLE_MS = FB_CYCLE_DAYS * 24 * 60 * 60 * 1000;
-const FB_TOP_N = 3;
-
-const FB_VOTE_SCORES = { fantastic: 3, nice: 2, average: 1, bad: -1 };
-
-function fbSumVotes(votesMap) {
-  return Object.values(votesMap || {}).reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
-}
-
-function fbVoteBreakdown(votesMap) {
-  const out = { fantastic: 0, nice: 0, average: 0, bad: 0 };
-  for (const v of Object.values(votesMap || {})) {
-    if (v === 3) out.fantastic++;
-    else if (v === 2) out.nice++;
-    else if (v === 1) out.average++;
-    else if (v === -1) out.bad++;
-  }
-  return out;
-}
-
-// Ensures the cycle-clock doc exists, and returns its cycleStart (ms).
-// Does NOT perform the reset itself — see fbMaybeRunReset() for that.
-async function fbGetOrInitCycleStart() {
-  const ref = db.collection('feedbackCycle').doc('current');
-  const snap = await ref.get();
-  if (snap.exists && snap.data().cycleStart) {
-    return { ref, startMs: snap.data().cycleStart.toMillis() };
-  }
-  const now = FieldValue.serverTimestamp();
-  await ref.set({ cycleStart: now }, { merge: true });
-  const fresh = await ref.get();
-  return { ref, startMs: fresh.data().cycleStart.toMillis() };
-}
-
-// Client-triggered reset check: called whenever someone opens the feedback
-// board. If the 7-day window has elapsed, this:
-//   1. Grabs the current top 3 OPEN suggestions by totalScore.
-//   2. Appends them to feedbackArchive (permanent — "What We're Working On").
-//   3. Deletes every remaining feedbackSuggestions doc (all of them, not
-//      just non-top-3 — the whole board resets empty).
-//   4. Restarts the cycle clock from now.
-// Because this only fires when a real visit happens after expiry, a reset
-// can run late (no one to trigger it exactly on time) but never early, and
-// never runs twice for the same cycle (the cycle clock is what's checked,
-// not a fixed schedule).
-async function fbMaybeRunReset() {
-  const { ref: cycleRef, startMs } = await fbGetOrInitCycleStart();
-  const now = Date.now();
-  const msRemaining = (startMs + FB_CYCLE_MS) - now;
-  if (msRemaining > 0) {
-    return { ranReset: false, cycleStart: startMs, msRemaining };
+  const valid = await verifyWebhookSignature(req.headers, rawBody);
+  if (!valid) {
+    console.warn('[webhook] Invalid PayPal signature — rejected');
+    return res.status(401).json({ error: 'Invalid webhook signature' });
   }
 
-  // Expired — run the reset.
-  const openSnap = await db.collection('feedbackSuggestions')
-    .where('status', '==', 'open')
-    .get();
+  const event = typeof req.body === 'string' ? JSON.parse(rawBody) : req.body;
+  const { event_type, resource } = event;
 
-  const scored = openSnap.docs
-    .map(d => {
-      const data = d.data();
-      return { id: d.id, data, totalScore: typeof data.totalScore === 'number' ? data.totalScore : fbSumVotes(data.votes) };
-    })
-    .sort((a, b) => b.totalScore - a.totalScore);
+  console.log('[webhook]', event_type);
 
-  const top3 = scored.slice(0, FB_TOP_N);
+  const db = getAdminDb();
 
+  async function findUserBySubId(subId) {
+    const snap = await db.collection('users')
+      .where('paypalSubscriptionId', '==', subId)
+      .limit(1)
+      .get();
+    return snap.empty ? null : snap.docs[0];
+  }
+
+  switch (event_type) {
+
+    // Monthly charge succeeded — keep planRenewedAt fresh
+    case 'PAYMENT.SALE.COMPLETED': {
+      const subId = resource.billing_agreement_id;
+      if (!subId) break;
+      const userDoc = await findUserBySubId(subId);
+      if (!userDoc) break;
+      await db.collection('users').doc(userDoc.id).update({
+        planStatus:    'active',
+        planRenewedAt: FieldValue.serverTimestamp(),
+      });
+      await db.collection('users').doc(userDoc.id)
+        .collection('transactions').add({
+          type:      'plan_renewal',
+          amount:    parseFloat(resource.amount?.total || 0),
+          label:     `Plan renewal · ${resource.id}`,
+          status:    'completed',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      break;
+    }
+
+    // Cancelled or expired — drop back to free
+    case 'BILLING.SUBSCRIPTION.CANCELLED':
+    case 'BILLING.SUBSCRIPTION.EXPIRED': {
+      const userDoc = await findUserBySubId(resource.id);
+      if (!userDoc) break;
+      const uid = userDoc.id;
+      const batch = db.batch();
+      batch.update(db.collection('users').doc(uid), {
+        plan:            'free',
+        planStatus:      'cancelled',
+        planCancelledAt: FieldValue.serverTimestamp(),
+      });
+      // Keep planIndex/{free,premium} in sync — see handleActivateSub's
+      // comment on this same scheme. userDoc here already came from the
+      // findUserBySubId query above, so no extra read is needed to know
+      // this user was on a paid plan (that's the only way they'd have a
+      // paypalSubscriptionId to have matched that query in the first
+      // place).
+      batch.set(db.collection('planIndex').doc('premium'), {
+        uids: FieldValue.arrayRemove(uid),
+      }, { merge: true });
+      batch.set(db.collection('planIndex').doc('free'), {
+        uids: FieldValue.arrayUnion(uid),
+      }, { merge: true });
+      await batch.commit();
+      break;
+    }
+
+    // Payment failed — mark so UI can warn the user
+    case 'BILLING.SUBSCRIPTION.PAYMENT.FAILED': {
+      const userDoc = await findUserBySubId(resource.id);
+      if (!userDoc) break;
+      await db.collection('users').doc(userDoc.id).update({
+        planStatus: 'payment_failed',
+      });
+      break;
+    }
+
+    // Re-activated after lapse
+    case 'BILLING.SUBSCRIPTION.ACTIVATED':
+    case 'BILLING.SUBSCRIPTION.RE-ACTIVATED': {
+      const userDoc = await findUserBySubId(resource.id);
+      if (!userDoc) break;
+      await db.collection('users').doc(userDoc.id).update({
+        planStatus:    'active',
+        planRenewedAt: FieldValue.serverTimestamp(),
+      });
+      break;
+    }
+
+    default:
+      break;
+  }
+
+  // PayPal retries if it doesn't get a 200
+  return res.status(200).json({ received: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cancel-sub  { idToken }  →  { success }
+// 1. Cancels the PayPal subscription via API so billing actually stops.
+// 2. Updates Firestore via Admin SDK — frontend never touches it.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleCancelSub(req, res) {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+
+  // 1. Verify Firebase identity
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  // 2. Look up the stored PayPal subscription ID
+  const db = getAdminDb();
+  const userSnap = await db.collection('users').doc(uid).get();
+  if (!userSnap.exists) return res.status(404).json({ error: 'User not found' });
+
+  const { paypalSubscriptionId, plan } = userSnap.data();
+
+  if (!paypalSubscriptionId) {
+    return res.status(400).json({ error: 'No active subscription found' });
+  }
+  if (plan === 'free') {
+    return res.status(400).json({ error: 'Already on the free plan' });
+  }
+
+  // 3. Cancel with PayPal — this stops future billing
+  const token = await getPayPalToken();
+  const cancelRes = await fetch(
+    `${ppBase()}/v1/billing/subscriptions/${paypalSubscriptionId}/cancel`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({ reason: 'Customer requested cancellation' }),
+    }
+  );
+
+  // PayPal returns 204 No Content on success
+  if (!cancelRes.ok && cancelRes.status !== 204) {
+    const err = await cancelRes.text();
+    console.error('PayPal cancel-sub error:', cancelRes.status, err);
+    return res.status(502).json({ error: 'PayPal cancellation failed' });
+  }
+
+  // 4. Update Firestore via Admin SDK
   const batch = db.batch();
-  const archivedAt = FieldValue.serverTimestamp();
-  for (const item of top3) {
-    const archiveRef = db.collection('feedbackArchive').doc();
-    batch.set(archiveRef, {
-      textOriginal: item.data.textOriginal,
-      totalScore: item.totalScore,
-      voteCount: Object.keys(item.data.votes || {}).length,
-      cycleEndedAt: archivedAt,
-      archivedAt,
-    });
-  }
-  // Delete ALL suggestions (including the top 3 just archived, and every
-  // non-top-3 one) — the live board always comes back empty.
-  for (const doc of openSnap.docs) {
-    batch.delete(doc.ref);
-  }
-  // Also sweep any non-open (planned/done/declined) leftovers so the board
-  // fully clears each cycle rather than accumulating old triaged rows.
-  const nonOpenSnap = await db.collection('feedbackSuggestions')
-    .where('status', '!=', 'open')
-    .get();
-  for (const doc of nonOpenSnap.docs) {
-    batch.delete(doc.ref);
-  }
-
-  batch.set(cycleRef, { cycleStart: archivedAt }, { merge: true });
+  batch.update(db.collection('users').doc(uid), {
+    plan:            'free',
+    planStatus:      'cancelled',
+    planCancelledAt: FieldValue.serverTimestamp(),
+  });
+  // Keep planIndex/{free,premium} in sync — see handleActivateSub's comment
+  // on this scheme. The plan==='free' check above already guarantees this
+  // uid was on a paid plan, so this is always a premium→free move, no
+  // branching needed.
+  batch.set(db.collection('planIndex').doc('premium'), {
+    uids: FieldValue.arrayRemove(uid),
+  }, { merge: true });
+  batch.set(db.collection('planIndex').doc('free'), {
+    uids: FieldValue.arrayUnion(uid),
+  }, { merge: true });
   await batch.commit();
 
-  const freshCycle = await cycleRef.get();
-  const newStartMs = freshCycle.data().cycleStart.toMillis();
-  return { ranReset: true, archivedCount: top3.length, cycleStart: newStartMs, msRemaining: FB_CYCLE_MS };
-}
-// ════════════════════════════════════════════════════════════════════════
-
-const FB_STOPWORDS = new Set([
-  'a','an','the','is','are','was','were','be','been','being','to','of','in',
-  'on','for','and','or','but','it','this','that','these','those','with',
-  'as','at','by','from','so','if','than','then','there','their','they',
-  'i','we','you','my','our','your','me','us','can','could','would','should',
-  'will','shall','do','does','did','please','pls','plz','add','make','want',
-  'wish','need','like','also','just','really','very','some','more','app',
-  'feature','option','ability','allow','let','have','has','get','when',
-]);
-
-function fbNormalize(text) {
-  return String(text || '')
-    .toLowerCase()
-    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-function fbTokenSet(normText) {
-  return new Set(normText.split(' ').filter(w => w.length > 1 && !FB_STOPWORDS.has(w)));
-}
-function fbJaccard(setA, setB) {
-  if (!setA.size && !setB.size) return 0;
-  let intersection = 0;
-  for (const t of setA) if (setB.has(t)) intersection++;
-  const union = setA.size + setB.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-function fbTrigrams(normText) {
-  const s = `  ${normText.replace(/\s+/g, ' ')} `;
-  const grams = new Set();
-  for (let i = 0; i < s.length - 2; i++) grams.add(s.slice(i, i + 3));
-  return grams;
-}
-function fbSimilarity(textA, textB) {
-  const normA = fbNormalize(textA);
-  const normB = fbNormalize(textB);
-  if (!normA || !normB) return 0;
-  if (normA === normB) return 1;
-  const jac = fbJaccard(fbTokenSet(normA), fbTokenSet(normB));
-  const tri = fbJaccard(fbTrigrams(normA), fbTrigrams(normB));
-  return Math.max(jac, tri);
+  return res.status(200).json({ success: true });
 }
 
-const FB_DUPLICATE_THRESHOLD = 0.62;
-const FB_GRAY_ZONE_MIN = 0.38;
+// ─────────────────────────────────────────────────────────────────────────────
+// withdraw  { idToken, amount, method?, scheduledFor?, ...method-specific fields }
+//   method: 'paypal'  → paypalEmail
+//   method: 'bank'    → bankAccountName, bankAccountNumber, bankRoutingNumber, bankAccountType
+//   method: 'bitcoin' → bitcoinAddress
+//   →  { success, newBalance, newWithdrawable, fee, receive }
+//
+// Withdrawable balance is tracked SEPARATELY from walletBalance
+// (withdrawableBalance on the user doc). Only money that entered the wallet
+// from a sale/escrow-release, a P2P transfer receive, or a referral bonus is
+// withdrawable — deposited funds are spendable inside Siterifty (boosts,
+// escrow, sending to others) but can never be cashed back out, so
+// walletBalance always stays >= withdrawableBalance and this endpoint checks
+// withdrawableBalance specifically rather than the combined total.
+//
+// No payout is actually sent from here for any method, including Bitcoin —
+// this only validates the request, debits the balance, and files a pending
+// `withdrawals` doc with the payout details attached. Sending the money
+// (PayPal payout, bank ACH, or a BTC transfer) is a manual step done outside
+// this codebase; see handleAdminResolveWithdrawal for how a completed/failed
+// outcome gets marked afterward.
+//
+// `scheduledFor` (optional ISO date string) lets the user pick a future
+// payout date from the wallet UI; if omitted or in the past we process
+// against "as soon as possible" and store scheduledFor = null.
+//
+// NOTE — deal.js integration: escrow release (handleEscrowRelease in
+// /api/deal) also credits withdrawableBalance directly, outside this file.
+// To make auto withdrawal fire on that credit too, import maybeAutoWithdraw
+// from this module in deal.js and call `await maybeAutoWithdraw(db, sellerUid)`
+// right after a successful escrow release commits, the same way it's called
+// here after transfer/autosend-run/referral credits.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleWithdraw(req, res) {
+  const {
+    idToken,
+    amount,
+    method = 'paypal',
+    scheduledFor,
+    // PayPal
+    paypalEmail,
+    // Bank (US ACH)
+    bankAccountName,
+    bankAccountNumber,
+    bankRoutingNumber,
+    bankAccountType, // 'checking' | 'savings'
+    // Bitcoin — payouts are sent manually; we just need a valid-looking address.
+    bitcoinAddress,
+  } = req.body;
 
-// Find the best existing match for newText among open suggestions.
-async function fbFindBestMatch(newText) {
-  // where('status', '==', 'open') + orderBy('updatedAt', 'desc') requires a
-  // composite index (same situation as fbGetTopOpen below). Fall back to an
-  // in-memory filter/sort if that index hasn't been created/deployed yet,
-  // so this never hard-fails the request.
-  let snap;
-  try {
-    snap = await db.collection('feedbackSuggestions')
-      .where('status', '==', 'open')
-      .orderBy('updatedAt', 'desc')
-      .limit(300) // recent/active window — keeps this cheap as the board grows
-      .get();
-  } catch (err) {
-    if (err.message?.includes('requires an index') || err.message?.includes('FAILED_PRECONDITION')) {
-      const allSnap = await db.collection('feedbackSuggestions').get();
-      const docs = allSnap.docs
-        .filter(d => d.data().status === 'open')
-        .sort((a, b) => {
-          const at = a.data().updatedAt?.toMillis?.() ?? 0;
-          const bt = b.data().updatedAt?.toMillis?.() ?? 0;
-          return bt - at;
-        })
-        .slice(0, 300);
-      snap = { forEach: (fn) => docs.forEach(fn) };
-    } else {
-      throw err;
-    }
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+  if (!['paypal', 'bank', 'bitcoin'].includes(method)) {
+    return res.status(400).json({ error: 'Invalid payment method' });
   }
 
-  let best = null;
-  const grayZoneCandidates = [];
-
-  snap.forEach(doc => {
-    const data = doc.data();
-    const score = fbSimilarity(newText, data.textOriginal);
-    if (score >= FB_DUPLICATE_THRESHOLD) {
-      if (!best || score > best.score) best = { id: doc.id, data, score, viaAi: false };
-    } else if (score >= FB_GRAY_ZONE_MIN) {
-      grayZoneCandidates.push({ id: doc.id, data, score });
+  // Per-method payout details — each method collects the fields that
+  // actually let a human being pay the person, not a one-size-fits-all
+  // email address.
+  let payoutDetails;
+  if (method === 'paypal') {
+    if (!paypalEmail || !paypalEmail.includes('@')) {
+      return res.status(400).json({ error: 'Enter a valid PayPal email address.' });
     }
-  });
+    payoutDetails = { paypalEmail: paypalEmail.trim() };
+  } else if (method === 'bank') {
+    const name    = (bankAccountName || '').trim();
+    const acct    = (bankAccountNumber || '').trim();
+    const routing = (bankRoutingNumber || '').trim();
+    const type    = bankAccountType === 'savings' ? 'savings' : bankAccountType === 'checking' ? 'checking' : null;
 
-  if (best) return best;
+    if (!name) return res.status(400).json({ error: 'Enter the account holder name.' });
+    if (!/^\d{4,17}$/.test(acct)) return res.status(400).json({ error: 'Enter a valid account number.' });
+    if (!/^\d{9}$/.test(routing)) return res.status(400).json({ error: 'Enter a valid 9-digit routing number.' });
+    if (!type) return res.status(400).json({ error: 'Select an account type (checking or savings).' });
 
-  // Only escalate to the AI tiebreaker for the single closest gray-zone
-  // candidate — keeps this to at most one extra model call per submission.
-  if (grayZoneCandidates.length) {
-    grayZoneCandidates.sort((a, b) => b.score - a.score);
-    const top = grayZoneCandidates[0];
-    try {
-      const verdict = await handleFeedbackDedupe({ textA: newText, textB: top.data.textOriginal });
-      if (verdict.sameRequest === true) return { id: top.id, data: top.data, score: top.score, viaAi: true };
-    } catch (err) {
-      console.error('[aistudio] feedback tiebreaker failed, treating as distinct:', err.message);
-    }
-  }
-
-  return null;
-}
-
-async function handleFeedbackSubmit({ text, callerUid }) {
-  const trimmed = String(text || '').trim();
-  if (!trimmed) throw httpError(400, 'text required');
-  if (trimmed.length < 4) throw httpError(400, 'Tell us a bit more — a few words is enough.');
-  if (trimmed.length > 500) throw httpError(400, 'Keep it under 500 characters.');
-
-  // Per-user rate limit: max 20 open suggestions authored per user, so this
-  // can't be spammed into an unusable list.
-  const authoredSnap = await db.collection('feedbackSuggestions')
-    .where('submittedByUid', '==', callerUid)
-    .where('status', '==', 'open')
-    .limit(21)
-    .get();
-  if (authoredSnap.size >= 20) {
-    throw httpError(429, 'You have a lot of open suggestions already — we\'ll get to them! Try again once some are reviewed.');
-  }
-
-  const match = await fbFindBestMatch(trimmed);
-
-  if (match) {
-    const existingVotes = match.data.votes || {};
-    const alreadyVoted = Object.prototype.hasOwnProperty.call(existingVotes, callerUid);
-    if (alreadyVoted) {
-      return {
-        merged: true,
-        alreadyCounted: true,
-        suggestionId: match.id,
-        message: 'You already suggested something like this — we\'ve got it noted!',
-      };
-    }
-    // Merging into an existing suggestion still counts as the submitter
-    // liking it a lot — same +3 "Fantastic" auto-vote as a brand new one.
-    const newVotes = { ...existingVotes, [callerUid]: FB_VOTE_SCORES.fantastic };
-    const ref = db.collection('feedbackSuggestions').doc(match.id);
-    await ref.set({
-      votes: newVotes,
-      voteCount: Object.keys(newVotes).length,
-      totalScore: fbSumVotes(newVotes),
-      updatedAt: FieldValue.serverTimestamp(),
-      lastVotedAt: FieldValue.serverTimestamp(),
-      ...(match.viaAi ? { aiMatchedCount: FieldValue.increment(1) } : {}),
-    }, { merge: true });
-    return {
-      merged: true,
-      alreadyCounted: false,
-      suggestionId: match.id,
-      message: 'Someone already suggested this — we\'ve added your vote!',
+    payoutDetails = {
+      bankAccountName:   name,
+      bankAccountNumber: acct,
+      bankRoutingNumber: routing,
+      bankAccountType:   type,
     };
-  }
-
-  const newRef = db.collection('feedbackSuggestions').doc();
-  const initialVotes = { [callerUid]: FB_VOTE_SCORES.fantastic };
-  await newRef.set({
-    textOriginal: trimmed,
-    textNormalized: fbNormalize(trimmed),
-    votes: initialVotes,
-    voteCount: 1,
-    totalScore: fbSumVotes(initialVotes),
-    status: 'open',
-    submittedByUid: callerUid,
-    aiMatchedCount: 0,
-    createdAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
-    lastVotedAt: FieldValue.serverTimestamp(),
-  });
-  return {
-    merged: false,
-    suggestionId: newRef.id,
-    message: 'Thanks — added to the board!',
-  };
-}
-
-// Public: top open suggestions, ranked by totalScore (highest first), for
-// the board view in the widget. callerUid may be null (signed-out callers
-// can still browse). Also runs the 7-day cycle check first (see
-// fbMaybeRunReset) since this is the read every board-open triggers.
-async function handleFeedbackListTop({ limit, callerUid }) {
-  const cycleInfo = await fbMaybeRunReset();
-
-  // where('status', '==', 'open') + orderBy('totalScore', 'desc') requires
-  // a composite Firestore index. If it hasn't been created yet (or is
-  // still building), Firestore throws FAILED_PRECONDITION instead of
-  // silently degrading — fall back to an in-memory filter/sort over the
-  // full collection so this endpoint never crashes the caller's view.
-  // The proper fix is still to create the index via the URL in the
-  // original error message; this is just a safety net.
-  const capLimit = Math.min(limit || 50, 100);
-  let docs;
-  try {
-    const snap = await db.collection('feedbackSuggestions')
-      .where('status', '==', 'open')
-      .orderBy('totalScore', 'desc')
-      .limit(capLimit)
-      .get();
-    docs = snap.docs;
-  } catch (err) {
-    if (err.message?.includes('requires an index') || err.message?.includes('FAILED_PRECONDITION')) {
-      const allSnap = await db.collection('feedbackSuggestions').get();
-      docs = allSnap.docs
-        .filter(d => d.data().status === 'open')
-        .sort((a, b) => (b.data().totalScore || 0) - (a.data().totalScore || 0))
-        .slice(0, capLimit);
-    } else {
-      throw err;
+  } else {
+    // Bitcoin — Siterifty never processes the payout itself (see
+    // handleWithdraw's top comment: payouts are always a manual step done
+    // outside this codebase); this just needs an address that's plausibly
+    // a real BTC address so it can be sent to manually. Covers legacy
+    // (1...), P2SH (3...), and bech32 (bc1...) formats without pulling in
+    // a full base58/bech32 checksum library.
+    const addr = (bitcoinAddress || '').trim();
+    const looksValid = /^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{25,59})$/.test(addr);
+    if (!looksValid) {
+      return res.status(400).json({ error: 'Enter a valid Bitcoin wallet address.' });
     }
+    payoutDetails = { bitcoinAddress: addr };
   }
 
-  return {
-    suggestions: docs.map(d => {
-      const data = d.data();
-      const votes = data.votes || {};
-      return {
-        id: d.id,
-        text: data.textOriginal,
-        totalScore: typeof data.totalScore === 'number' ? data.totalScore : fbSumVotes(votes),
-        voteCount: Object.keys(votes).length,
-        breakdown: fbVoteBreakdown(votes),
-        myVote: callerUid && Object.prototype.hasOwnProperty.call(votes, callerUid) ? votes[callerUid] : null,
-      };
-    }),
-    cycle: {
-      cycleStart: cycleInfo.cycleStart,
-      cycleEnd: cycleInfo.cycleStart + FB_CYCLE_MS,
-      msRemaining: Math.max(0, cycleInfo.msRemaining),
-      serverNow: Date.now(),
-      justReset: !!cycleInfo.ranReset,
-    },
-  };
-}
-
-// Cast or change a vote on an existing suggestion. `score` must be one of
-// the 4 allowed values (3/2/1/-1) — see FB_VOTE_SCORES. One vote per user
-// per suggestion; casting again just overwrites their previous score
-// (so users can change their mind).
-async function handleFeedbackVoteExisting({ suggestionId, callerUid, score }) {
-  if (!suggestionId) throw httpError(400, 'suggestionId required');
-  const allowedScores = Object.values(FB_VOTE_SCORES);
-  if (!allowedScores.includes(score)) {
-    throw httpError(400, `score must be one of: ${allowedScores.join(', ')}`);
+  const amt = parseFloat(amount);
+  if (!amt || amt < 1 || amt > 10000 || !isFinite(amt)) {
+    return res.status(400).json({ error: 'Amount must be between $1 and $10,000' });
   }
-  const ref = db.collection('feedbackSuggestions').doc(suggestionId);
-  const snap = await ref.get();
-  if (!snap.exists) throw httpError(404, 'Suggestion not found');
-  const data = snap.data();
-  const votes = { ...(data.votes || {}) };
-  const alreadyCast = Object.prototype.hasOwnProperty.call(votes, callerUid);
-  const previousScore = alreadyCast ? votes[callerUid] : null;
 
-  votes[callerUid] = score;
-  const totalScore = fbSumVotes(votes);
-
-  await ref.set({
-    votes,
-    voteCount: Object.keys(votes).length,
-    totalScore,
-    updatedAt: FieldValue.serverTimestamp(),
-    lastVotedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
-
-  return {
-    voted: true,
-    changed: alreadyCast && previousScore !== score,
-    previousScore,
-    score,
-    totalScore,
-    voteCount: Object.keys(votes).length,
-    breakdown: fbVoteBreakdown(votes),
-  };
-}
-
-// Public: the permanent "What We're Working On" archive — every past
-// cycle's top 3, oldest or newest first depending on `order`. Never
-// deleted, only ever appended to (+3 per week).
-async function handleFeedbackListArchive({ limit }) {
-  const snap = await db.collection('feedbackArchive')
-    .orderBy('archivedAt', 'desc')
-    .limit(Math.min(limit || 300, 500))
-    .get();
-  return {
-    items: snap.docs.map(d => {
-      const data = d.data();
-      return {
-        id: d.id,
-        text: data.textOriginal,
-        totalScore: data.totalScore || 0,
-        voteCount: data.voteCount || 0,
-        archivedAt: data.archivedAt ? data.archivedAt.toMillis() : null,
-      };
-    }),
-  };
-}
-
-// Public: current cycle countdown info, without necessarily loading the
-// full suggestion list (used to paint the countdown/header even before the
-// board tab is opened). Also safe to call to trigger the reset check on
-// its own.
-async function handleFeedbackGetCycle() {
-  const cycleInfo = await fbMaybeRunReset();
-  return {
-    cycleStart: cycleInfo.cycleStart,
-    cycleEnd: cycleInfo.cycleStart + FB_CYCLE_MS,
-    msRemaining: Math.max(0, cycleInfo.msRemaining),
-    serverNow: Date.now(),
-    justReset: !!cycleInfo.ranReset,
-  };
-}
-
-// Admin-only: review queue sorted by votes, for the team to triage.
-async function handleFeedbackListForReview({ callerData, status }) {
-  if (!callerData?.isAdmin) throw httpError(403, 'Admin only');
-  const effectiveStatus = status || 'open';
-  let docs;
-  try {
-    const snap = await db.collection('feedbackSuggestions')
-      .where('status', '==', effectiveStatus)
-      .orderBy('totalScore', 'desc')
-      .limit(100)
-      .get();
-    docs = snap.docs;
-  } catch (err) {
-    if (err.message?.includes('requires an index') || err.message?.includes('FAILED_PRECONDITION')) {
-      const allSnap = await db.collection('feedbackSuggestions').get();
-      docs = allSnap.docs
-        .filter(d => d.data().status === effectiveStatus)
-        .sort((a, b) => (b.data().totalScore || 0) - (a.data().totalScore || 0))
-        .slice(0, 100);
-    } else {
-      throw err;
+  // Validate the optional scheduled date — must be a real date, not in the past,
+  // and not more than 90 days out (avoid indefinite-hold scheduling abuse).
+  let scheduledTs = null;
+  if (scheduledFor) {
+    const d = new Date(scheduledFor);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid scheduled date' });
+    const now = new Date();
+    const maxOut = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+    if (d.getTime() < now.getTime() - 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: 'Scheduled date cannot be in the past' });
     }
+    if (d.getTime() > maxOut.getTime()) {
+      return res.status(400).json({ error: 'Scheduled date cannot be more than 90 days out' });
+    }
+    scheduledTs = Timestamp.fromDate(d);
   }
-  return { suggestions: docs.map(d => ({ id: d.id, ...d.data() })) };
-}
 
-async function handleFeedbackSetStatus({ callerData, suggestionId, status }) {
-  if (!callerData?.isAdmin) throw httpError(403, 'Admin only');
-  if (!['open', 'planned', 'done', 'declined'].includes(status)) {
-    throw httpError(400, 'Invalid status');
-  }
-  await db.collection('feedbackSuggestions').doc(suggestionId).set({
-    status,
-    updatedAt: FieldValue.serverTimestamp(),
-  }, { merge: true });
-  return { ok: true };
-}
+  // 1. Verify Firebase identity
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
 
-// ── Daily nudge eligibility ──
-// Decided server-side and stamped once per user per day, so the same user
-// can't get re-rolled by reloading the page — but the outcome itself is a
-// random-looking per-day coin flip (not always the same clock time), and
-// only fires on ~1 in 3 active days so it doesn't feel naggy.
-async function handleFeedbackCheckNudge({ callerUid, recentAction }) {
-  if (!callerUid) return { shouldShow: false, alreadyDecidedToday: false, shown: false };
+  const fee     = parseFloat((amt * 0.05).toFixed(2));
+  const receive = parseFloat((amt - fee).toFixed(2));
 
-  const bucket = new Date().toISOString().slice(0, 10); // UTC day bucket
-  const ref = db.collection('feedbackNudges').doc(`${callerUid}__${bucket}`);
-  const snap = await ref.get();
+  // 2. Run everything in a Firestore transaction via Admin SDK
+  const db = getAdminDb();
+  const userRef = db.collection('users').doc(uid);
 
-  if (snap.exists) {
+  // Resolved ahead of the transaction — a query-by-email has no place inside
+  // a Firestore transaction alongside doc gets/sets. Same pattern as
+  // handleTransfer/handleDonate: null means ADMIN_EMAIL is unset/
+  // unresolvable, NOT "no fee owed" — the fee is still taken from the
+  // withdrawing user's balance below either way; this only decides whether
+  // it's credited to a live admin wallet or held in the unclaimed-fees
+  // ledger until ADMIN_EMAIL is fixed.
+  const adminUid = await getPlatformFeeAdminUid(db);
+  const feeOwedButUnroutable = fee > 0 && uid !== adminUid && !adminUid;
+  const creditAdmin = fee > 0 && uid !== adminUid && !!adminUid;
+  const adminRef = creditAdmin ? db.collection('users').doc(adminUid) : null;
+  let ledgerEntry = null;
+
+  const methodLabel = method === 'bank' ? 'Bank Transfer' : method === 'bitcoin' ? 'Bitcoin' : 'PayPal';
+  const noteDetail =
+    method === 'paypal'   ? `PayPal: ${payoutDetails.paypalEmail}` :
+    method === 'bitcoin'  ? `BTC address: ${payoutDetails.bitcoinAddress}` :
+    `Bank: ${payoutDetails.bankAccountName} · ${payoutDetails.bankAccountType} · routing ${payoutDetails.bankRoutingNumber} · acct ****${payoutDetails.bankAccountNumber.slice(-4)}`;
+
+  const result = await db.runTransaction(async tx => {
+    const [snap, adminSnap] = await Promise.all([
+      tx.get(userRef),
+      adminRef ? tx.get(adminRef) : Promise.resolve(null),
+    ]);
+    if (!snap.exists) throw new Error('User document not found');
+    if (adminRef && !adminSnap.exists) throw new Error('Platform fee admin account not found');
+
     const data = snap.data();
-    return { shouldShow: false, alreadyDecidedToday: true, shown: !!data.shown };
+    const bal      = parseFloat((data.walletBalance || 0).toFixed(2));
+    const withdrawable = parseFloat((data.withdrawableBalance || 0).toFixed(2));
+
+    // Server-side balance check — client cannot spoof this. Checked against
+    // withdrawableBalance specifically: deposited-only funds cannot be cashed out.
+    if (amt > withdrawable) {
+      throw new Error(
+        withdrawable <= 0
+          ? 'You have no withdrawable balance. Deposited funds can be spent on Siterifty but not withdrawn — only earnings from sales, transfers received, or referral bonuses qualify.'
+          : `You can only withdraw up to $${withdrawable.toFixed(2)} — the rest of your balance came from deposits, which aren't withdrawable.`
+      );
+    }
+    // Defensive: withdrawable should never exceed total, but never let the
+    // total balance go negative even if that invariant is ever violated.
+    if (amt > bal) throw new Error('Insufficient balance');
+
+    // The withdrawing user's wallet is debited the FULL amt (not just
+    // `receive`) — the 5% fee is real money leaving their balance, same as
+    // any other platform fee, and pendingBalance tracks the full hold until
+    // the downstream payout process (outside this file) actually sends
+    // `receive` to their PayPal/bank/BTC wallet. The fee itself is credited
+    // to the admin account (or ledgered) right here, at request time — it
+    // must not be left as inert metadata on the transaction/withdrawals
+    // docs with nothing ever actually collecting it.
+    const updatedBal         = parseFloat((bal - amt).toFixed(2));
+    const updatedWithdrawable = parseFloat((withdrawable - amt).toFixed(2));
+    const pending             = parseFloat(((data.pendingBalance || 0) + amt).toFixed(2));
+
+    tx.update(userRef, {
+      walletBalance:       updatedBal,
+      withdrawableBalance: updatedWithdrawable,
+      pendingBalance:      pending,
+    });
+
+    tx.set(userRef.collection('transactions').doc(), {
+      type:         'withdraw',
+      amount:       -amt,
+      fee,
+      receive,      // net amount that will actually be paid out once approved
+      label:        `Withdrawal via ${methodLabel}`,
+      note:         noteDetail + (feeOwedButUnroutable ? ' (fee pending platform reconciliation)' : ''),
+      method,
+      scheduledFor: scheduledTs,
+      status:       'pending',
+      createdAt:    FieldValue.serverTimestamp(),
+    });
+
+    tx.set(db.collection('withdrawals').doc(), {
+      uid,
+      email:  fbUser.email,
+      method,
+      ...payoutDetails,
+      amount:       amt,
+      fee,
+      receive,
+      scheduledFor: scheduledTs,
+      status:       'pending',
+      createdAt:    FieldValue.serverTimestamp(),
+    });
+
+    // Credit the platform fee to the admin account right now, same as
+    // transfer/donate/escrow-release — a fee that's computed and shown to
+    // the user but never actually collected anywhere is the exact bug this
+    // whole pass is fixing. Skipped only if the withdrawing user IS the
+    // admin account (fee <=0 already returns early via the guard above in
+    // that edge case is moot since fee is always >0 for amt>=1 at 5%).
+    if (creditAdmin) {
+      const adminBal    = parseFloat((adminSnap.data().walletBalance || 0).toFixed(2));
+      const newAdminBal = parseFloat((adminBal + fee).toFixed(2));
+      const adminWithdrawable    = parseFloat((adminSnap.data().withdrawableBalance || 0).toFixed(2));
+      const newAdminWithdrawable = parseFloat((adminWithdrawable + fee).toFixed(2));
+
+      tx.update(adminRef, { walletBalance: newAdminBal, withdrawableBalance: newAdminWithdrawable });
+
+      tx.set(adminRef.collection('transactions').doc(), {
+        type:      'platform_fee',
+        amount:    fee,
+        label:     'Platform fee · Withdrawal',
+        note:      `5% of $${amt.toLocaleString()} withdrawn by ${fbUser.email || uid}`,
+        withdrawerUid: uid,
+        status:    'completed',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } else if (feeOwedButUnroutable) {
+      ledgerEntry = {
+        amount: fee,
+        source: 'withdrawal',
+        sourceId: null,
+        payerUid: uid,
+        counterpartyUid: null,
+        note: `5% of $${amt.toLocaleString()} withdrawn by ${fbUser.email || uid} — deducted from withdrawer, held pending ADMIN_EMAIL fix`,
+      };
+    }
+
+    return { updatedBal, updatedWithdrawable };
+  });
+
+  if (ledgerEntry) {
+    await _ledgerUnclaimedFee(db, ledgerEntry);
   }
 
-  const seed = `${callerUid}__${bucket}`;
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-  const showProbability = 0.35;
-  const willShow = (hash % 1000) / 1000 < showProbability;
+  return res.status(200).json({
+    success:         true,
+    newBalance:      result.updatedBal,
+    newWithdrawable: result.updatedWithdrawable,
+    fee,
+    receive,
+  });
+}
 
-  await ref.set({
+// ─────────────────────────────────────────────────────────────────────────────
+// admin-resolve-withdrawal  { withdrawalId, outcome: 'completed' | 'failed' }
+// ADMIN-ONLY — gated by the admin_session cookie (verifyAdminSession), not a
+// user idToken. This never sends money itself: actual PayPal/bank payouts
+// are a manual step done outside this codebase (see handleWithdraw's doc
+// comment — "the downstream payout process (outside this file) actually
+// sends `receive`"). This action only finalizes the bookkeeping once that
+// manual step has happened (or been declined):
+//
+//   outcome: 'completed' — admin has already sent the real payout via
+//     PayPal/bank themselves. Marks the withdrawal + its transaction record
+//     completed and clears the amount out of pendingBalance (it's no longer
+//     "pending", it's done — walletBalance/withdrawableBalance were already
+//     debited at request time by handleWithdraw and stay debited).
+//
+//   outcome: 'failed' — admin is declining the payout (bad PayPal email,
+//     fraud check, etc.). Marks it failed, clears pendingBalance, AND
+//     refunds the full original amount back to walletBalance +
+//     withdrawableBalance — undoing the debit handleWithdraw made upfront.
+//     Without this refund the user's money would simply vanish.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleAdminResolveWithdrawal(req, res) {
+  const session = verifyAdminSession(req);
+  if (!session) return res.status(401).json({ error: 'Not authenticated as admin' });
+
+  const { withdrawalId, outcome } = req.body || {};
+  if (!withdrawalId) return res.status(400).json({ error: 'Missing withdrawalId' });
+  if (!['completed', 'failed'].includes(outcome)) {
+    return res.status(400).json({ error: 'outcome must be "completed" or "failed"' });
+  }
+
+  const db = getAdminDb();
+  const withdrawalRef = db.collection('withdrawals').doc(withdrawalId);
+
+  const result = await db.runTransaction(async tx => {
+    const wSnap = await tx.get(withdrawalRef);
+    if (!wSnap.exists) throw new Error('Withdrawal not found');
+    const w = wSnap.data();
+
+    if (w.status !== 'pending') {
+      throw new Error(`Cannot resolve — withdrawal status is already "${w.status}"`);
+    }
+
+    const uid = w.uid;
+    const amt = parseFloat(w.amount || 0);
+    if (!uid || !amt) throw new Error('Withdrawal record is missing uid/amount');
+
+    const userRef = db.collection('users').doc(uid);
+    const userSnap = await tx.get(userRef);
+    if (!userSnap.exists) throw new Error('User not found');
+    const userData = userSnap.data();
+
+    // Clear the hold either way — it's no longer pending once resolved.
+    const currentPending = parseFloat((userData.pendingBalance || 0).toFixed(2));
+    const newPending = Math.max(0, parseFloat((currentPending - amt).toFixed(2)));
+
+    const userUpdate = { pendingBalance: newPending };
+
+    if (outcome === 'failed') {
+      // Refund exactly what was debited at request time — the full amt
+      // (not `receive`), matching how handleWithdraw took it out.
+      const currentBal = parseFloat((userData.walletBalance || 0).toFixed(2));
+      const currentWithdrawable = parseFloat((userData.withdrawableBalance || 0).toFixed(2));
+      userUpdate.walletBalance = parseFloat((currentBal + amt).toFixed(2));
+      userUpdate.withdrawableBalance = parseFloat((currentWithdrawable + amt).toFixed(2));
+    }
+
+    tx.update(userRef, userUpdate);
+    tx.update(withdrawalRef, {
+      status: outcome,
+      resolvedAt: FieldValue.serverTimestamp(),
+      resolvedBy: session.email,
+    });
+
+    // Log a transaction record so this shows up in the user's history —
+    // separate from the original 'withdraw' debit record, same pattern as
+    // escrow_refund being its own record rather than editing the original.
+    if (outcome === 'failed') {
+      tx.set(userRef.collection('transactions').doc(), {
+        type: 'withdraw_failed',
+        amount: amt,
+        label: 'Withdrawal declined — refunded',
+        note: `Your $${amt.toFixed(2)} withdrawal request was declined and refunded to your wallet.`,
+        withdrawalId,
+        status: 'completed',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } else {
+      tx.set(userRef.collection('transactions').doc(), {
+        type: 'withdraw_completed',
+        amount: -amt,
+        label: 'Withdrawal completed',
+        note: `Your $${(w.receive ?? amt).toFixed(2)} payout was sent.`,
+        withdrawalId,
+        status: 'completed',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    return { uid, amt, refunded: outcome === 'failed' };
+  });
+
+  // Notify the user (best-effort, non-blocking of the response)
+  try {
+    await db.collection('users').doc(result.uid).collection('notifications').add({
+      type: outcome === 'failed' ? 'withdrawal_failed' : 'withdrawal_completed',
+      title: outcome === 'failed' ? 'Withdrawal declined' : 'Withdrawal completed',
+      body: outcome === 'failed'
+        ? `Your $${result.amt.toFixed(2)} withdrawal request was declined and refunded to your wallet.`
+        : `Your $${result.amt.toFixed(2)} withdrawal has been sent.`,
+      read: false,
+      createdAt: Date.now(),
+    });
+  } catch (_) {
+    // Non-fatal — the resolution itself already succeeded.
+  }
+
+  return res.status(200).json({ success: true, outcome, refunded: result.refunded });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// lookup-recipient  { idToken, email }  →  { uid, displayName, username, email, profilePic }
+//
+// Resolves a Siterifty user by email for a P2P transfer. This runs server-side
+// (with the Admin SDK) rather than letting the client query the `users`
+// collection directly by email — querying by email client-side would let
+// anyone enumerate registered accounts and pull back whatever fields
+// Firestore rules happen to expose. This endpoint returns only the minimal
+// fields the transfer UI actually needs (profilePic included so the wallet's
+// Send tab can show a real avatar instead of just initials).
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleLookupRecipient(req, res) {
+  const { idToken, email } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return res.status(400).json({ error: 'Enter a valid email address' });
+  }
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  if (cleanEmail === (fbUser.email || '').toLowerCase()) {
+    return res.status(400).json({ error: 'You cannot send money to yourself' });
+  }
+
+  const db = getAdminDb();
+  const snap = await db.collection('users')
+    .where('email', '==', cleanEmail)
+    .limit(1)
+    .get();
+
+  if (snap.empty) {
+    return res.status(404).json({ error: 'No Siterifty account found with that email' });
+  }
+
+  const foundDoc = snap.docs[0];
+  const data = foundDoc.data();
+  return res.status(200).json({
+    uid:         foundDoc.id,
+    displayName: data.displayName || '',
+    username:    data.username || '',
+    email:       data.email || cleanEmail,
+    profilePic:  data.profilePic || null,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// transfer  { idToken, recipientUid, amount, note? }  →  { success, newBalance, fee, receiveAmount }
+//
+// Server-validated P2P wallet transfer. Previously this ran as a client-side
+// Firestore transaction with no server involved at all — any tampering with
+// client JS could bypass the balance check or the fee calculation entirely.
+// Now the sender's balance, the recipient's existence, and the fee math are
+// all re-verified here with the Admin SDK inside a single transaction, the
+// same pattern as handleWithdraw above.
+//
+// ── DISABLED (2026-07-25) ────────────────────────────────────────────────────
+// User-to-user wallet transfers move real ledger balance between two
+// ordinary users with no PayPal (or other licensed) rail in the middle —
+// that's custodial money transmission, which Siterifty is not currently
+// licensed for. Wallet balance is licensed-safe ONLY as a spend-only credit
+// for boosting listings; it must never be sendable to another user or
+// cashed out until Siterifty holds (or partners for) a money transmitter
+// license. Gated at the top of the handler, not removed — all validation,
+// fee-split, and ledgering logic below is untouched and ready to re-enable
+// by deleting this early return once licensed. See TransferMethodPicker/
+// SendTab.tsx for the matching frontend placeholder.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleTransfer(req, res) {
+  return res.status(410).json({
+    error: 'Sending money to other users isn\'t available yet — Siterifty wallet balance is currently limited to boosting your own listings. This feature will return once Siterifty completes money-transmission licensing. PayPal handles the full escrow-protected marketplace transaction.',
+  });
+}
+
+// Original implementation kept below, unreachable — see the disabled-notice
+// comment above for why, and for exactly what to delete to restore it.
+async function _handleTransfer_DISABLED_pendingLicense(req, res) {
+  const { idToken, recipientUid, amount, note } = req.body;
+  if (!idToken)      return res.status(401).json({ error: 'Missing auth token' });
+  if (!recipientUid) return res.status(400).json({ error: 'Missing recipient' });
+
+  const amt = parseFloat(amount);
+  if (!amt || amt <= 0 || amt > 10000 || !isFinite(amt)) {
+    return res.status(400).json({ error: 'Amount must be between $0.01 and $10,000' });
+  }
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const senderUid = fbUser.localId;
+
+  if (senderUid === recipientUid) {
+    return res.status(400).json({ error: 'You cannot send money to yourself' });
+  }
+
+  const TRANSFER_FEE_RATE = LIMITS.wallet.transferFee;
+  // Guard against a missing/misconfigured rate silently sending 100% of the
+  // transfer fee-free. A rate must be a finite number in [0, 1) — 0 is a
+  // legitimate "no fee" config and is allowed through; anything else
+  // (undefined because LIMITS.wallet or .transferFee doesn't exist, NaN,
+  // negative, or >=1 i.e. >=100%) means the config itself is broken, and a
+  // broken config should fail loudly here rather than quietly waive the fee
+  // on every transfer until someone notices real dollars going missing.
+  if (typeof TRANSFER_FEE_RATE !== 'number' || !isFinite(TRANSFER_FEE_RATE) || TRANSFER_FEE_RATE < 0 || TRANSFER_FEE_RATE >= 1) {
+    console.error('[paypal.js] LIMITS.wallet.transferFee is missing or invalid:', TRANSFER_FEE_RATE);
+    return res.status(500).json({ error: 'Transfer fee is not configured correctly. Please try again later.' });
+  }
+  const fee        = parseFloat((amt * TRANSFER_FEE_RATE).toFixed(2));
+  const receiveAmt = parseFloat((amt - fee).toFixed(2));
+  const safeNote   = (note || '').slice(0, 200);
+
+  const db         = getAdminDb();
+  const senderRef  = db.collection('users').doc(senderUid);
+  const recipRef   = db.collection('users').doc(recipientUid);
+
+  // Resolved ahead of the transaction — a query-by-email has no place inside
+  // a Firestore transaction alongside doc gets/sets for sender/recipient.
+  // null means ADMIN_EMAIL is unset/unresolvable — NOT "no fee owed".
+  const adminUid = await getPlatformFeeAdminUid(db);
+
+  // Two DISTINCT reasons the recipient might get the full amount — these
+  // must never be conflated:
+  //  - noFeeOwed: either party IS the platform admin account, or the fee
+  //    rounds to $0. Correctly no fee to collect from anyone.
+  //  - feeOwedButUnroutable: a real fee IS owed and IS deducted from the
+  //    recipient below, same as normal — there's just nowhere live to
+  //    credit it (adminUid is null) because ADMIN_EMAIL is unset/
+  //    misconfigured. That fee goes to the unclaimed-fees ledger after
+  //    this transaction commits, not to the recipient and not into the void.
+  const noFeeOwed = fee <= 0 || senderUid === adminUid || recipientUid === adminUid;
+  const feeOwedButUnroutable = !noFeeOwed && !adminUid;
+  const applyFeeSplit = !noFeeOwed; // recipient's side pays the fee either way unless noFeeOwed
+
+  // adminRef is resolved (and read, if needed) up front alongside the
+  // sender/recipient reads — Firestore transactions require every tx.get()
+  // to run before any tx.update()/tx.set(), so this can't be fetched later,
+  // conditionally, after the writes below have already been queued.
+  const adminRef = (applyFeeSplit && adminUid) ? db.collection('users').doc(adminUid) : null;
+  let ledgerEntry = null; // set inside the transaction if we need to ledger post-commit
+
+  const result = await db.runTransaction(async tx => {
+    const [senderSnap, recipSnap, adminSnap] = await Promise.all([
+      tx.get(senderRef),
+      tx.get(recipRef),
+      adminRef ? tx.get(adminRef) : Promise.resolve(null),
+    ]);
+
+    if (!senderSnap.exists) throw new Error('Your user profile could not be found');
+    if (!recipSnap.exists)  throw new Error('Recipient account not found');
+    if (adminRef && !adminSnap.exists) throw new Error('Platform fee admin account not found');
+
+    const senderData = senderSnap.data();
+    const senderBal = parseFloat((senderData.walletBalance || 0).toFixed(2));
+    // Server-side balance check — client cannot spoof this
+    if (amt > senderBal) throw new Error('Insufficient balance');
+
+    // Sending money draws down withdrawable dollars first (capped at 0) —
+    // this is the conservative choice: it never lets someone end up with
+    // more withdrawableBalance than the money they actually earned.
+    const senderWithdrawable = parseFloat((senderData.withdrawableBalance || 0).toFixed(2));
+    const newSenderWithdrawable = parseFloat(Math.max(0, senderWithdrawable - amt).toFixed(2));
+
+    const recipData = recipSnap.data();
+    const recipBal = parseFloat((recipData.walletBalance || 0).toFixed(2));
+    const recipWithdrawable = parseFloat((recipData.withdrawableBalance || 0).toFixed(2));
+    const newSenderBal = parseFloat((senderBal - amt).toFixed(2));
+    const creditToRecip = applyFeeSplit ? receiveAmt : amt;
+    const newRecipBal  = parseFloat((recipBal + creditToRecip).toFixed(2));
+    // Money received from another user counts as withdrawable — only a
+    // straight PayPal deposit is excluded from withdrawableBalance.
+    const newRecipWithdrawable = parseFloat((recipWithdrawable + creditToRecip).toFixed(2));
+
+    tx.update(senderRef, { walletBalance: newSenderBal, withdrawableBalance: newSenderWithdrawable });
+    tx.update(recipRef,  { walletBalance: newRecipBal,  withdrawableBalance: newRecipWithdrawable });
+
+    const senderName = fbUser.displayName || fbUser.email?.split('@')[0] || 'Someone';
+    const recipName  = recipData.displayName || recipData.username || recipData.email?.split('@')[0] || 'User';
+
+    tx.set(senderRef.collection('transactions').doc(), {
+      type:      'send',
+      amount:    -amt,
+      fee:       0,
+      receiveAmount: creditToRecip, // what the recipient actually got, net of the fee they paid — shown in the sender's own wallet history so "sent $100" doesn't read as if $100 arrived
+      label:     `Sent to ${recipName}`,
+      note:      safeNote || `to ${recipData.email || recipientUid}`,
+      status:    'completed',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    // Recipient's own transaction record always shows the REAL fee they
+    // were charged, whether or not we could route it to a live admin
+    // wallet — this must never disagree with what actually landed in
+    // their balance.
+    const recipTxRecord = {
+      type:      'receive',
+      amount:    creditToRecip,
+      fee:       applyFeeSplit ? fee : 0,
+      label:     `Received from ${senderName}`,
+      status:    'completed',
+      createdAt: FieldValue.serverTimestamp(),
+    };
+    recipTxRecord.note = applyFeeSplit
+      ? (safeNote ? `"${safeNote}" · ` : '') + `${Math.round(TRANSFER_FEE_RATE * 100)}% fee (${fee.toFixed(2)}) applied`
+        + (feeOwedButUnroutable ? ' (fee pending platform reconciliation)' : '')
+      : (safeNote || '');
+    tx.set(recipRef.collection('transactions').doc(), recipTxRecord);
+
+    // Credit the platform's cut to the admin account — only when a real fee
+    // is owed AND we have somewhere live to put it. If a fee is owed but
+    // adminUid is null (feeOwedButUnroutable), the fee has still been
+    // deducted from the recipient's credit above — it's queued for the
+    // unclaimed-fees ledger after the transaction commits, not dropped here.
+    if (applyFeeSplit && adminRef) {
+      const adminBal    = parseFloat((adminSnap.data().walletBalance || 0).toFixed(2));
+      const newAdminBal = parseFloat((adminBal + fee).toFixed(2));
+      const adminWithdrawable    = parseFloat((adminSnap.data().withdrawableBalance || 0).toFixed(2));
+      const newAdminWithdrawable = parseFloat((adminWithdrawable + fee).toFixed(2));
+
+      tx.update(adminRef, { walletBalance: newAdminBal, withdrawableBalance: newAdminWithdrawable });
+
+      tx.set(adminRef.collection('transactions').doc(), {
+        type:      'platform_fee',
+        amount:    fee,
+        label:     'Platform fee · P2P transfer',
+        note:      `${Math.round(TRANSFER_FEE_RATE * 100)}% of $${amt.toLocaleString()} sent from ${senderName} to ${recipName}`,
+        senderUid,
+        recipientUid,
+        status:    'completed',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } else if (feeOwedButUnroutable) {
+      ledgerEntry = {
+        amount: fee,
+        source: 'p2p_transfer',
+        sourceId: null,
+        payerUid: recipientUid, // the fee was deducted from the recipient's credit, same party as before
+        counterpartyUid: senderUid,
+        note: `${Math.round(TRANSFER_FEE_RATE * 100)}% of $${amt.toLocaleString()} sent from ${senderName} to ${recipName} — deducted from recipient, held pending ADMIN_EMAIL fix`,
+      };
+    }
+
+    tx.set(recipRef.collection('notifications').doc(), {
+      type:      'wallet_transfer',
+      title:     'Money received',
+      body:      `${senderName} sent you $${creditToRecip.toLocaleString()}${safeNote ? ' — "' + safeNote + '"' : ''}.`,
+      read:      false,
+      createdAt: Date.now(),
+    });
+
+    return { newSenderBal, newSenderWithdrawable, recipName, creditToRecip };
+  });
+
+  if (ledgerEntry) {
+    await _ledgerUnclaimedFee(db, ledgerEntry);
+  }
+
+  // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
+  await maybeAutoWithdraw(db, recipientUid);
+
+  return res.status(200).json({
+    success:         true,
+    newBalance:      result.newSenderBal,
+    newWithdrawable: result.newSenderWithdrawable,
+    fee:             applyFeeSplit ? fee : 0,
+    receiveAmount:   result.creditToRecip,
+    recipientName:   result.recipName,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// donate  { idToken, sellerUid, amount, note? }
+//   →  { success, newBalance, newWithdrawable, fee, receiveAmount, sellerName }
+//
+// Buyer-to-seller wallet donation, shown on the seller's public profile
+// modal. Modeled directly on handleTransfer above (same server-verified
+// balance check + atomic transaction pattern) with two differences:
+//   - Fee is a fixed 15% platform cut, always applied (no plan-based
+//     tiers, no admin-account exemption skip — donations are a flat rate
+//     regardless of who's receiving them).
+//   - Every donation is additionally logged to
+//     users/{sellerUid}/donations/{autoId} — a dedicated, append-only
+//     record separate from the general transactions subcollection, which
+//     is what handleGetDonations reads to power the "total donated" +
+//     "last 10 donations" list on the donate modal. Keeping this in its
+//     own subcollection means that public read never has to filter a
+//     user's full (privacy-sensitive) transaction history down to just
+//     donations — it only ever reads donations.
+// ─────────────────────────────────────────────────────────────────────────────
+const DONATION_FEE_RATE = 0.15;
+const DONATION_MIN = 1;
+const DONATION_MAX = 2500;
+
+// ── DISABLED (2026-07-25) ─────────────────────────────────────────────────
+// Only the money-moving action is gated here — the donate overlay itself
+// (summary stats, recent donations list, get-donations) stays fully live.
+// Donating drew from the donor's wallet balance and credited the seller's
+// wallet balance directly, same as P2P transfer: custodial wallet-to-wallet
+// money movement with no PayPal (or other licensed) rail involved, which
+// Siterifty isn't currently licensed for. Once licensed, donations will
+// move to PayPal split payments (like escrow) instead of wallet balance —
+// so this returns a 410 rather than being restored to wallet debits when
+// re-enabled. Frontend: DonateOverlay.tsx's submit button is disabled with
+// a "coming soon" state; everything else on that overlay is untouched.
+// ─────────────────────────────────────────────────────────────────────────
+async function handleDonate(req, res) {
+  return res.status(410).json({
+    error: 'Donations aren\'t available right now — we\'re moving this to PayPal split payments. Check back soon.',
+  });
+}
+
+// Original implementation kept below, unreachable — see the disabled-notice
+// comment above for why, and what replaces it (PayPal split payments, not a
+// wallet-debit restore) when this comes back.
+async function _handleDonate_DISABLED_pendingPaypalSplit(req, res) {
+  const { idToken, sellerUid, amount, note } = req.body;
+  if (!idToken)   return res.status(401).json({ error: 'Missing auth token' });
+  if (!sellerUid) return res.status(400).json({ error: 'Missing seller' });
+
+  const amt = parseFloat(amount);
+  if (!amt || amt < DONATION_MIN || amt > DONATION_MAX || !isFinite(amt)) {
+    return res.status(400).json({ error: `Amount must be between $${DONATION_MIN} and $${DONATION_MAX.toLocaleString()}` });
+  }
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const donorUid = fbUser.localId;
+
+  if (donorUid === sellerUid) {
+    return res.status(400).json({ error: 'You cannot donate to yourself' });
+  }
+
+  const fee        = parseFloat((amt * DONATION_FEE_RATE).toFixed(2));
+  const receiveAmt = parseFloat((amt - fee).toFixed(2));
+  const safeNote    = (note || '').slice(0, 200);
+
+  const db        = getAdminDb();
+  const donorRef  = db.collection('users').doc(donorUid);
+  const sellerRef = db.collection('users').doc(sellerUid);
+
+  // Resolved ahead of the transaction, same reasoning as handleTransfer —
+  // a query has no place inside a transaction alongside doc gets/sets.
+  // null means ADMIN_EMAIL is unset/unresolvable.
+  const adminUid = await getPlatformFeeAdminUid(db);
+  // Unlike handleTransfer, the fee is never waived from the seller's side
+  // even if one party is the admin account — donations are a flat 15% by
+  // design, not a plan-based/exemptable fee. adminIsParty only controls
+  // whether the *admin* gets credited (crediting an account its own fee on
+  // a donation to/from itself would just be a no-op double-entry).
+  // feeOwedButUnroutable is the DISTINCT case where a real fee is owed and
+  // deducted from the seller as normal, but adminUid is null — there's
+  // nowhere live to credit it, so it goes to the unclaimed-fees ledger
+  // instead. These two must never be conflated: adminIsParty=false but
+  // adminUid=null must NOT build a doc(null) reference.
+  const adminIsParty = adminUid != null && (donorUid === adminUid || sellerUid === adminUid);
+  const feeOwedButUnroutable = !adminIsParty && !adminUid;
+  const creditAdmin = !adminIsParty && !!adminUid;
+
+  // adminRef is resolved (and read, if needed) up front alongside the
+  // donor/seller reads — Firestore transactions require every tx.get() to
+  // run before any tx.update()/tx.set(), so this can't be fetched later,
+  // conditionally, after the writes below have already been queued.
+  const adminRef = creditAdmin ? db.collection('users').doc(adminUid) : null;
+  let ledgerEntry = null; // set inside the transaction if we need to ledger post-commit
+
+  const result = await db.runTransaction(async tx => {
+    const [donorSnap, sellerSnap, adminSnap] = await Promise.all([
+      tx.get(donorRef),
+      tx.get(sellerRef),
+      adminRef ? tx.get(adminRef) : Promise.resolve(null),
+    ]);
+
+    if (!donorSnap.exists)  throw new Error('Your user profile could not be found');
+    if (!sellerSnap.exists) throw new Error('Seller account not found');
+    if (adminRef && !adminSnap.exists) throw new Error('Platform fee admin account not found');
+
+    const donorData = donorSnap.data();
+    const donorBal = parseFloat((donorData.walletBalance || 0).toFixed(2));
+    // Server-side balance check — client cannot spoof this
+    if (amt > donorBal) throw new Error('Insufficient balance');
+
+    // Donating draws down withdrawable dollars first (capped at 0), same
+    // conservative rule as handleTransfer/escrow-pay.
+    const donorWithdrawable = parseFloat((donorData.withdrawableBalance || 0).toFixed(2));
+    const newDonorWithdrawable = parseFloat(Math.max(0, donorWithdrawable - amt).toFixed(2));
+
+    const sellerData = sellerSnap.data();
+    const sellerBal = parseFloat((sellerData.walletBalance || 0).toFixed(2));
+    const sellerWithdrawable = parseFloat((sellerData.withdrawableBalance || 0).toFixed(2));
+    const newDonorBal   = parseFloat((donorBal - amt).toFixed(2));
+    const newSellerBal  = parseFloat((sellerBal + receiveAmt).toFixed(2));
+    // Donations received count as withdrawable, same as P2P transfers.
+    const newSellerWithdrawable = parseFloat((sellerWithdrawable + receiveAmt).toFixed(2));
+
+    tx.update(donorRef,  { walletBalance: newDonorBal,  withdrawableBalance: newDonorWithdrawable });
+    tx.update(sellerRef, { walletBalance: newSellerBal, withdrawableBalance: newSellerWithdrawable });
+
+    const donorName  = fbUser.displayName || donorData.username || fbUser.email?.split('@')[0] || 'Anonymous';
+    const sellerName = sellerData.displayName || sellerData.username || sellerData.email?.split('@')[0] || 'Seller';
+
+    tx.set(donorRef.collection('transactions').doc(), {
+      type:      'donate',
+      amount:    -amt,
+      fee:       0,
+      label:     `Donated to ${sellerName}`,
+      note:      safeNote,
+      sellerUid,
+      status:    'completed',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    tx.set(sellerRef.collection('transactions').doc(), {
+      type:      'donation_received',
+      amount:    receiveAmt,
+      fee,
+      label:     `Donation from ${donorName}`,
+      note:      (safeNote ? `"${safeNote}" · ` : '') + `15% fee ($${fee.toFixed(2)}) applied`,
+      donorUid,
+      status:    'completed',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    // Dedicated donations log — this is what the donate modal's "last 10
+    // donations" list and running total read from. donorName/donorPic are
+    // denormalized onto the record itself (rather than joined at read
+    // time) so the public list never has to look up the donor's user doc.
+    tx.set(sellerRef.collection('donations').doc(), {
+      donorUid,
+      donorName,
+      donorPic:  donorData.profilePic || null,
+      amount:    receiveAmt,
+      grossAmount: amt,
+      fee,
+      note:      safeNote,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    if (creditAdmin) {
+      const adminBal    = parseFloat((adminSnap.data().walletBalance || 0).toFixed(2));
+      const newAdminBal = parseFloat((adminBal + fee).toFixed(2));
+      const adminWithdrawable    = parseFloat((adminSnap.data().withdrawableBalance || 0).toFixed(2));
+      const newAdminWithdrawable = parseFloat((adminWithdrawable + fee).toFixed(2));
+
+      tx.update(adminRef, { walletBalance: newAdminBal, withdrawableBalance: newAdminWithdrawable });
+
+      tx.set(adminRef.collection('transactions').doc(), {
+        type:      'platform_fee',
+        amount:    fee,
+        label:     'Platform fee · Donation',
+        note:      `15% of $${amt.toLocaleString()} donated by ${donorName} to ${sellerName}`,
+        donorUid,
+        sellerUid,
+        status:    'completed',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } else if (feeOwedButUnroutable) {
+      ledgerEntry = {
+        amount: fee,
+        source: 'donation',
+        sourceId: null,
+        payerUid: sellerUid, // the fee was deducted from the seller's receipt, same party as before
+        counterpartyUid: donorUid,
+        note: `15% of $${amt.toLocaleString()} donated by ${donorName} to ${sellerName} — deducted from seller, held pending ADMIN_EMAIL fix`,
+      };
+    }
+
+    tx.set(sellerRef.collection('notifications').doc(), {
+      type:      'donation_received',
+      title:     'You received a donation! 💚',
+      body:      `${donorName} donated $${receiveAmt.toLocaleString()}${safeNote ? ' — "' + safeNote + '"' : ''}.`,
+      read:      false,
+      createdAt: Date.now(),
+    });
+
+    return { newDonorBal, newDonorWithdrawable, sellerName };
+  });
+
+  if (ledgerEntry) {
+    await _ledgerUnclaimedFee(db, ledgerEntry);
+  }
+
+  // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
+  await maybeAutoWithdraw(db, sellerUid);
+
+  return res.status(200).json({
+    success:         true,
+    newBalance:      result.newDonorBal,
+    newWithdrawable: result.newDonorWithdrawable,
+    fee,
+    receiveAmount:   receiveAmt,
+    sellerName:      result.sellerName,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// get-donations  { sellerUid }  →  { ok, totalDonated, donationCount, recent: [...] }
+//
+// Public, read-only aggregate for the donate modal — total lifetime amount
+// donated to this seller (net of the 15% fee, i.e. what they actually
+// received) and their 10 most recent donations (donor name/pic, amount,
+// timestamp). No auth required: this is meant to be visible to anyone
+// viewing the seller's profile, same visibility level as their listings
+// or follower count. Reads only the dedicated donations subcollection
+// (never the general transactions collection), which only ever contains
+// the denormalized, already-public-safe fields written by handleDonate.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleGetDonations(req, res) {
+  const sellerUid = req.body?.sellerUid;
+  if (!sellerUid || typeof sellerUid !== 'string') {
+    return res.status(400).json({ error: 'Missing sellerUid' });
+  }
+
+  const db = getAdminDb();
+  const donationsRef = db.collection('users').doc(sellerUid).collection('donations');
+
+  const [recentSnap, allSnap] = await Promise.all([
+    donationsRef.orderBy('createdAt', 'desc').limit(10).get(),
+    // Lifetime total needs every donation, not just the last 10 — this
+    // collection is append-only and per-seller, so a full scan here is
+    // cheap even for very active sellers (thousands of donations would
+    // still be a fast, single-purpose read).
+    donationsRef.get(),
+  ]);
+
+  let totalDonated = 0;
+  allSnap.forEach(d => {
+    const amt = d.data().amount;
+    if (typeof amt === 'number') totalDonated += amt;
+  });
+
+  const recent = recentSnap.docs.map(d => {
+    const don = d.data();
+    return {
+      donorName: don.donorName || 'Anonymous',
+      donorPic:  don.donorPic || null,
+      amount:    don.amount || 0,
+      note:      don.note || '',
+      createdAt: don.createdAt?.toMillis ? don.createdAt.toMillis() : null,
+    };
+  });
+
+  return res.status(200).json({
+    ok: true,
+    totalDonated: parseFloat(totalDonated.toFixed(2)),
+    donationCount: allSnap.size,
+    recent,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// wallet-summary  { idToken }
+//   →  { walletBalance, withdrawableBalance, pendingBalance,
+//         escrowHeld, escrowIncoming, escrowCount }
+//
+// Single call the wallet modal uses to paint the balance hero + escrow
+// banner accurately. escrowHeld = money THIS user has paid into escrow as a
+// buyer on deals that haven't released/refunded yet (still locked, not
+// spendable). escrowIncoming = money owed to this user as a seller on
+// funded-but-not-yet-released deals (not theirs to spend or withdraw until
+// the buyer confirms and the deal actually releases funds into
+// walletBalance/withdrawableBalance via /api/deal's escrow-release).
+//
+// Reads users/{uid}/deals — the same subcollection the chat/deal-status UI
+// already reads client-side (see chat room escrow status banner) — so the
+// numbers shown here always match what the deal screens show.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleWalletSummary(req, res) {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  const db = getAdminDb();
+  const userSnap = await db.collection('users').doc(uid).get();
+  if (!userSnap.exists) return res.status(404).json({ error: 'User not found' });
+  const userData = userSnap.data();
+
+  // Escrow is tracked per-deal on users/{uid}/deals/{dealId}, mirroring the
+  // chatRoom doc's paymentStatus/escrowAmount fields (see index.html's chat
+  // escrow status banner for the same field names).
+  const dealsSnap = await db.collection('users').doc(uid).collection('deals').get();
+
+  let escrowHeld = 0;      // this user is the buyer, funds locked
+  let escrowIncoming = 0;  // this user is the seller, funds locked, not theirs yet
+  let escrowCount = 0;
+
+  // Field names verified against deal.js: escrow-pay (handleEscrowPay) mirrors
+  // paymentStatus + escrowAmount onto users/{uid}/deals/{dealId} for both the
+  // buyer and seller copy, and buyerUid/sellerUid are set once at deal
+  // creation (handleCreateDeal) and never overwritten afterward, so they're
+  // present on both mirror docs for the lifetime of the deal.
+  dealsSnap.forEach(d => {
+    const deal = d.data();
+    if (deal.paymentStatus !== 'funded') return; // only actively-held escrow counts
+    const amt = Number(deal.escrowAmount || deal.price || 0);
+    if (!amt) return;
+    escrowCount++;
+    if (deal.buyerUid === uid) escrowHeld += amt;
+    else if (deal.sellerUid === uid) escrowIncoming += amt;
+  });
+
+  return res.status(200).json({
+    walletBalance:       Number(userData.walletBalance || 0),
+    withdrawableBalance: Number(userData.withdrawableBalance || 0),
+    pendingBalance:       Number(userData.pendingBalance || 0),
+    escrowHeld:           parseFloat(escrowHeld.toFixed(2)),
+    escrowIncoming:       parseFloat(escrowIncoming.toFixed(2)),
+    escrowCount,
+  });
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// autowithdraw-get  { idToken }
+//   →  { enabled, threshold, keepBalance, method, paypalEmail }
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleAutoWithdrawGet(req, res) {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  const db = getAdminDb();
+  const snap = await db.collection('users').doc(uid).get();
+  if (!snap.exists) return res.status(404).json({ error: 'User not found' });
+
+  const data = snap.data();
+  const cfg = data.autoWithdraw || {};
+
+  return res.status(200).json({
+    enabled:     Boolean(cfg.enabled),
+    threshold:   Number(cfg.threshold || 0),
+    keepBalance: Number(cfg.keepBalance || 0),
+    method:      cfg.method === 'bank' ? 'bank' : 'paypal',
+    paypalEmail: cfg.paypalEmail || '',
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// autowithdraw-save  { idToken, enabled, threshold, keepBalance, method, paypalEmail }
+//   →  { success, ...settings }
+//
+// Unlike auto top-up (which needs a saved PayPal vault token to charge),
+// auto withdrawal doesn't require anything pre-saved — it just needs a
+// payout email, same as a manual withdrawal request. keepBalance defaults to
+// 0 (withdraw everything above the threshold down to zero) if omitted.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleAutoWithdrawSave(req, res) {
+  const { idToken, enabled, threshold, keepBalance = 0, method = 'paypal', paypalEmail } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  const db = getAdminDb();
+  const userRef = db.collection('users').doc(uid);
+  const snap = await userRef.get();
+  if (!snap.exists) return res.status(404).json({ error: 'User not found' });
+
+  const wantsEnabled = Boolean(enabled);
+
+  if (wantsEnabled) {
+    if (!['paypal', 'bank'].includes(method)) {
+      return res.status(400).json({ error: 'Invalid payment method' });
+    }
+    if (!paypalEmail || !paypalEmail.includes('@')) {
+      return res.status(400).json({ error: 'A valid PayPal email is required for auto withdrawal.' });
+    }
+
+    const th   = Number(threshold);
+    const keep = Number(keepBalance);
+
+    if (!th || th < AUTOWITHDRAW_MIN_THRESHOLD || th > AUTOWITHDRAW_MAX_THRESHOLD) {
+      return res.status(400).json({ error: `Threshold must be between $${AUTOWITHDRAW_MIN_THRESHOLD} and $${AUTOWITHDRAW_MAX_THRESHOLD}.` });
+    }
+    if (keep < AUTOWITHDRAW_MIN_KEEP || keep > AUTOWITHDRAW_MAX_KEEP) {
+      return res.status(400).json({ error: `Keep-in-wallet amount must be between $${AUTOWITHDRAW_MIN_KEEP} and $${AUTOWITHDRAW_MAX_KEEP}.` });
+    }
+    if (keep >= th) {
+      return res.status(400).json({ error: 'The amount you keep must be less than your threshold, or auto withdrawal would never have anything to send.' });
+    }
+
+    await userRef.set({
+      autoWithdraw: {
+        enabled:     true,
+        threshold:   parseFloat(th.toFixed(2)),
+        keepBalance: parseFloat(keep.toFixed(2)),
+        method,
+        paypalEmail,
+        updatedAt:   FieldValue.serverTimestamp(),
+      },
+    }, { merge: true });
+
+    await userRef.collection('transactions').add({
+      type:      'autowithdraw_settings',
+      amount:    0,
+      label:     'Auto withdrawal enabled',
+      note:      `Will withdraw down to $${keep.toFixed(2)} whenever your withdrawable balance reaches $${th.toFixed(2)}.`,
+      status:    'completed',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    // A save can itself push the user over their new threshold immediately
+    // (e.g. they already have $200 withdrawable and just set a $100
+    // threshold) — check right away instead of waiting for the next credit.
+    await maybeAutoWithdraw(db, uid);
+
+    return res.status(200).json({ success: true, enabled: true, threshold: th, keepBalance: keep, method, paypalEmail });
+  }
+
+  // Disabling — always allowed, no payout-email requirement
+  await userRef.set({
+    autoWithdraw: {
+      enabled:   false,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+  }, { merge: true });
+
+  await userRef.collection('transactions').add({
+    type:      'autowithdraw_settings',
+    amount:    0,
+    label:     'Auto withdrawal disabled',
+    status:    'completed',
     createdAt: FieldValue.serverTimestamp(),
-    shown: willShow,
-    recentAction: recentAction || null,
   });
 
-  return { shouldShow: willShow, alreadyDecidedToday: false, shown: willShow };
+  return res.status(200).json({ success: true, enabled: false });
 }
 
-// ════════════════════════════════════════════════════════════════════════
-// FEATURE — Seller AI Agent's model calls (formerly a standalone agent.js
-// file's own Groq client; the agent module is now folded into api/deal.js).
-// That module still owns eligibility, quota,
-// scheduling, and — since the deal.js refactor — the actual accept/reject
-// transaction (via deal.js's settleDealInternal). This file's job is only
-// the "what should the agent do" judgment call and reply drafting, so
-// every AI feature on the platform goes through the same router, fallback
-// chain, and usage tracking rather than that module keeping its own separate
-// Groq instance and model list.
-// ════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+// autosend-create  { idToken, recipientUid, amount, intervalDays, note? }
+//   →  { success, schedule }
+//
+// Schedules a repeating P2P transfer. First run is `intervalDays` from now
+// (not immediately) — if the user wants an immediate send too, they can use
+// the regular one-off "Send" action alongside this.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleAutoSendCreate(req, res) {
+  const { idToken, recipientUid, amount, intervalDays, note } = req.body;
+  if (!idToken)      return res.status(401).json({ error: 'Missing auth token' });
+  if (!recipientUid) return res.status(400).json({ error: 'Missing recipient' });
 
-const AGENT_DEAL_DECISION_SYSTEM = `
-You are a marketplace seller's AI agent on Siterifty, evaluating one pending deal offer.
-
-Respond ONLY with strict JSON, no markdown:
-{"action":"accept"|"reject"|"hold","reason":"<one short sentence>"}
-
-Rules:
-- "accept" only if the offer is reasonable relative to the listed price and the buyer's message reads as genuine interest, not a lowball or spam.
-- "reject" if the offer is far below the listed price with no justification, or the message reads as spam/abusive.
-- "hold" if you're not confident either way — a human seller should decide. Prefer "hold" over guessing.
-- There is no counter-offer mechanism on this platform — do not invent one or mention negotiating a specific alternate price.
-`;
-
-async function handleAgentDealDecision({ listingTitle, listingPrice, offerPrice, buyerMessage, autoAcceptMinPercent, autoRejectFloor }) {
-  // Deterministic fast paths — skip the model call entirely when the
-  // seller's own configured thresholds already give a clear answer.
-  const offer = typeof offerPrice === 'number' ? offerPrice : listingPrice ?? 0;
-
-  // autoAcceptMinPercent is a percentage of the listing's own price (e.g.
-  // 80 = must offer >= 80% of listed price) rather than a flat dollar
-  // figure, so one seller's threshold works across listings of very
-  // different prices.
-  if (
-    typeof autoAcceptMinPercent === 'number' &&
-    typeof listingPrice === 'number' &&
-    listingPrice > 0 &&
-    offer >= listingPrice * (autoAcceptMinPercent / 100)
-  ) {
-    return { action: 'accept', reason: 'Meets your configured minimum offer percentage.', model: null };
-  }
-  if (typeof autoRejectFloor === 'number' && offer < autoRejectFloor) {
-    return { action: 'reject', reason: 'Below your configured floor price.', model: null };
+  const amt = parseFloat(amount);
+  if (!amt || amt <= 0 || amt > 10000 || !isFinite(amt)) {
+    return res.status(400).json({ error: 'Amount must be between $0.01 and $10,000' });
   }
 
-  const result = await callWithFallback(CHAINS.agentDealDecision, {
-    messages: [
-      { role: 'system', content: AGENT_DEAL_DECISION_SYSTEM },
-      { role: 'user', content: `Listing: "${listingTitle || 'Unknown'}"
-Listed price: ${listingPrice != null ? `$${listingPrice}` : 'not set'}
-Buyer offer: ${offerPrice != null ? `$${offerPrice}` : 'no specific offer, asking about listed price'}
-Buyer message: "${buyerMessage || ''}"` },
-    ],
-    temperature: 0.2,
-    max_tokens: 120,
+  const interval = Number(intervalDays);
+  if (!AUTOSEND_INTERVALS.includes(interval)) {
+    return res.status(400).json({ error: `Interval must be one of: ${AUTOSEND_INTERVALS.join(', ')} days` });
+  }
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const senderUid = fbUser.localId;
+
+  if (senderUid === recipientUid) {
+    return res.status(400).json({ error: 'You cannot auto-send money to yourself' });
+  }
+
+  const db = getAdminDb();
+
+  // Confirm the recipient actually exists before scheduling anything
+  const recipSnap = await db.collection('users').doc(recipientUid).get();
+  if (!recipSnap.exists) return res.status(404).json({ error: 'Recipient account not found' });
+  const recipData = recipSnap.data();
+  const recipName = recipData.displayName || recipData.username || recipData.email?.split('@')[0] || 'User';
+
+  const safeNote = (note || '').slice(0, 200);
+  const nextRunAt = Timestamp.fromMillis(Date.now() + interval * 24 * 60 * 60 * 1000);
+
+  const scheduleRef = db.collection('users').doc(senderUid).collection('autosends').doc();
+  const schedule = {
+    id:            scheduleRef.id,
+    recipientUid,
+    recipientName: recipName,
+    recipientEmail: recipData.email || '',
+    amount:        amt,
+    intervalDays:  interval,
+    note:          safeNote,
+    status:        'active',
+    nextRunAt,
+    lastRunAt:     null,
+    runCount:      0,
+    failCount:     0,
+    createdAt:     FieldValue.serverTimestamp(),
+  };
+  await scheduleRef.set(schedule);
+
+  await db.collection('users').doc(senderUid).collection('transactions').add({
+    type:      'autosend_settings',
+    amount:    0,
+    label:     `Auto send scheduled · every ${interval} day${interval !== 1 ? 's' : ''}`,
+    note:      `$${amt.toFixed(2)} to ${recipName} every ${interval} days until cancelled.`,
+    status:    'completed',
+    createdAt: FieldValue.serverTimestamp(),
   });
 
-  let parsed;
-  try {
-    parsed = JSON.parse((result.content || '').replace(/```json|```/g, '').trim());
-  } catch {
-    parsed = { action: 'hold', reason: 'Could not parse agent decision — defaulting to hold for human review.' };
-  }
-  if (!['accept', 'reject', 'hold'].includes(parsed.action)) parsed.action = 'hold';
-  return { action: parsed.action, reason: parsed.reason || '', model: result.usedModel };
+  return res.status(200).json({ success: true, schedule: { ...schedule, createdAt: Date.now() } });
 }
 
-// NOTE: no longer called by anything (deal.js's agentHandleUnrepliedMessages,
-// the only caller, was removed — the agent now only posts a one-shot bot
-// announcement on auto-accept, see postAutoAcceptBotMessage in deal.js).
-// Left in place rather than deleted since it's inert and harmless; safe to
-// remove entirely in a later cleanup pass.
-async function handleAgentAutoReply({ listingTitle, buyerMessage, tone }) {
-  if (!buyerMessage) throw httpError(400, 'buyerMessage required');
-  const useTone = tone || 'professional';
+// ─────────────────────────────────────────────────────────────────────────────
+// autosend-list  { idToken }  →  { schedules: [...] }
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleAutoSendList(req, res) {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
 
-  const result = await callWithFallback(CHAINS.agentAutoReply, {
-    messages: [
-      { role: 'system', content: `You are an AI agent replying for a marketplace seller on Siterifty. Reply in a ${useTone} tone. Keep it 2-4 sentences. Listing: "${listingTitle || 'your listing'}". Respond ONLY with JSON: {"reply":"<your message>"}` },
-      { role: 'user', content: `Buyer sent: "${buyerMessage}"\nWrite a ${useTone} seller reply.` },
-    ],
-    temperature: 0.4,
-    max_tokens: 200,
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  const db = getAdminDb();
+  const snap = await db.collection('users').doc(uid).collection('autosends')
+    .orderBy('createdAt', 'desc')
+    .get();
+
+  const schedules = snap.docs.map(d => {
+    const s = d.data();
+    return {
+      id:             d.id,
+      recipientUid:   s.recipientUid,
+      recipientName:  s.recipientName,
+      recipientEmail: s.recipientEmail,
+      amount:         s.amount,
+      intervalDays:   s.intervalDays,
+      note:           s.note || '',
+      status:         s.status,
+      nextRunAt:      s.nextRunAt?.toMillis?.() || null,
+      lastRunAt:      s.lastRunAt?.toMillis?.() || null,
+      runCount:       s.runCount || 0,
+      failCount:      s.failCount || 0,
+    };
   });
 
-  let parsed;
-  try {
-    parsed = JSON.parse((result.content || '').replace(/```json|```/g, '').trim());
-  } catch {
-    parsed = { reply: '' };
+  return res.status(200).json({ schedules });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// autosend-cancel  { idToken, scheduleId }  →  { success }
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleAutoSendCancel(req, res) {
+  const { idToken, scheduleId } = req.body;
+  if (!idToken)     return res.status(401).json({ error: 'Missing auth token' });
+  if (!scheduleId)  return res.status(400).json({ error: 'Missing scheduleId' });
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  const db = getAdminDb();
+  const ref = db.collection('users').doc(uid).collection('autosends').doc(scheduleId);
+  const snap = await ref.get();
+  if (!snap.exists) return res.status(404).json({ error: 'Schedule not found' });
+
+  await ref.update({ status: 'cancelled', cancelledAt: FieldValue.serverTimestamp() });
+
+  const s = snap.data();
+  await db.collection('users').doc(uid).collection('transactions').add({
+    type:      'autosend_settings',
+    amount:    0,
+    label:     'Auto send cancelled',
+    note:      `Stopped recurring $${Number(s.amount || 0).toFixed(2)} to ${s.recipientName || 'recipient'}.`,
+    status:    'completed',
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  return res.status(200).json({ success: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// autosend-run  { cronSecret }  →  { processed, succeeded, failed }
+//
+// Cron entry point — no idToken (this isn't called by a logged-in browser).
+// Protect it with AUTOSEND_CRON_SECRET in env and point your scheduler here.
+// Scans every user doc that has at least one active autosend schedule due
+// (nextRunAt <= now) via a collection-group query, and processes each one:
+//   - re-verifies the recipient still exists
+//   - re-checks the sender's live balance (never trusts cached data)
+//   - on success: debits sender, credits recipient (95% after 5% fee, same
+//     as one-off Send), advances nextRunAt by intervalDays, logs a normal
+//     'send'/'receive' transaction pair on both sides
+//   - on failure (insufficient balance, recipient gone, etc.): does NOT
+//     advance nextRunAt (retries next sweep), increments failCount, and logs
+//     a 'failed' transaction on the sender's side so History shows exactly
+//     what happened and why
+//   - after 5 consecutive failures, auto-pauses the schedule (status:
+//     'paused') so a permanently-broken schedule doesn't spam failed
+//     attempts forever; the user can review and cancel/fix it from Send tab
+// ─────────────────────────────────────────────────────────────────────────────
+const AUTOSEND_MAX_CONSECUTIVE_FAILS = 5;
+const TRANSFER_FEE_RATE_AUTOSEND = 0.05;
+
+async function handleAutoSendRun(req, res) {
+  const { cronSecret } = req.body || {};
+  if (AUTOSEND_CRON_SECRET && cronSecret !== AUTOSEND_CRON_SECRET) {
+    return res.status(401).json({ error: 'Invalid cron secret' });
   }
-  return { reply: parsed.reply || '', model: result.usedModel };
-}
 
-// ════════════════════════════════════════════════════════════════════════
-// HTTP HANDLER
-// ════════════════════════════════════════════════════════════════════════
+  const db = getAdminDb();
+  const now = Date.now();
 
-function httpError(status, message) {
-  const err = new Error(message);
-  err.status = status;
-  return err;
-}
+  // Collection-group query across every user's autosends subcollection
+  const dueSnap = await db.collectionGroup('autosends')
+    .where('status', '==', 'active')
+    .where('nextRunAt', '<=', Timestamp.fromMillis(now))
+    .limit(200) // safety cap per sweep
+    .get();
 
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  let processed = 0, succeeded = 0, failed = 0;
 
-  try {
-    const body = req.body || {};
-    const action = body.action;
-    if (!action) return res.status(400).json({ error: 'action is required' });
+  for (const scheduleDoc of dueSnap.docs) {
+    processed++;
+    const schedule = scheduleDoc.data();
+    const senderRef = scheduleDoc.ref.parent.parent; // users/{senderUid}
+    const senderUid = senderRef.id;
+    const scheduleRef = scheduleDoc.ref;
 
-    // ── Auth ──
-    // Normal path: verify the caller's Firebase ID token (all user-facing
-    // actions require login).
-    // Internal path: deal.js/listings.js call triage-report/triage-dispute/
-    // analyze-reported-image right after filing a report/dispute — there is
-    // no logged-in "caller" for that server-to-server call, so it
-    // authenticates with a shared secret instead. Restricted to these three
-    // system-triggered actions; every other action still requires a real
-    // Firebase ID token.
-    const internalToken = req.headers['x-internal-token'];
-    const INTERNAL_ACTIONS = ['triage-report', 'triage-dispute', 'analyze-reported-image', 'feedback-dedupe', 'agent-deal-decision', 'agent-auto-reply'];
-    const isInternalTriageCall = internalToken
-      && process.env.AISTUDIO_INTERNAL_TOKEN
-      && internalToken === process.env.AISTUDIO_INTERNAL_TOKEN
-      && INTERNAL_ACTIONS.includes(action);
+    try {
+      const result = await db.runTransaction(async tx => {
+        const [senderSnap, recipSnap] = await Promise.all([
+          tx.get(senderRef),
+          tx.get(db.collection('users').doc(schedule.recipientUid)),
+        ]);
 
-    // These must work fully signed-out (browsing the archive and the
-    // countdown doesn't require an account — only submitting/voting does).
-    const PUBLIC_ACTIONS = ['feedback-list-archive', 'feedback-get-cycle'];
-    const isPublicAction = PUBLIC_ACTIONS.includes(action);
+        if (!senderSnap.exists) throw { code: 'sender_missing', message: 'Sender account not found' };
+        if (!recipSnap.exists)  throw { code: 'recipient_missing', message: 'Recipient account no longer exists' };
 
-    // recommendations is a user-facing action that must also work
-    // signed-out (the panel shows non-personalized results in that case) —
-    // so it verifies a token if one was sent, but doesn't require it.
-    // check-nudge similarly degrades gracefully to "no nudge" if signed out.
-    // feedback-list-top is the same story: signed-out callers can still
-    // browse the board, but if a token IS sent we decode it so each
-    // suggestion can report the caller's own already-cast vote (myVote).
-    const OPTIONAL_AUTH_ACTIONS = ['recommendations', 'check-nudge', 'feedback-list-top'];
-    const isOptionalAuthAction = OPTIONAL_AUTH_ACTIONS.includes(action);
+        const senderData = senderSnap.data();
+        const senderBal = parseFloat((senderData.walletBalance || 0).toFixed(2));
+        const amt = Number(schedule.amount);
 
-    let callerUid = null;
-    let callerName = 'System';
-    let callerData = {};
+        if (amt > senderBal) {
+          throw {
+            code: 'insufficient_balance',
+            message: `Insufficient balance — needed $${amt.toFixed(2)}, had $${senderBal.toFixed(2)}`,
+          };
+        }
 
-    if (!isInternalTriageCall && !isPublicAction) {
-      const authHeader = req.headers.authorization || '';
-      const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        const fee        = parseFloat((amt * TRANSFER_FEE_RATE_AUTOSEND).toFixed(2));
+        const receiveAmt = parseFloat((amt - fee).toFixed(2));
 
-      if (!idToken && !isOptionalAuthAction) {
-        return res.status(401).json({ error: 'Missing auth token' });
+        const senderWithdrawable = parseFloat((senderData.withdrawableBalance || 0).toFixed(2));
+        const newSenderWithdrawable = parseFloat(Math.max(0, senderWithdrawable - amt).toFixed(2));
+        const newSenderBal = parseFloat((senderBal - amt).toFixed(2));
+
+        const recipData = recipSnap.data();
+        const recipBal = parseFloat((recipData.walletBalance || 0).toFixed(2));
+        const recipWithdrawable = parseFloat((recipData.withdrawableBalance || 0).toFixed(2));
+        const newRecipBal = parseFloat((recipBal + receiveAmt).toFixed(2));
+        const newRecipWithdrawable = parseFloat((recipWithdrawable + receiveAmt).toFixed(2));
+
+        tx.update(senderRef, { walletBalance: newSenderBal, withdrawableBalance: newSenderWithdrawable });
+        tx.update(recipSnap.ref, { walletBalance: newRecipBal, withdrawableBalance: newRecipWithdrawable });
+
+        const nextRunAt = Timestamp.fromMillis(now + schedule.intervalDays * 24 * 60 * 60 * 1000);
+        tx.update(scheduleRef, {
+          nextRunAt,
+          lastRunAt: FieldValue.serverTimestamp(),
+          runCount:  FieldValue.increment(1),
+          failCount: 0, // reset consecutive-failure counter on success
+        });
+
+        tx.set(senderRef.collection('transactions').doc(), {
+          type:      'autosend',
+          amount:    -amt,
+          fee,
+          label:     `Auto send to ${schedule.recipientName || 'recipient'}`,
+          note:      (schedule.note ? `"${schedule.note}" · ` : '') + `Repeats every ${schedule.intervalDays} days`,
+          scheduleId: scheduleRef.id,
+          status:    'completed',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+
+        tx.set(recipSnap.ref.collection('transactions').doc(), {
+          type:      'receive',
+          amount:    receiveAmt,
+          fee,
+          label:     `Received from ${senderData.displayName || senderData.username || 'auto send'}`,
+          note:      `Recurring payment · ${Math.round(TRANSFER_FEE_RATE_AUTOSEND * 100)}% fee (${fee.toFixed(2)}) applied`,
+          status:    'completed',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+
+        tx.set(recipSnap.ref.collection('notifications').doc(), {
+          type:      'wallet_transfer',
+          title:     'Money received',
+          body:      `You received a recurring payment of $${receiveAmt.toLocaleString()}.`,
+          read:      false,
+          createdAt: Date.now(),
+        });
+
+        return { newSenderBal };
+      });
+
+      succeeded++;
+      // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
+      await maybeAutoWithdraw(db, schedule.recipientUid);
+      console.log(`[autosend] OK schedule=${scheduleRef.id} sender=${senderUid} newBal=${result.newSenderBal}`);
+
+    } catch (err) {
+      failed++;
+      const code = err?.code || 'unknown_error';
+      const message = err?.message || err?.toString?.() || 'Unknown error';
+      console.warn(`[autosend] FAILED schedule=${scheduleRef.id} sender=${senderUid} code=${code}: ${message}`);
+
+      // Log the failed attempt on the sender's history — do NOT advance
+      // nextRunAt, so the next sweep retries automatically.
+      await senderRef.collection('transactions').add({
+        type:       'autosend_failed',
+        amount:     0,
+        label:      'Auto send failed',
+        note:       message,
+        failReason: code,
+        scheduleId: scheduleRef.id,
+        status:     'failed',
+        createdAt:  FieldValue.serverTimestamp(),
+      });
+
+      const newFailCount = (schedule.failCount || 0) + 1;
+      const updates = { failCount: newFailCount, lastAttemptAt: FieldValue.serverTimestamp() };
+
+      // Auto-pause after too many consecutive failures so a dead schedule
+      // (recipient deleted, permanently broke) doesn't retry forever.
+      if (newFailCount >= AUTOSEND_MAX_CONSECUTIVE_FAILS) {
+        updates.status = 'paused';
+        await senderRef.collection('transactions').add({
+          type:      'autosend_settings',
+          amount:    0,
+          label:     'Auto send paused',
+          note:      `Paused after ${newFailCount} failed attempts in a row. Review and resume from the Send tab.`,
+          status:    'completed',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      } else {
+        // Retry sooner rather than waiting a full interval again — try
+        // again on the next sweep by leaving nextRunAt in the past (no-op),
+        // it's already <= now so it'll be picked up next run automatically.
       }
 
-      if (idToken) {
-        let decoded;
-        try {
-          decoded = await admin.auth().verifyIdToken(idToken);
-        } catch {
-          if (isOptionalAuthAction) {
-            decoded = null; // bad/expired token on an optional-auth action -> treat as signed-out, don't fail the request
-          } else {
-            return res.status(401).json({ error: 'Invalid or expired auth token' });
-          }
-        }
-        if (decoded) {
-          callerUid = decoded.uid;
-          const callerSnap = await db.collection('users').doc(callerUid).get();
-          callerData = callerSnap.exists ? callerSnap.data() : {};
-          callerName = callerData.username || callerData.displayName || 'there';
-        }
-      }
+      await scheduleRef.update(updates).catch(e => console.error('[autosend] failed to update failCount', e));
     }
-
-    let result;
-    switch (action) {
-      case 'chat':
-        result = await handleChat({ messages: body.messages, callerUid, callerName });
-        break;
-      case 'scam-check':
-        result = await handleScamCheck({ text: body.text, callerUid, chatId: body.chatId });
-        break;
-      case 'auto-description':
-        result = await handleAutoDescription({
-          title: body.title,
-          targetLength: body.targetLength,
-          plan: body.plan || callerData.plan || 'free',
-          callerUid,
-        });
-        break;
-      case 'deal-message-assist':
-        result = await handleDealMessageAssist({
-          listingTitle: body.listingTitle,
-          listingSummary: body.listingSummary,
-          offerAmount: body.offerAmount,
-          userDraft: body.userDraft,
-          callerUid,
-        });
-        break;
-      case 'triage-report':
-        result = await handleTriage({ kind: 'report', reportId: body.reportId, evidence: body.evidence, callerUid });
-        break;
-      case 'triage-dispute':
-        result = await handleTriage({ kind: 'dispute', disputeId: body.disputeId, evidence: body.evidence, callerUid });
-        break;
-      case 'read-image':
-        result = await handleImageRead({ imageBase64: body.imageBase64, mimeType: body.mimeType, question: body.question });
-        break;
-      case 'analyze-reported-image':
-        result = await handleAnalyzeReportedImage({ imageUrl: body.imageUrl, context: body.context, reportId: body.reportId, disputeId: body.disputeId });
-        break;
-      case 'feedback-dedupe':
-        result = await handleFeedbackDedupe({ textA: body.textA, textB: body.textB });
-        break;
-      case 'agent-deal-decision':
-        result = await handleAgentDealDecision({
-          listingTitle: body.listingTitle,
-          listingPrice: body.listingPrice,
-          offerPrice: body.offerPrice,
-          buyerMessage: body.buyerMessage,
-          autoAcceptMinPercent: body.autoAcceptMinPercent,
-          autoRejectFloor: body.autoRejectFloor,
-        });
-        break;
-      case 'agent-auto-reply':
-        result = await handleAgentAutoReply({ listingTitle: body.listingTitle, buyerMessage: body.buyerMessage, tone: body.tone });
-        break;
-      case 'recommendations':
-        result = await handleRecommendations({ callerUid });
-        break;
-      case 'feedback-submit':
-        result = await handleFeedbackSubmit({ text: body.text, callerUid });
-        break;
-      case 'feedback-list-top':
-        result = await handleFeedbackListTop({ limit: body.limit, callerUid });
-        break;
-      case 'feedback-vote-existing':
-        result = await handleFeedbackVoteExisting({ suggestionId: body.suggestionId, callerUid, score: body.score });
-        break;
-      case 'feedback-list-archive':
-        result = await handleFeedbackListArchive({ limit: body.limit });
-        break;
-      case 'feedback-get-cycle':
-        result = await handleFeedbackGetCycle();
-        break;
-      case 'feedback-list-for-review':
-        result = await handleFeedbackListForReview({ callerData, status: body.status });
-        break;
-      case 'feedback-set-status':
-        result = await handleFeedbackSetStatus({ callerData, suggestionId: body.suggestionId, status: body.status });
-        break;
-      case 'check-nudge':
-        result = await handleFeedbackCheckNudge({ callerUid, recentAction: body.recentAction });
-        break;
-      default:
-        return res.status(400).json({ error: `Unknown action: ${action}` });
-    }
-
-    return res.status(200).json(result);
-  } catch (err) {
-    console.error('aistudio handler error:', err);
-    const status = err.status || 500;
-    return res.status(status).json({ error: err.message || 'Internal server error' });
   }
+
+  return res.status(200).json({ processed, succeeded, failed });
 }
+
+// Debits the caller's wallet, sets listings/{listingId}.boostedUntil for
+// legacy/reference purposes, and — the part that actually drives visible
+// placement — writes a denormalized ad record to boostedAds/{listingId}.
+// BoostedRow reads that collection live/uncached (listing.boosted-ads in
+// app/api/listings/_handler.js), never through the feed's TTL'd pool
+// cache, so the purchase is visible on the very next page load. The main
+// feed itself stays a plain seeded shuffle and does not rank by boost —
+// boosted listings only appear in the dedicated row.
+//
+// Price is looked up from BOOST_PLANS here — never trusts a client-sent price,
+// same principle as PLAN_IDS/PLAN_PRICES above. Caller must own the listing.
+// Stacking a boost onto an already-boosted listing extends from whichever is
+// later — now or the current boostedUntil — rather than overwriting it, so a
+// seller topping up mid-boost doesn't lose remaining paid time.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleBoostListing(req, res) {
+  const { idToken, listingId, days } = req.body;
+  if (!idToken)    return res.status(401).json({ error: 'Missing auth token' });
+  if (!listingId)  return res.status(400).json({ error: 'Missing listingId' });
+
+  const d = Number(days);
+  const price = BOOST_PLANS[d];
+  if (!price) {
+    return res.status(400).json({ error: 'Invalid boost duration' });
+  }
+
+  // 1. Verify Firebase identity
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  // 2. Run everything in a single Firestore transaction via Admin SDK —
+  //    balance check, listing ownership check, wallet debit, and the
+  //    boostedUntil write all succeed or fail together.
+  const db         = getAdminDb();
+  const userRef    = db.collection('users').doc(uid);
+  const listingRef = db.collection('listings').doc(listingId);
+
+  const result = await db.runTransaction(async tx => {
+    const [userSnap, listingSnap] = await Promise.all([
+      tx.get(userRef),
+      tx.get(listingRef),
+    ]);
+
+    if (!userSnap.exists)    throw new Error('User document not found');
+    if (!listingSnap.exists) throw new Error('Listing not found');
+
+    const listingData = listingSnap.data();
+    if (listingData.ownerId !== uid) {
+      throw new Error('You can only boost your own listings');
+    }
+
+    const bal = parseFloat((userSnap.data().walletBalance || 0).toFixed(2));
+    // Server-side balance check — client cannot spoof this
+    if (price > bal) throw new Error('Insufficient balance');
+
+    const updatedBal = parseFloat((bal - price).toFixed(2));
+
+    // Extend from the later of "now" or the current boostedUntil, so a
+    // top-up on an already-boosted listing adds time instead of wasting it.
+    const now = Date.now();
+    const currentUntilMs = listingData.boostedUntil?.toMillis?.() || 0;
+    const baseMs   = Math.max(now, currentUntilMs);
+    const newUntil = baseMs + d * 24 * 60 * 60 * 1000;
+    const newUntilTs = Timestamp.fromMillis(newUntil);
+
+    tx.update(userRef, { walletBalance: updatedBal });
+    tx.update(listingRef, {
+      boostedUntil:   newUntilTs,
+      lastBoostedAt:  FieldValue.serverTimestamp(),
+      lastBoostDays:  d,
+    });
+
+    // Write the paid ad slot itself — a fully self-contained, denormalized
+    // doc in its own `boostedAds` collection, NOT just a flag on the
+    // listings doc. This is what BoostedRow actually reads, and it reads it
+    // live/uncached (see listing.boosted-ads in app/api/listings/
+    // _handler.js) — deliberately independent of the feed's 1-hour TTL
+    // pool cache, so a boost the seller just paid real money for is
+    // visible on the very next page load, not up to an hour later.
+    // Same-transaction write means "payment succeeded" and "ad is live"
+    // can never drift apart — they commit together or not at all.
+    tx.set(db.collection('boostedAds').doc(listingId), {
+      listingId,
+      type:         listingData.type || 'website',
+      ownerId:      listingData.ownerId || null,
+      title:        listingData.title || 'Untitled',
+      tagline:      listingData.tagline || null,
+      url:          listingData.url || null,
+      images:       Array.isArray(listingData.images) ? listingData.images.slice(0, 6) : [],
+      imageCover:   listingData.imageCover || (listingData.images && listingData.images[0]) || null,
+      appIcon:      listingData.appIcon || null,
+      category:     listingData.category || null,
+      gameType:     listingData.gameType || null,
+      financials:   listingData.financials || null,
+      settings:     listingData.settings || null,
+      verified:     !!listingData.verified,
+      boostedUntil: newUntilTs,
+    });
+
+    tx.set(userRef.collection('transactions').doc(), {
+      type:       'boost',
+      amount:     -price,
+      label:      `Boosted listing · ${d} day${d !== 1 ? 's' : ''}`,
+      listingId,
+      status:     'completed',
+      createdAt:  FieldValue.serverTimestamp(),
+    });
+
+    return { updatedBal, newUntil };
+  });
+
+  // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
+
+  return res.status(200).json({
+    success:      true,
+    newBalance:   result.updatedBal,
+    boostedUntil: result.newUntil,
+    days: d,
+    price,
+  });
+}
+
+// ── Setup notes for Auto Send cron ──────────────────────────────────────────
+// 1. Set AUTOSEND_CRON_SECRET in your environment.
+// 2. Point a scheduler (Vercel Cron, cron-job.org, GitHub Actions cron, etc.)
+//    at this endpoint on whatever cadence you like — hourly is plenty, since
+//    a schedule only fires once its nextRunAt is actually due:
+//      POST /api/paypal
+//      Content-Type: application/json
+//      { "action": "autosend-run", "cronSecret": "<AUTOSEND_CRON_SECRET>" }
+// 3. Firestore requires a composite index for the collection-group query
+//    used in handleAutoSendRun (status ASC, nextRunAt ASC) on the
+//    `autosends` collection group. Firestore's error message on first run
+//    will include a direct link to create it — click it once and you're set.
+
+// ── Setup notes for Auto Withdrawal ─────────────────────────────────────────
+// 1. (Recommended) Add an `autoWithdraw` block to LIMITS in limits.js, e.g.:
+//      autoWithdraw: { minThreshold: 10, maxThreshold: 10000, minKeepBalance: 0, maxKeepBalance: 10000 }
+//    mirroring the autoTopUp block already there. This file falls back to
+//    the same defaults if that block is missing, so nothing breaks either way.
+// 2. In deal.js, after a successful escrow release credits the seller's
+//    withdrawableBalance, import and call maybeAutoWithdraw (named export
+//    below) with the seller's uid:
+//      import { maybeAutoWithdraw } from './paypal.js';
+//      await maybeAutoWithdraw(db, sellerUid);
+//    This is the only credit path not already wired up from within this file.
+// 3. Pending auto-filed withdrawals land in the same `withdrawals` collection
+//    as manual ones (flagged auto: true) — no changes needed to whatever
+//    admin process currently pays those out.
+
+export const config = {
+  api: { bodyParser: { sizeLimit: '1mb' } },
+};
+
+export { maybeAutoWithdraw };
+
