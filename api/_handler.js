@@ -1973,9 +1973,9 @@ async function handlePremiumSellers(body, idToken) {
 //     handlePremiumSellers just above, minus the per-seller follower/listing
 //     count() aggregations (not needed here since this is unranked).
 // ─────────────────────────────────────────────────────────────────────────────
-const DISCOVER_BLOG_LIMIT = 6;
+const DISCOVER_BLOG_LIMIT = 15;
 const DISCOVER_LISTING_LIMIT = 12;
-const DISCOVER_SELLER_LIMIT = 6;
+const DISCOVER_SELLER_LIMIT = 10;
 // Pull a slightly larger capped pool than we need so the seeded shuffle
 // actually varies the visible slice instead of always returning the same
 // handful in the same order.
