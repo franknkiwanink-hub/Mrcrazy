@@ -162,6 +162,30 @@
 
 .wb-continue-btn:hover { filter: brightness(1.05); }
 
+/* ── Top-right corner CTA: on mobile the bottom sticky CTA is always
+            in reach, so this stays hidden there. From 768px up the shell
+            becomes a centered card (and at ≥1024px a two-pane layout with
+            its own internal scroll regions), where the bottom CTA can end
+            up feeling out of the way — this gives a second, always-visible
+            way out from the top-right regardless of scroll position. ── */
+.wb-corner-close {
+         display: none;
+         }
+
+@media (min-width: 768px) {
+           .wb-corner-close {
+             display: flex; align-items: center; justify-content: center;
+             position: absolute; top: 16px; right: 16px; z-index: 2;
+             width: 34px; height: 34px; border-radius: 50%;
+             background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+             color: rgba(255,255,255,0.7);
+             cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+           }
+           .wb-corner-close:hover {
+             background: rgba(255,255,255,0.12); color: #fff; border-color: rgba(255,255,255,0.2);
+           }
+         }
+
 @media (max-width: 420px) {
            .wb-name { font-size: 18px; }
            .wb-earn-amt { font-size: 26px; }
