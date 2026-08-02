@@ -114,7 +114,7 @@
 .disc-rail::-webkit-scrollbar-thumb { background: var(--mp-border-hover); border-radius: 3px; }
 .disc-rail::-webkit-scrollbar-track { background: transparent; }
 
-.disc-rail > * { scroll-snap-align: start; flex: 0 0 auto; }
+.disc-rail > * { scroll-snap-align: start; flex: 0 0 auto; align-self: stretch; }
 
 .disc-blog-card {
                display: flex; flex-direction: column;
@@ -160,7 +160,8 @@
 /* Listings — reuses the real marketplace card components via
                   ListingCard; each item gets a fixed rail width so
                   ListingCard's own internal layout is untouched. */
-.disc-rail-listing-item { width: 220px; }
+.disc-rail-listing-item { width: 220px; display: flex; height: 100%; }
+.disc-rail-listing-item > * { flex: 1 1 auto; width: 100%; }
 
 /* Sellers — mirrors .mp-ts-card's avatar/name/stars layout
                   from the Premium sellers strip, as its own vertical card
