@@ -7,6 +7,7 @@ import { auth, db } from "@/lib/firebase";
 import { useAuth } from "@/lib/AuthContext";
 import { useProfileData } from "@/lib/useProfileData";
 import { useBoostModal } from "@/components/boost/BoostModalProvider";
+import { unboostListing } from "@/lib/listings";
 import { useAgentModal } from "@/components/agent/AgentModalProvider";
 import { useEditListingModal } from "@/components/listing/EditListingModalProvider";
 import { usePlansModal } from "@/components/billing/PlansModalProvider";
@@ -50,6 +51,27 @@ import PmHeaderBannerRotator from "@/components/profile/PmHeaderBannerRotator";
 //    redirect to /sell. onSaved/onDeleted both call refreshListings()
 //    so this page's own list re-fetches rather than duplicating the
 //    modal's save/delete logic locally.
+
+// Mirrors isBoosted() in lib/listings.ts but returns whole days remaining
+// (ceil, so "expires in 40 minutes" still reads as "1 day left" rather
+// than "0 days left") instead of a plain boolean — this is what the
+// "My Listings" boosted badge actually needs to display. Returns null for
+// an unboosted or already-expired listing.
+function boostDaysLeft(listing: { boostedUntil?: number | { toMillis?: () => number; seconds?: number } }): number | null {
+  const until = listing.boostedUntil;
+  if (!until) return null;
+  const ms =
+    typeof until === "number"
+      ? until
+      : until.toMillis
+        ? until.toMillis()
+        : until.seconds
+          ? until.seconds * 1000
+          : 0;
+  const remainingMs = ms - Date.now();
+  if (remainingMs <= 0) return null;
+  return Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+}
 
 const TYPE_ICONS: Record<string, ReactElement> = {
   website: (
@@ -178,6 +200,7 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [deleting, setDeleting] = useState(false);
+  const [unboostingId, setUnboostingId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [logoutConfirming, setLogoutConfirming] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -291,6 +314,27 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
       /* fall back to id-only */
     }
     openBoost(listingId, listingData);
+  }
+
+  async function handleUnboost(listingId: string) {
+    const ok = await confirm({
+      theme: "danger",
+      title: "Stop Boost?",
+      msg: "This listing will stop showing as boosted right away. Remaining boost time is not refunded.",
+      confirmText: "Stop Boost",
+    });
+    if (!ok) return;
+    setUnboostingId(listingId);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error("Not signed in");
+      await unboostListing({ idToken, listingId });
+      toast("Boost stopped.", "success");
+    } catch {
+      toast("Could not stop the boost. Please try again.", "error");
+    } finally {
+      setUnboostingId(null);
+    }
   }
 
   async function handleCancelPlan() {
@@ -726,6 +770,8 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                       const thumb = (l.images && (l.images[2] || l.images[0])) || "";
                       const title = l.title || "Untitled";
                       const desc = l.description ? l.description.slice(0, 60) + (l.description.length > 60 ? "…" : "") : "";
+                      const daysLeft = boostDaysLeft(l);
+                      const boosted = daysLeft !== null;
                       return (
                         <div className="pm-listing-card" key={l.id}>
                           {thumb ? (
@@ -744,14 +790,44 @@ export default function MyProfileHub({ initialTab }: { initialTab?: ParentTab })
                               {l.status === "draft" ? (
                                 <span style={{ fontSize: "0.65rem", background: "#222", color: "#888", padding: "2px 8px", borderRadius: "1rem", marginLeft: 4 }}>Draft</span>
                               ) : null}
+                              {boosted ? (
+                                <span
+                                  style={{
+                                    fontSize: "0.65rem", fontWeight: 800, background: "rgba(163,230,53,0.14)",
+                                    color: "#a3e635", border: "1px solid rgba(163,230,53,0.35)",
+                                    padding: "2px 8px", borderRadius: "1rem", marginLeft: 4,
+                                    display: "inline-flex", alignItems: "center", gap: 3,
+                                  }}
+                                  title={`Boosted — ${daysLeft} day${daysLeft === 1 ? "" : "s"} left`}
+                                >
+                                  <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
+                                  </svg>
+                                  BOOSTED · {daysLeft}D LEFT
+                                </span>
+                              ) : null}
                             </div>
                             {desc ? <div className="pm-listing-desc">{desc}</div> : null}
-                            <button className="pm-listing-boost" type="button" onClick={() => handleBoost(l.id)}>
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
-                              </svg>
-                              <span>BOOST LISTING</span>
-                            </button>
+                            {boosted ? (
+                              <button
+                                className="pm-listing-boost pm-listing-unboost"
+                                type="button"
+                                disabled={unboostingId === l.id}
+                                onClick={() => handleUnboost(l.id)}
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M18 6L6 18M6 6l12 12" />
+                                </svg>
+                                <span>{unboostingId === l.id ? "Stopping…" : "STOP BOOST"}</span>
+                              </button>
+                            ) : (
+                              <button className="pm-listing-boost" type="button" onClick={() => handleBoost(l.id)}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
+                                </svg>
+                                <span>BOOST LISTING</span>
+                              </button>
+                            )}
                             <div className="pm-listing-actions-row">
                               <button
                                 className="pm-listing-edit-btn"
