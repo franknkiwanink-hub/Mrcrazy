@@ -407,6 +407,13 @@ export async function updateListing(params: UpdateListingParams): Promise<Record
   return callListingsApi<Record<string, never>>("listing.update", params);
 }
 
+// Owner-only early cancel of an active boost — see handleUnboost in
+// app/api/listings/_handler.js. No refund for unused days; just stops the
+// listing from showing/behaving as boosted.
+export async function unboostListing(params: { idToken: string; listingId: string }): Promise<Record<string, never>> {
+  return callListingsApi<Record<string, never>>("listing.unboost", params);
+}
+
 // ── Domain ownership verification (action: 'listing.verify-generate' /
 // 'listing.verify-check') — see _handler.js for the full server-side
 // contract. Both owner-only; listingId must belong to the caller. Optional
