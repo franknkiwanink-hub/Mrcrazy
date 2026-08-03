@@ -19,6 +19,37 @@ export interface ListingFinancials {
   profit?: number;
 }
 
+export type SaleType = "fixed" | "auction";
+
+// Minimum-increment rule is fixed at 10% platform-wide (not seller-
+// configurable) — see MIN_BID_INCREMENT_PCT in _handler.js, the single
+// source of truth this constant mirrors for client-side display/preview
+// only. The server always re-validates independently of anything sent
+// by the client.
+export const MIN_BID_INCREMENT_PCT = 0.10;
+
+export type AuctionStatus = "scheduled" | "live" | "ended";
+
+export interface AuctionBid {
+  bidderId: string;
+  bidderHandle?: string;
+  amount: number;
+  placedAt?: unknown;
+}
+
+export interface AuctionInfo {
+  startPrice: number;
+  startTime: string;
+  endTime: string;
+  currentBid?: number | null;
+  currentBidderId?: string | null;
+  currentBidderHandle?: string | null;
+  bidCount?: number;
+  status: AuctionStatus;
+  winnerId?: string | null;
+  closedAt?: unknown;
+}
+
 export interface ListingTech {
   frontend?: string;
   backend?: string;
@@ -84,6 +115,11 @@ export interface Listing {
   ownerEmail?: string;
   ownerPlan?: string;
   financials?: ListingFinancials & { model?: string; subMonthly?: number; subAnnual?: number };
+  // Defaults to "fixed" for any listing that predates this field. When
+  // "auction", `financials.price` is unused for the buy side — bidding
+  // reads/writes exclusively through `auction` below.
+  saleType?: SaleType;
+  auction?: AuctionInfo;
   traffic?: ListingTraffic;
   tech?: ListingTech;
   settings?: ListingSettings;
@@ -359,6 +395,15 @@ export interface CreateListingParams {
   notLive?: { ios?: boolean; android?: boolean; web?: boolean; global?: boolean };
   globalBuildUrl?: string;
   attachedRepo?: AttachedRepo | null;
+  // Auction fields — see buildAuction in _handler.js for full validation
+  // rules. Omit both (or send saleType: "fixed") for an ordinary
+  // fixed-price listing; financials.price still governs that case exactly
+  // as before. When saleType is "auction", `auction` is required and the
+  // server computes/owns everything else on it (currentBid, bidCount,
+  // status, winnerId) — this client only ever sends startPrice/startTime/
+  // endTime, never the derived fields.
+  saleType?: SaleType;
+  auction?: { startPrice: number; startTime: string; endTime: string };
 }
 
 export async function createListing(
@@ -401,10 +446,33 @@ export interface UpdateListingParams {
   additionalFiles?: ListingBuildFile[];
   notLive?: boolean;
   globalBuildUrl?: string;
+  // See the matching fields on CreateListingParams above — omit both to
+  // leave the listing's current sale mode untouched (same convention as
+  // embedCode: omission means "not touching this field", not "clear it").
+  saleType?: SaleType;
+  auction?: { startPrice: number; startTime: string; endTime: string };
 }
 
 export async function updateListing(params: UpdateListingParams): Promise<Record<string, never>> {
   return callListingsApi<Record<string, never>>("listing.update", params);
+}
+
+// action: 'listing.bid' — auth required. Server enforces the 10%-over-
+// current-bid minimum, the not-your-own-listing rule, and the auction's
+// live window; this client sends only the raw amount and never computes
+// or trusts a "minimum" of its own beyond what it shows as a live preview
+// (see MIN_BID_INCREMENT_PCT above — UI-only, the server's copy in
+// _handler.js is the one actually enforced). Throws ListingsApiError with
+// code BID_TOO_LOW / AUCTION_ENDED / AUCTION_NOT_STARTED /
+// CANNOT_BID_OWN_LISTING / NOT_AN_AUCTION on rejection — BidModal.tsx
+// reads `.code` to show a specific inline message rather than a generic
+// failure banner.
+export async function placeBid(params: {
+  idToken: string;
+  listingId: string;
+  amount: number;
+}): Promise<{ currentBid: number }> {
+  return callListingsApi<{ currentBid: number }>("listing.bid", params);
 }
 
 // Owner-only early cancel of an active boost — see handleUnboost in
