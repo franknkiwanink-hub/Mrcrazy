@@ -306,6 +306,12 @@ export default function AppListingForm({ onBack }: { onBack?: () => void } = {})
   const [price, setPrice] = useState("");
   const [revenue, setRevenue] = useState("");
   const [expenses, setExpenses] = useState("");
+  // Fixed-price vs auction — see WebsiteListingForm.tsx's matching block
+  // for the full rationale; kept identical across every listing type.
+  const [saleType, setSaleType] = useState<"fixed" | "auction">("fixed");
+  const [auctionStartPrice, setAuctionStartPrice] = useState("");
+  const [auctionStartTime, setAuctionStartTime] = useState("");
+  const [auctionEndTime, setAuctionEndTime] = useState("");
   const [techFrontend, setTechFrontend] = useState("");
   const [techBackend, setTechBackend] = useState("");
   const [techDatabase, setTechDatabase] = useState("");
@@ -650,10 +656,36 @@ export default function AppListingForm({ onBack }: { onBack?: () => void } = {})
       changeStep(3);
       return;
     }
-    const priceVal = price.trim();
-    if (!priceVal || isNaN(parseFloat(priceVal)) || parseFloat(priceVal) < 0) {
-      setErrors({ fin: "Please enter a valid asking price." });
-      return;
+    let priceVal = "";
+    if (saleType === "auction") {
+      if (!auctionStartPrice.trim() || isNaN(parseFloat(auctionStartPrice)) || parseFloat(auctionStartPrice) <= 0) {
+        setErrors({ fin: "Please enter a valid starting price for your auction." });
+        return;
+      }
+      if (!auctionStartTime || !auctionEndTime) {
+        setErrors({ fin: "Please set a start and end time for your auction." });
+        return;
+      }
+      const startMs = new Date(auctionStartTime).getTime();
+      const endMs = new Date(auctionEndTime).getTime();
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+        setErrors({ fin: "Auction end time must be after the start time." });
+        return;
+      }
+      if (endMs - startMs < 60 * 60 * 1000) {
+        setErrors({ fin: "Auctions must run for at least 1 hour." });
+        return;
+      }
+      // financials.price mirrors the starting price for auctions, same
+      // convention as WebsiteListingForm — it gives the backend/cards a
+      // sane fallback number before any bid exists.
+      priceVal = auctionStartPrice.trim();
+    } else {
+      priceVal = price.trim();
+      if (!priceVal || isNaN(parseFloat(priceVal)) || parseFloat(priceVal) < 0) {
+        setErrors({ fin: "Please enter a valid asking price." });
+        return;
+      }
     }
     if (!globalNotLive) {
       if (!revenue.trim() || isNaN(parseFloat(revenue)) || !expenses.trim() || isNaN(parseFloat(expenses)) || !monetization) {
@@ -770,6 +802,14 @@ export default function AppListingForm({ onBack }: { onBack?: () => void } = {})
         financials: globalNotLive
           ? { price: parseFloat(priceVal), revenue: 0, expenses: 0 }
           : { price: parseFloat(priceVal), revenue: parseFloat(revenue), expenses: parseFloat(expenses), revenueProofUrls },
+        saleType,
+        auction: saleType === "auction"
+          ? {
+              startPrice: parseFloat(auctionStartPrice),
+              startTime: new Date(auctionStartTime).toISOString(),
+              endTime: new Date(auctionEndTime).toISOString(),
+            }
+          : undefined,
         transferMethods,
         attachedRepo: null,
       });
@@ -1126,12 +1166,67 @@ export default function AppListingForm({ onBack }: { onBack?: () => void } = {})
           <div>
             {errors.fin && <ErrorBox>{errors.fin}</ErrorBox>}
 
-            <div className="sr-lf-fin-card">
-              <Field label="Asking Price (USD)" required>
-                <div className="sr-lf-money">
-                  <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="1000" style={inputStyle} />
+            <div style={{ marginBottom: 18 }}>
+              <span style={sectionLabelStyle}>Sale Type</span>
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setSaleType("fixed")}
+                  style={{
+                    flex: 1, padding: "12px 14px", borderRadius: 10, cursor: "pointer",
+                    fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                    border: `1px solid ${saleType === "fixed" ? ACCENT : "rgba(255,255,255,0.1)"}`,
+                    background: saleType === "fixed" ? `${ACCENT}1a` : "rgba(255,255,255,0.03)",
+                    color: saleType === "fixed" ? ACCENT : "rgba(255,255,255,0.6)",
+                  }}
+                >
+                  Fixed Price
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSaleType("auction")}
+                  style={{
+                    flex: 1, padding: "12px 14px", borderRadius: 10, cursor: "pointer",
+                    fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                    border: `1px solid ${saleType === "auction" ? ACCENT : "rgba(255,255,255,0.1)"}`,
+                    background: saleType === "auction" ? `${ACCENT}1a` : "rgba(255,255,255,0.03)",
+                    color: saleType === "auction" ? ACCENT : "rgba(255,255,255,0.6)",
+                  }}
+                >
+                  Auction
+                </button>
+              </div>
+            </div>
+
+            {saleType === "auction" && (
+              <div className="sr-lf-fin-card">
+                <Field label="Starting Price (USD)" required>
+                  <div className="sr-lf-money">
+                    <input type="number" min="0" value={auctionStartPrice} onChange={(e) => setAuctionStartPrice(e.target.value)} placeholder="200" style={inputStyle} />
+                  </div>
+                </Field>
+                <div className="sr-lf-row-2">
+                  <Field label="Start Time">
+                    <input type="datetime-local" value={auctionStartTime} onChange={(e) => setAuctionStartTime(e.target.value)} style={inputStyle} />
+                  </Field>
+                  <Field label="End Time">
+                    <input type="datetime-local" value={auctionEndTime} onChange={(e) => setAuctionEndTime(e.target.value)} style={inputStyle} />
+                  </Field>
                 </div>
-              </Field>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}>
+                  Buyers must bid at least 10% above the current highest bid (or starting price for the first bid). Runs 1 hour–30 days.
+                </div>
+              </div>
+            )}
+
+            <div className="sr-lf-fin-card">
+              {saleType === "fixed" && (
+                <Field label="Asking Price (USD)" required>
+                  <div className="sr-lf-money">
+                    <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="1000" style={inputStyle} />
+                  </div>
+                </Field>
+              )}
 
               {globalNotLive && (
                 <div style={{ padding: 12, background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.2)", borderRadius: 10, marginBottom: 16, fontSize: 12, color: ACCENT }}>
