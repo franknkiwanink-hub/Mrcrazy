@@ -763,6 +763,12 @@
 
 .mp-modal-cta-deal:active { transform: scale(0.96); }
 
+.mp-modal-cta-deal:disabled {
+               opacity: 0.55; cursor: not-allowed; filter: none;
+               }
+.mp-modal-cta-deal:disabled:hover { filter: none; }
+.mp-modal-cta-deal:disabled:active { transform: none; }
+
 /* ═══════════════════════════════════════════════════════
                   AD / "PREPARING…" COUNTDOWN OVERLAY (#mpAdOverlay)
                   Shown before opening an external link/preview/game on
