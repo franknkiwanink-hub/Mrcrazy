@@ -20,6 +20,14 @@
 import { getAdminDb, serializeTimestamps } from "@/lib/server/adminDb";
 import type { Listing } from "@/lib/listings";
 import { idFromListingSlug } from "@/lib/slug";
+// @ts-ignore — _handler.js is plain JS, no types; _maybeCloseAuction lazily
+// flips an auction listing's status to "ended" (+ fires winner/seller
+// notifications) when its endTime has passed but no bid landed after the
+// deadline to trigger the same self-heal inline inside listing.bid. The
+// detail page is the highest-traffic single-listing read in the app, so
+// it's the natural place to catch anything listing.bid's own inline check
+// didn't — see that function's header comment in _handler.js.
+import { _maybeCloseAuction } from "@/app/api/listings/_handler.js";
 
 // `segment` is the raw /listing/[id] route param — either the new
 // "title-slug-{id}" format or a legacy bare id. idFromListingSlug pulls
@@ -34,5 +42,6 @@ export async function getListingById(segment: string): Promise<Listing | null> {
   const snap = await db.collection("listings").doc(id).get();
   if (!snap.exists) return null;
   const data = serializeTimestamps(snap.data()) as Omit<Listing, "id">;
-  return { id: snap.id, ...data };
+  const closed = await _maybeCloseAuction(db, snap.id, data);
+  return { id: snap.id, ...closed };
 }
