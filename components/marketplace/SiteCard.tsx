@@ -7,6 +7,7 @@ import { useCurrency } from "@/lib/CurrencyContext";
 import SellerStrip from "./SellerStrip";
 import SaveButton from "./SaveButton";
 import VerifiedBadge from "./VerifiedBadge";
+import AuctionBadge from "./AuctionBadge";
 
 const PLACEHOLDER_MAIN = "https://placehold.co/1280x720/0d0d14/444?text=No+Preview";
 
@@ -31,6 +32,11 @@ export default function SiteCard({
   const { formatPriceShort, formatFinFull } = useCurrency();
   const price = formatPriceShort(fin.price);
   const priceTooltip = typeof fin.price === "number" ? `$${fin.price.toLocaleString()} USD` : undefined;
+  const isAuction = listing.saleType === "auction" && !!listing.auction;
+  const auctionHigh = isAuction
+    ? (typeof listing.auction!.currentBid === "number" ? listing.auction!.currentBid : listing.auction!.startPrice)
+    : null;
+  const auctionPriceStr = auctionHigh !== null ? formatPriceShort(auctionHigh) : price;
   const sellerHandle = listing.ownerEmail?.split("@")[0] || "Anonymous";
 
   const mainImg = listing.images?.[2] || listing.imageCover || listing.images?.[0] || PLACEHOLDER_MAIN;
@@ -67,6 +73,7 @@ export default function SiteCard({
 
   return (
     <div ref={cardRef} className={className} data-type="website">
+      {isAuction && <AuctionBadge auction={listing.auction!} />}
       <div className="sr-site-media">
         <div className="sr-site-media-main">
           <img
@@ -112,7 +119,9 @@ export default function SiteCard({
             <h3 className="sr-site-title">{title}</h3>
             <VerifiedBadge listing={listing} />
           </div>
-          <div className="sr-site-price" title={priceTooltip}>{price}</div>
+          <div className="sr-site-price" title={isAuction ? undefined : priceTooltip}>
+            {isAuction ? auctionPriceStr : price}
+          </div>
         </div>
         <p className="sr-site-desc">
           {desc.slice(0, 110)}
@@ -153,7 +162,7 @@ export default function SiteCard({
                 onOpen(listing);
               }}
             >
-              Open site
+              {isAuction ? (listing.auction!.status === "ended" ? "View result" : "Place bid") : "Open site"}
             </button>
           </div>
         </div>
