@@ -423,6 +423,39 @@
   border: 1px solid rgba(56,189,248,.3);
 }
 
+/* ── Auction badge ──
+   Same convention as .sr-boost above: attached directly to the card root
+   (.sr-site/.sr-app/.sr-game/.sr-3d already provide position: relative),
+   positioned top-left so it never collides with .sr-boost's top-right
+   corner. z-index 3 sits below .sr-boost's 4 in the rare case a boosted
+   listing is also an auction — the boosted ribbon should still win. */
+.sr-auction-badge {
+  position: absolute; left: 8px; top: 8px; z-index: 3;
+  display: flex; flex-direction: column; gap: 2px;
+  background: rgba(8,8,13,.86);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  border: 1px solid rgba(56,189,248,.3);
+  border-radius: 10px;
+  padding: 5px 9px;
+  max-width: calc(100% - 16px);
+  pointer-events: none;
+}
+
+.sr-auction-badge[data-phase="live"] { border-color: rgba(248,113,113,.4); }
+.sr-auction-badge[data-phase="ended"] { border-color: rgba(148,148,158,.35); opacity: .85; }
+
+.sr-auction-clock {
+  font-size: 9.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  color: #f87171;
+}
+.sr-auction-badge[data-phase="upcoming"] .sr-auction-clock { color: #38bdf8; }
+.sr-auction-badge[data-phase="ended"] .sr-auction-clock { color: #94949e; }
+
+.sr-auction-bid {
+  font-size: 10px; color: #cfcfd6; white-space: nowrap;
+}
+.sr-auction-bid strong { color: #fff; font-weight: 700; }
+
 .sr-site-main { padding: 12px 14px 13px; display: flex; flex-direction: column; min-width: 0;
   border-top: 1px solid var(--sr-line); }
 
