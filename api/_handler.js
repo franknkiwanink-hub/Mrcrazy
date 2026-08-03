@@ -1,324 +1,119 @@
-// /api/deal.js — Siterifty deal & escrow handler
-// ─────────────────────────────────────────────────────────────────────────────
-// Single source of truth for ALL deal and escrow operations.
-// Previously split across limits.js (create/accept/reject/cancel-deal) and
-// paypal.js (escrow-pay/deliver/release/refund/dispute). Centralised here so
-// deal logic lives in one place and is easy to audit, extend, and test.
+// /api/paypal.js — Siterifty server-side PayPal handler
+// All money operations go through here. Frontend never touches Firestore for money.
 //
-// POST /api/deal  { action, idToken, ...params }
+// Actions (POST body: { action, ...params }):
+//   create-order   → DISABLED. PayPal deposits are no longer offered — Siterifty
+//                    holds user balances (escrow, wallet), and running that kind
+//                    of money transmission through PayPal's standard checkout
+//                    violates their acceptable-use terms for platforms holding
+//                    customer funds. PayPal is still used for the Pro
+//                    subscription only (get-plan-id/activate-sub/cancel-sub
+//                    below), which is a normal recurring charge to Siterifty,
+//                    not custody of user funds. See handleCreateOrder for the
+//                    stub response. A new deposit provider will replace this.
+//   capture-order  → DISABLED, same reasoning as create-order. Also stops
+//                    issuing/saving PayPal vault tokens — Auto Top-Up (which
+//                    depended on the vault) is removed along with it.
+//   get-plan-id    → subscription: return plan_id (never exposed in HTML)
+//   activate-sub   → subscription: verify ACTIVE with PayPal, write plan to Firestore
+//   cancel-sub     → subscription: cancel PayPal billing + downgrade to free
+//   withdraw       → wallet: debit balance, write pending withdrawal record.
+//                    method is 'paypal' | 'bank' | 'bitcoin' — payout itself is
+//                    always a manual step done outside this codebase (see
+//                    handleWithdraw's own comment); this just validates the
+//                    right fields for the chosen method and records the request.
+//   lookup-recipient → wallet: resolve a user by email for P2P transfer (server-side only —
+//                      the client never queries the users collection directly for this)
+//   transfer       → wallet: server-validated P2P balance transfer between two users
+//   boost-listing  → marketplace: debit wallet, set listings/{id}.boostedUntil so the
+//                     listing surfaces first in its type group in the feed algorithm.
+//                     Price is looked up server-side from BOOST_PLANS — the client only
+//                     ever sends `days`, never a price, so it cannot pay less than listed.
+//   [webhook]      → PayPal billing events: renewals, cancellations, payment failures
 //
-//   ── Deal lifecycle ────────────────────────────────────────────────────────
-//   action: 'create-deal'   { idToken, listingId, message, offerPrice? }
-//                            → { allowed: true, dealId }
-//                            → 409 if a pending deal already exists
+// ── Auto Top-Up ────────────────────────────────────────────────────────────
+//   REMOVED. Auto Top-Up charged a saved PayPal vault token whenever the
+//   balance dropped below a threshold — it only made sense while PayPal
+//   deposits existed. autotopup-get/autotopup-save actions and
+//   maybeAutoTopUp are gone (call sites that used to await maybeAutoTopUp
+//   after a debit now simply don't — nothing else depended on its return
+//   value, since it was always fire-and-forget).
 //
-//   action: 'accept-deal'   { idToken, dealId }
-//                            → { allowed: true, chatRoomId, expiresAt }
-//                            Seller only. Creates deal chat room atomically.
+// ── Auto Send (recurring P2P payments) ────────────────────────────────────
+//   autosend-create   → schedule a repeating transfer to another user every
+//                        N days (1, 3, 7, 14, 21, or 30) until cancelled
+//   autosend-list     → list the caller's active/paused/cancelled schedules
+//   autosend-cancel   → cancel a schedule (no further charges)
+//   autosend-run      → cron entry point (see config.autoSendCronSecret) —
+//                        processes every schedule whose nextRunAt is due,
+//                        deducts from the payer, credits the payee, and logs
+//                        success/failure (insufficient balance, missing
+//                        recipient, etc.) to both users' transaction logs
 //
-//   action: 'reject-deal'   { idToken, dealId }
-//                            → { allowed: true }
-//                            Seller only.
+// ── Auto Withdrawal (wallet settings) ─────────────────────────────────────
+//   autowithdraw-get   → read the caller's auto withdrawal settings
+//   autowithdraw-save  → enable/disable + set threshold/keepBalance/payout
+//                         method (PayPal email, bank details, or BTC address
+//                         on file)
+//   Like auto top-up used to, auto withdrawal is not a separate action the
+//   client calls to "run" it — it runs server-side (maybeAutoWithdraw) right
+//   after any successful credit to withdrawableBalance (referral bonus, P2P
+//   transfer received, auto send received — and escrow release, called from
+//   /api/deal). If the resulting withdrawable balance is at/above the user's
+//   threshold, it automatically files a payout request for everything above
+//   their configured "keep" floor, using the exact same pending-withdrawal
+//   pipeline as a manual withdraw request (same `withdrawals` collection,
+//   same transaction record shape) — it just skips the manual button tap.
 //
-//   action: 'cancel-deal'   { idToken, dealId }
-//                            → { allowed: true }
-//                            Buyer only.
-//
-//   ── Escrow lifecycle ──────────────────────────────────────────────────────
-//   Status machine:
-//     accepted → funded → delivered → complete
-//                        ↘ disputed → (refunded | complete via support)
-//     accepted → refunded  (buyer or seller cancels before funded)
-//
-//   action: 'escrow-pay'    { idToken, chatRoomId, dealId, amount }
-//                            Buyer pays wallet → escrow. Sets status='funded'.
-//                            → { success: true, escrowAmount }
-//
-//   action: 'escrow-deliver' { idToken, chatRoomId, dealId }
-//                            Seller marks as delivered. Sets status='delivered'.
-//                            Does NOT release funds — buyer must confirm.
-//                            → { success: true }
-//
-//   action: 'escrow-release' { idToken, chatRoomId, dealId }
-//                            Buyer confirms delivery. Credits seller wallet.
-//                            Sets status='complete'. Closes chat room.
-//                            → { success: true }
-//
-//   action: 'escrow-refund'  { idToken, chatRoomId, dealId }
-//                            Seller or buyer triggers refund. Refunds buyer wallet.
-//                            Sets status='refunded'. Closes chat room.
-//                            → { success: true }
-//
-//   action: 'escrow-dispute' { idToken, chatRoomId, dealId, reason }
-//                            Either party raises a dispute. Freezes escrow.
-//                            Creates a record in /disputes for admin review.
-//                            → { success: true }
-//
-//   action: 'escrow-get-download-url' { idToken, chatRoomId, dealId, storagePath }
-//                            Mints a short-lived (5 min) signed URL for a deal
-//                            deliverable stored in private Supabase storage.
-//                            Caller must be the buyer or seller on the deal.
-//                            Allowed while status is funded/delivered/disputed;
-//                            refused once complete or refunded — the buyer has
-//                            already had their verification window, so the
-//                            link is not kept alive indefinitely after the
-//                            transaction closes. (The file itself isn't
-//                            deleted — that's governed separately by
-//                            storage.js's autoCleanup — this only gates the
-//                            app-level ability to fetch a fresh link to it.)
-//                            → { url, expiresIn }
-//
-//   ── Seller Dashboard ──────────────────────────────────────────────────────
-//   action: 'list-my-deals' { idToken, range?, limit? }
-//                            → { ok: true, deals, revenue, dealsCompleted }
-//                            Caller's own deals (any status), newest first,
-//                            optionally filtered to a range matching the
-//                            dashboard's filter bar ('today'|'yesterday'|
-//                            'this-week'|'this-month'|'last-90'|'lifetime').
-//                            revenue/dealsCompleted only count status:'complete'
-//                            + dealOutcome:'successful' deals, same rule as
-//                            get-seller-stats.
-//
-// Firestore paths touched:
-//   users/{uid}/deals/{dealId}
-//   dealChats/{chatRoomId}
-//   dealChats/{chatRoomId}/messages/*
-//   users/{uid}/threads/{chatRoomId}
-//   users/{uid}/notifications/*
-//   users/{uid}/transactions/*
-//   disputes/*
-//   listings/{listingId}        (read only — to populate deal fields)
-//
-// All mutations run via Firebase Admin SDK inside Firestore transactions.
-// The client must NOT write directly to any of the above paths.
-//
-// ── AI agent module (below, same file) ────────────────────────────────────
-// The seller's AI agent (folded into this file — see "AI AGENT" section
-// near the bottom) accepts/rejects a pending deal by calling settleDealCore()
-// directly, going through the EXACT SAME transaction, chat-room creation,
-// and notification/email logic as a manual accept/reject — there is only
-// one accept/reject implementation in the app, not a duplicate "agent
-// version." The agent module used to be a separate /api/agent.js file; it
-// now lives here purely to stay under the hobby-plan serverless function
-// count (each file under /api is its own function slot).
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Escrow actions ──────────────────────────────────────────────────────────
+// escrow-pay / escrow-deliver / escrow-release / escrow-refund / escrow-dispute
+// have been moved to /api/deal (deal.js) alongside the deal lifecycle actions.
+// Update frontend callers to POST to /api/deal for all escrow actions.
 
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { supabaseCreateSignedUrl, findAccountById, deleteFiles } from '../_lib/storage.js';
 import { LIMITS } from '../_lib/limits.js';
-import { sendPushToUser } from '../_lib/push.js';
-import { dispatchWebhook } from '../_lib/webhooks.js';
 import crypto from 'crypto';
 
-// ═════════════════════════════════════════════════════════════════════════════
-// EMAIL (Resend) — sent only for the "big" moments: deal received, accepted,
-// payment funded, delivered, released (incl. auto-release), refunded (incl.
-// auto), disputed. Everyday chat/system messages stay in-app only.
-//
-// Fire-and-forget by design, same philosophy as the in-app notification
-// writes elsewhere in this file: a slow or failing email must never hold up
-// or fail the underlying money/deal transaction. Every call site awaits this
-// AFTER the Firestore transaction has already committed, and errors are
-// caught and logged, never thrown.
-// ═════════════════════════════════════════════════════════════════════════════
-
-const RESEND_API_KEY  = process.env.RESEND_API_KEY;
-const EMAIL_FROM       = process.env.DEAL_EMAIL_FROM || 'Siterifty <deals@dlsvalue.site>';
-const SITE_ORIGIN      = process.env.SITE_ORIGIN || process.env.PUBLIC_BASE_URL || '';
-
-// Brand accent per event — small visual language so buyers/sellers can
-// tell at a glance (before even reading) whether an email is good news,
-// informational, or needs attention.
-const EMAIL_ACCENTS = {
-  success: { bar: '#16a34a', chip: '#dcfce7', chipText: '#166534' }, // money in / deal won
-  info:    { bar: '#2563eb', chip: '#dbeafe', chipText: '#1e40af' }, // status update
-  warn:    { bar: '#d97706', chip: '#fef3c7', chipText: '#92400e' }, // needs action
-  danger:  { bar: '#dc2626', chip: '#fee2e2', chipText: '#991b1b' }, // dispute / rejected
+// ── Plan IDs hardcoded here (private repo) — not in frontend HTML ────────────
+// Replace these with your real PayPal plan IDs from developer.paypal.com
+const PLAN_IDS = {
+  starter: 'P-1PS58089939783309NJRHMJQ',
+  growth:  'P-5DY44028H9297735ENJRHNNA',
+  pro:     'P-3W326687TA376614CNJRHOJQ',
 };
 
-// One shared, modern HTML shell. `accentKey` picks the color language,
-// `eyebrow` is the small label chip above the headline, everything else is
-// free-form content rendered as a single content block for simplicity —
-// callers pass fully-formed inner HTML (kept short/plain per email).
-function renderDealEmail({ accentKey = 'info', eyebrow, heading, bodyHtml, ctaLabel, ctaUrl, footerNote }) {
-  const accent = EMAIL_ACCENTS[accentKey] || EMAIL_ACCENTS.info;
-  const year = new Date().getFullYear();
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${heading}</title>
-</head>
-<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 16px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" style="max-width:520px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(16,24,40,0.08);">
-          <tr>
-            <td style="height:5px;background:${accent.bar};line-height:0;font-size:0;">&nbsp;</td>
-          </tr>
-          <tr>
-            <td style="padding:32px 32px 8px 32px;">
-              <div style="display:inline-block;padding:4px 12px;border-radius:999px;background:${accent.chip};color:${accent.chipText};font-size:12px;font-weight:600;letter-spacing:0.02em;text-transform:uppercase;">
-                ${eyebrow}
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:12px 32px 0 32px;">
-              <h1 style="margin:0;font-size:22px;line-height:1.3;color:#0f1222;font-weight:700;">${heading}</h1>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 32px 8px 32px;font-size:15px;line-height:1.6;color:#3f4354;">
-              ${bodyHtml}
-            </td>
-          </tr>
-          ${ctaUrl ? `
-          <tr>
-            <td style="padding:16px 32px 8px 32px;">
-              <a href="${ctaUrl}" style="display:inline-block;background:#0f1222;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 22px;border-radius:10px;">
-                ${ctaLabel || 'View deal'}
-              </a>
-            </td>
-          </tr>` : ''}
-          <tr>
-            <td style="padding:24px 32px 0 32px;">
-              <div style="height:1px;background:#eef0f4;"></div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 32px 32px 32px;font-size:12px;line-height:1.6;color:#9aa0ae;">
-              ${footerNote || 'You are receiving this because it relates to an active deal on Siterifty.'}
-              <br>© ${year} Siterifty. All rights reserved.
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`;
-}
+// ── Boost Listing pricing — single source of truth is LIMITS.boost.plans in
+//    limits.js (mirrored to frontend for display only; this file is still
+//    what actually gets enforced — it never trusts a client-sent price).
+//    Reshaped here into a days -> price lookup map for handleBoostListing. ───
+const BOOST_PLANS = Object.fromEntries(LIMITS.boost.plans.map(p => [p.days, p.price]));
 
-// Low-level send — direct HTTPS call to Resend's API (no SDK dependency).
-// Swallows all errors; callers never need their own try/catch.
-async function sendResendEmail({ to, subject, html }) {
-  if (!RESEND_API_KEY) {
-    console.warn('[deal-email] RESEND_API_KEY not configured — skipping email:', subject);
-    return;
-  }
-  if (!to) {
-    console.warn('[deal-email] no recipient email — skipping:', subject);
-    return;
-  }
-  try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${RESEND_API_KEY}`,
-      },
-      body: JSON.stringify({ from: EMAIL_FROM, to, subject, html }),
-    });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      console.error('[deal-email] Resend API error', res.status, errText);
-    }
-  } catch (err) {
-    console.error('[deal-email] send failed (non-fatal):', err.message);
-  }
-}
+// ── Auto Send: allowed recurring intervals, in days — from limits.js ────────
+const AUTOSEND_INTERVALS = LIMITS.autoSend.intervals;
 
-// High-level helper used by every call site below. `chatRoomId` (if present)
-// links the CTA straight to the deal chat; otherwise it links to the deals
-// inbox. Kept as one function so every email shares the same URL-building
-// and shell-rendering logic.
-function dealCtaUrl(chatRoomId) {
-  if (!SITE_ORIGIN) return null; // no CTA button if we don't know our own origin
-  return chatRoomId
-    ? `${SITE_ORIGIN}/?deal=${encodeURIComponent(chatRoomId)}`
-    : `${SITE_ORIGIN}/?tab=deals`;
-}
+// Auto Top-Up (and its bounds constants) removed along with PayPal deposits.
 
-async function sendDealEmail({ to, accentKey, eyebrow, heading, bodyHtml, ctaLabel, chatRoomId, subject }) {
-  const html = renderDealEmail({
-    accentKey,
-    eyebrow,
-    heading,
-    bodyHtml,
-    ctaLabel,
-    ctaUrl: dealCtaUrl(chatRoomId),
-  });
-  await sendResendEmail({ to, subject: subject || heading, html });
-}
+// ── Auto Withdrawal: sane server-side bounds, mirroring auto top-up's
+//    pattern. Ideally sourced from LIMITS.autoWithdraw in limits.js (add it
+//    there alongside autoTopUp/autoSend for a single source of truth shared
+//    with the frontend); falls back to reasonable defaults if that block
+//    doesn't exist yet so this doesn't hard-crash on deploy. ─────────────────
+const AUTOWITHDRAW_MIN_THRESHOLD = LIMITS.autoWithdraw?.minThreshold ?? 10;
+const AUTOWITHDRAW_MAX_THRESHOLD = LIMITS.autoWithdraw?.maxThreshold ?? 10000;
+const AUTOWITHDRAW_MIN_KEEP      = LIMITS.autoWithdraw?.minKeepBalance ?? 0;
+const AUTOWITHDRAW_MAX_KEEP      = LIMITS.autoWithdraw?.maxKeepBalance ?? 10000;
+// Debounce window, same idea as autoTopUp.lastAttemptAt — stops several
+// credits landing in quick succession from firing overlapping payouts.
+const AUTOWITHDRAW_DEBOUNCE_MS = 2 * 60 * 1000;
 
-// ── Combined email + push helper ─────────────────────────────────────────────
-// "Two birds" — email and push are two independent delivery channels with
-// different failure modes (bad/unverified sender domain, spam folder, no
-// inbox at all vs. no active push subscription, browser never granted
-// permission, stale endpoint). Firing both means a single-channel outage
-// doesn't mean the user misses the notification entirely. Each channel is
-// awaited but isolated with its own .catch() so a failure in one never
-// blocks or suppresses the other — see sendDealEmail (never throws) and
-// sendPushToUser (never throws) for how each channel fails safely on its own.
-//
-// `uid` is required for push (push looks up subscriptions by uid) but email
-// params are otherwise identical to sendDealEmail's.
-async function notifyDeal({ uid, to, accentKey, eyebrow, heading, bodyHtml, ctaLabel, chatRoomId, subject, pushBody }) {
-  await Promise.all([
-    sendDealEmail({ to, accentKey, eyebrow, heading, bodyHtml, ctaLabel, chatRoomId, subject }).catch(err => {
-      console.error('[deal-notify] email failed (non-fatal):', err?.message);
-    }),
-    uid ? sendPushToUser(uid, {
-      title: heading,
-      // Push notifications render as plain text (no HTML), and are shown in
-      // a small OS-level bubble — so this uses a short, plain-text body
-      // rather than reusing bodyHtml (which contains <strong> tags meant for
-      // the email's rich HTML rendering).
-      body: pushBody || heading,
-      url: dealCtaUrl(chatRoomId) || '/',
-    }).catch(err => {
-      console.error('[deal-notify] push failed (non-fatal):', err?.message);
-    }) : Promise.resolve(),
-  ]);
-}
+// ── Cron secret for the autosend-run sweep. Set AUTOSEND_CRON_SECRET in env
+//    and point your scheduler (Vercel Cron / cron-job.org / etc.) at
+//    POST /api/paypal { action: 'autosend-run', cronSecret }
+//    on whatever cadence you like (hourly is plenty since nextRunAt is
+//    checked against "now" — a schedule only actually fires once it's due).
+const AUTOSEND_CRON_SECRET = process.env.AUTOSEND_CRON_SECRET || null;
 
-
-// ── Internal call into /api/aistudio for AI triage ──
-// Fire-and-forget from the caller's perspective — dispute filing must never
-// fail or slow down because the AI is slow/down. AISTUDIO_INTERNAL_TOKEN lets
-// aistudio.js trust this as a server-to-server call rather than requiring a
-// user's Firebase ID token (there isn't a "user" for this specific call —
-// it's this backend calling another backend route).
-async function triggerAiTriage({ kind, id, evidence }) {
-  try {
-    const base = process.env.PUBLIC_BASE_URL
-      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null);
-    if (!base) {
-      console.warn('[deal] no base URL configured (PUBLIC_BASE_URL/VERCEL_URL) — skipping AI triage trigger');
-      return;
-    }
-    await fetch(`${base}/api/aistudio`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Internal-Token': process.env.AISTUDIO_INTERNAL_TOKEN || '',
-      },
-      body: JSON.stringify({
-        action: kind === 'dispute' ? 'triage-dispute' : 'triage-report',
-        [kind === 'dispute' ? 'disputeId' : 'reportId']: id,
-        evidence,
-      }),
-    });
-  } catch (err) {
-    // Non-fatal — the dispute/report record still exists and can be triaged
-    // manually or retried later; we just log so it's visible in Vercel logs.
-    console.error('[deal] AI triage trigger failed (non-fatal):', err.message);
-  }
-}
 
 // ── Firebase Admin singleton ─────────────────────────────────────────────────
 function getAdminDb() {
@@ -335,11 +130,13 @@ function getAdminDb() {
 }
 
 // ── Admin session verification ───────────────────────────────────────────────
-// Mirrors admin.js's / paypal.js's cookie sign/verify exactly (same
-// COOKIE_NAME, same SESSION_SECRET, same HMAC-SHA256 format) so the same
-// admin_session cookie works across every serverless function without a
-// second login. Gates admin-only actions (dispute resolution) that must
-// NOT be reachable with a regular user's Firebase idToken.
+// Mirrors admin.js's cookie sign/verify exactly (same COOKIE_NAME, same
+// SESSION_SECRET, same HMAC-SHA256 format: base64url(payload) + "." + hex
+// sig) so a session created by logging into admin.html is valid here too,
+// without needing a second login or a cross-file import (each Vercel
+// function is bundled independently). Used to gate admin-only actions in
+// this file (payout approve/reject) that must NOT be reachable with a
+// regular user's Firebase idToken.
 const ADMIN_COOKIE_NAME = 'admin_session';
 function verifyAdminSession(req) {
   const header = req.headers.cookie || '';
@@ -373,90 +170,88 @@ function verifyAdminSession(req) {
   return payload; // { email, iat, exp }
 }
 
-// ── Firebase ID token verification ───────────────────────────────────────────
+// ── PayPal OAuth token (cached per cold-start) ───────────────────────────────
+let _ppToken = null;
+let _ppTokenExp = 0;
+
+async function getPayPalToken() {
+  if (_ppToken && Date.now() < _ppTokenExp) return _ppToken;
+  const base = ppBase();
+  const res = await fetch(`${base}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + Buffer.from(
+        `${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
+      ).toString('base64'),
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'grant_type=client_credentials',
+  });
+  if (!res.ok) throw new Error(`PayPal OAuth failed: ${res.status}`);
+  const data = await res.json();
+  _ppToken    = data.access_token;
+  _ppTokenExp = Date.now() + (data.expires_in - 60) * 1000;
+  return _ppToken;
+}
+
+function ppBase() {
+  return 'https://api-m.paypal.com';
+}
+
+// ── Firebase ID token verification via REST ──────────────────────────────────
+// Using the public web API key — already hardcoded in index.html, not a secret
 const FIREBASE_WEB_API_KEY = 'AIzaSyCMdI_bIYse6j3GyGDBnbE6FoGNnPKaMao';
 
 async function verifyFirebaseToken(idToken) {
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_WEB_API_KEY}`,
     {
-      method:  'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ idToken }),
+      body: JSON.stringify({ idToken }),
     }
   );
   if (!res.ok) throw new Error('Invalid Firebase token');
   const data = await res.json();
   const user = data.users?.[0];
   if (!user) throw new Error('User not found');
-  return user; // { localId, email, displayName, ... }
+  return user; // { localId, email, ... }
 }
 
-// ── Deal expiry (imported from limits constants) ──────────────────────────────
-// How long an accepted deal has to be delivered before it auto-cancels.
-// Different listing types genuinely take different amounts of work to hand
-// over, so each gets its own target — but nothing is allowed to run past the
-// 14-day hard cap regardless of type.
-const DEAL_CHAT_EXPIRY_MS_BY_TYPE = {
-  game:    7  * 24 * 60 * 60 * 1000,  // games: usually a fast handover
-  app:     14 * 24 * 60 * 60 * 1000,  // apps: store transfers, signing keys, etc. take longer
-  website: 14 * 24 * 60 * 60 * 1000,  // websites: capped down from a natural 21d to the 14d hard max
-};
-const DEAL_CHAT_EXPIRY_MS_DEFAULT = 14 * 24 * 60 * 60 * 1000; // fallback / hard cap
-const DEAL_CHAT_EXPIRY_HARD_CAP_MS = 14 * 24 * 60 * 60 * 1000;
-
-function dealExpiryMsForType(listingType) {
-  const ms = DEAL_CHAT_EXPIRY_MS_BY_TYPE[listingType] || DEAL_CHAT_EXPIRY_MS_DEFAULT;
-  return Math.min(ms, DEAL_CHAT_EXPIRY_HARD_CAP_MS);
-}
-
-// Once the seller marks a deal delivered, the buyer has this long to confirm
-// receipt (or raise a dispute) before the deal auto-completes and funds
-// release automatically. This is intentionally separate from — and does NOT
-// close the chat like — the pre-delivery deadline above: the buyer can keep
-// asking questions in the chat right up until this window closes.
-const DEAL_AUTO_RELEASE_MS = 72 * 60 * 60 * 1000; // 72 hours
-
-// ── Minimum deal message length — single source of truth is
-//    limits.js LIMITS.deals.messageMinLength, never duplicated here.
-const DEAL_MSG_MIN_LENGTH = LIMITS.deals.messageMinLength;
-
-// ── Platform escrow fee recipient ────────────────────────────────────────────
-// The seller's plan-based cut (LIMITS.saleFees — 20%/15%/10%/5% by plan) is
-// deducted at escrow release and credited to this account's wallet, same as
-// any other wallet credit (walletBalance + withdrawableBalance, transaction
-// record, notification). The account is identified by email, set via the
+// ── Platform fee recipient (P2P transfer fee, donations) ─────────────────────
+// handleTransfer's TRANSFER_FEE_RATE cut (and handleDonate's flat rate) is
+// credited to this account's wallet rather than just being deducted and
+// going nowhere. The account is identified by email, set via the
 // ADMIN_EMAIL environment variable (set in Vercel → Project → Settings →
-// Environment Variables) — never hardcoded here, so the fee recipient can be
-// changed without touching code or redeploying from source. Same variable
-// name and pattern as paypal.js — both files must agree on who collects
-// platform fees, so this is intentionally not a separate/independent value.
+// Environment Variables) — never hardcoded here, so the fee recipient can
+// be changed without touching code or redeploying from source.
 // Resolved once by email and cached in memory for the life of the serverless
-// instance — a Firestore query by email has no place inside the money-moving
-// transaction in _releaseEscrowForRoom, so this resolves ahead of time
-// instead.
+// instance — same pattern used for the escrow platform fee in deal.js. A
+// query-by-email has no place inside the money-moving transaction below, so
+// this resolves ahead of time instead.
 //
 // Lowercased at read time: Firebase Auth normalizes user emails to lowercase
 // on the users/{uid} doc, but there's nothing stopping ADMIN_EMAIL from being
 // entered with different casing in Vercel (e.g. 'Siterifty@gmail.com') — a
 // Firestore '==' query is case-sensitive, so that mismatch alone silently
 // fails the lookup even though the account exists. Normalizing here means
-// casing in the env var can never cause this again.
+// casing in the env var can never cause this again. Same fix as deal.js —
+// both files must stay in sync on this.
 //
 // Returns null (does NOT throw) if ADMIN_EMAIL is unset or the account can't
-// be found — escrow release must never block a real buyer/seller transaction
-// over a platform misconfiguration. Callers fall back to crediting the fee
-// into the platformFeesUnclaimed ledger (see _creditPlatformFeeOrLedger
-// below) instead of a live wallet when this returns null, so the fee is
-// still deducted and fully accounted for per-user, just not yet delivered
-// anywhere — nothing is silently discarded.
+// be found — transfers/donations must never block over a platform
+// misconfiguration. Callers fall back to crediting the fee into the
+// platformFeesUnclaimed ledger (see _ledgerUnclaimedFee below) instead of a
+// live wallet when this returns null, so the fee is still deducted and
+// fully accounted for per-user, just not yet delivered anywhere — nothing
+// is silently discarded.
 const PLATFORM_FEE_ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase() || null;
 let _platformFeeAdminUidCache = null;
 
 async function getPlatformFeeAdminUid(db) {
   if (_platformFeeAdminUidCache) return _platformFeeAdminUidCache;
   if (!PLATFORM_FEE_ADMIN_EMAIL) {
-    console.error('[deal.js] ADMIN_EMAIL is not set — platform fees will be ledgered as unclaimed instead of credited live. Set it in Vercel → Project → Settings → Environment Variables.');
+    console.error('[paypal.js] ADMIN_EMAIL is not set — platform fees will be ledgered as unclaimed instead of credited live. Set it in Vercel → Project → Settings → Environment Variables.');
     return null;
   }
   const snap = await db.collection('users')
@@ -464,7 +259,7 @@ async function getPlatformFeeAdminUid(db) {
     .limit(1)
     .get();
   if (snap.empty) {
-    console.error(`[deal.js] Platform fee admin account (${PLATFORM_FEE_ADMIN_EMAIL}) not found — platform fees will be ledgered as unclaimed instead of credited live.`);
+    console.error(`[paypal.js] Platform fee admin account (${PLATFORM_FEE_ADMIN_EMAIL}) not found — platform fees will be ledgered as unclaimed instead of credited live.`);
     return null;
   }
   _platformFeeAdminUidCache = snap.docs[0].id;
@@ -478,2924 +273,2191 @@ async function getPlatformFeeAdminUid(db) {
 // transaction record always shows the real amount they were charged — this
 // ledger exists purely so the *platform's* side of that same fee isn't lost
 // while the admin account is misconfigured. Each doc is one such instance,
-// fully attributed (who, what deal/transfer, how much, when) so a follow-up
-// script can sweep platformFeesUnclaimed into the real admin wallet once
-// ADMIN_EMAIL is fixed, crediting the exact right historical amount.
+// fully attributed (who, what transfer/donation, how much, when) so a
+// follow-up script can sweep platformFeesUnclaimed into the real admin
+// wallet once ADMIN_EMAIL is fixed, crediting the exact right historical
+// amount. Same shape/collection as deal.js's copy of this helper — both
+// files write into the same 'platformFeesUnclaimed' collection.
 async function _ledgerUnclaimedFee(db, { amount, source, sourceId, payerUid, counterpartyUid, note }) {
   try {
     await db.collection('platformFeesUnclaimed').add({
       amount,
-      source,          // 'escrow_release' | 'p2p_transfer' | 'donation'
-      sourceId,         // dealId / chatRoomId / transfer doc id, whatever identifies the originating transaction
-      payerUid,         // whose money this fee was deducted from
-      counterpartyUid,  // the other party on the transaction, if any
+      source,          // 'p2p_transfer' | 'donation' | 'escrow_release'
+      sourceId,
+      payerUid,
+      counterpartyUid,
       note,
       claimed: false,
       createdAt: FieldValue.serverTimestamp(),
     });
   } catch (err) {
     // Ledger write is best-effort logging on top of a fee that's already
-    // been correctly deducted from the payer inside the real transaction —
-    // never let a ledger failure retroactively break or reverse that.
-    console.error('[deal.js] failed to write unclaimed-fee ledger entry (non-fatal)', err.message);
+    // been correctly deducted inside the real transaction — never let a
+    // ledger failure retroactively break or reverse that.
+    console.error('[paypal.js] failed to write unclaimed-fee ledger entry (non-fatal)', err.message);
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MAIN HANDLER
-// ─────────────────────────────────────────────────────────────────────────────
+// ── PayPal webhook signature verification ────────────────────────────────────
+async function verifyWebhookSignature(headers, rawBody) {
+  const token = await getPayPalToken();
+  const res = await fetch(`${ppBase()}/v1/notifications/verify-webhook-signature`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type':  'application/json',
+    },
+    body: JSON.stringify({
+      auth_algo:         headers['paypal-auth-algo'],
+      cert_url:          headers['paypal-cert-url'],
+      transmission_id:   headers['paypal-transmission-id'],
+      transmission_sig:  headers['paypal-transmission-sig'],
+      transmission_time: headers['paypal-transmission-time'],
+      webhook_id:        process.env.PAYPAL_WEBHOOK_ID,
+      webhook_event:     JSON.parse(rawBody),
+    }),
+  });
+  if (!res.ok) return false;
+  const data = await res.json();
+  return data.verification_status === 'SUCCESS';
+}
+
+// ── Main handler ─────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
-  // sweep-expired-deals is a system/cron action — no end-user idToken exists
-  // for it, so it's authenticated with a shared secret instead (Vercel Cron
-  // convention: set CRON_SECRET in your project env vars, and Vercel sends
-  // it automatically as "Authorization: Bearer <CRON_SECRET>" on scheduled
-  // requests). It also accepts GET since Vercel Cron requests are GET.
-  const isSweepRequest =
-    (req.method === 'GET' && (req.query?.action === 'sweep-expired-deals')) ||
-    (req.method === 'POST' && (req.body?.action === 'sweep-expired-deals'));
-
-  if (isSweepRequest) {
-    const authHeader = req.headers['authorization'] || '';
-    const providedSecret = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : (req.body?.cronSecret || req.query?.cronSecret || '');
-    const expectedSecret = process.env.CRON_SECRET || '';
-    if (!expectedSecret || providedSecret !== expectedSecret) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    try {
-      return await handleSweepExpiredDeals(req, res);
-    } catch (err) {
-      console.error('[deal.js] sweep-expired-deals', err.message);
-      return res.status(500).json({ error: err.message || 'Internal error' });
-    }
-  }
-
-  // agent-sweep is the AI agent's cron tick (Vercel Cron, every minute) —
-  // same trust model as sweep-expired-deals above, so it reuses the same
-  // CRON_SECRET rather than introducing a second cron secret for what is,
-  // from an auth standpoint, an identical "trusted scheduler" situation.
-  const isAgentSweepRequest =
-    (req.method === 'GET' && req.query?.action === 'agent-sweep') ||
-    (req.method === 'POST' && req.body?.action === 'agent-sweep');
-
-  if (isAgentSweepRequest) {
-    const authHeader = req.headers['authorization'] || '';
-    const providedSecret = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : (req.body?.cronSecret || req.query?.cronSecret || '');
-    const expectedSecret = process.env.CRON_SECRET || '';
-    if (!expectedSecret || providedSecret !== expectedSecret) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    try {
-      return await handleAgentSweep(req, res);
-    } catch (err) {
-      console.error('[deal.js] agent-sweep', err.message);
-      return res.status(500).json({ error: err.message || 'Internal error' });
-    }
-  }
-
-  // agent-limits is a public, read-only plan/usage lookup (shown on the
-  // agent settings panel) — no idToken required, same exemption pattern as
-  // get-seller-stats below.
-  if (req.method === 'GET' && req.query?.action === 'agent-limits') {
-    try {
-      return await handleAgentLimits(req, res);
-    } catch (err) {
-      console.error('[deal.js] agent-limits', err.message);
-      return res.status(500).json({ error: err.message || 'Internal error' });
-    }
+  // PayPal webhook calls arrive without an action field but with PayPal headers
+  if (req.headers['paypal-transmission-id']) {
+    return handleWebhook(req, res);
   }
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { action, idToken } = req.body || {};
-
-  // get-seller-stats is a public, read-only aggregate (shown on any seller's
-  // public profile modal to any visitor, signed in or not) — it doesn't
-  // touch or expose anything auth-gated, so it's exempt from the idToken
-  // requirement that guards every other action below.
-  if (action === 'get-seller-stats') {
-    try {
-      return await handleGetSellerStats(req, res);
-    } catch (err) {
-      console.error('[deal.js] get-seller-stats', err.message);
-      return res.status(500).json({ error: err.message || 'Internal error' });
-    }
-  }
-
-  // record-profile-view is a public, write-only counter bump — fired by the
-  // frontend every time any visitor (signed in or not) opens a seller's
-  // public profile. Same exemption pattern as get-seller-stats above: it
-  // doesn't read or expose anything auth-gated, it just increments a field
-  // on the seller's own user doc, so no idToken is required to fire it.
-  if (action === 'record-profile-view') {
-    try {
-      return await handleRecordProfileView(req, res);
-    } catch (err) {
-      console.error('[deal.js] record-profile-view', err.message);
-      return res.status(500).json({ error: err.message || 'Internal error' });
-    }
-  }
-
-  // admin-resolve-dispute is an ADMIN-ONLY action, authenticated via the
-  // admin_session cookie (verifyAdminSession) rather than a user idToken —
-  // it must be exempted from the idToken requirement below, same pattern as
-  // get-seller-stats/record-profile-view, but its own handler does its own
-  // (stricter) auth check immediately, so this is not actually public.
-  if (action === 'admin-resolve-dispute') {
-    try {
-      return await handleAdminResolveDispute(req, res);
-    } catch (err) {
-      console.error('[deal.js] admin-resolve-dispute', err.message);
-      return res.status(500).json({ error: err.message || 'Internal error' });
-    }
-  }
-
-  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+  const { action } = req.body || {};
 
   try {
     switch (action) {
-      // ── Deal lifecycle ───────────────────────────────────────────────────
-      case 'create-deal':    return await handleCreateDeal(req, res, idToken);
-      case 'accept-deal':    return await handleAcceptDeal(req, res, idToken);
-      case 'reject-deal':    return await handleRejectDeal(req, res, idToken);
-      case 'cancel-deal':    return await handleCancelDeal(req, res, idToken);
-
-      // ── Escrow lifecycle ─────────────────────────────────────────────────
-      case 'escrow-pay':     return await handleEscrowPay(req, res, idToken);
-      case 'escrow-deliver': return await handleEscrowDeliver(req, res, idToken);
-      case 'escrow-release': return await handleEscrowRelease(req, res, idToken);
-      case 'escrow-refund':  return await handleEscrowRefund(req, res, idToken);
-      case 'escrow-dispute': return await handleEscrowDispute(req, res, idToken);
-
-      // ── Deliverable access ───────────────────────────────────────────────
-      case 'escrow-get-download-url': return await handleEscrowGetDownloadUrl(req, res, idToken);
-
-      // ── GitHub repo sharing (manual, seller-triggered) ───────────────────
-      case 'invite-github-collaborator':  return await handleInviteGithubCollaborator(req, res, idToken);
-      case 'github-collaborator-status':  return await handleGithubCollaboratorStatus(req, res, idToken);
-
-      // ── Client-safe lazy expiry check ────────────────────────────────────
-      // Any participant can ask the server to check-and-resolve their own
-      // deal room if its deadline has passed. This is a fallback so deals
-      // resolve correctly even before/without a cron job configured — the
-      // client calls this once whenever a deal chat is opened.
-      case 'check-deal-expiry': return await handleCheckDealExpiry(req, res, idToken);
-
-      // ── Seller Dashboard ─────────────────────────────────────────────────
-      case 'list-my-deals': return await handleListMyDeals(req, res, idToken);
-
-      // ── AI agent key management ──────────────────────────────────────────
-      case 'agent-check-key-limit': return await handleAgentCheckKeyLimit(req, res, idToken);
-      case 'agent-create-key':      return await handleAgentCreateKey(req, res, idToken);
-
+      case 'create-order':      return await handleCreateOrder(req, res);
+      case 'capture-order':     return await handleCaptureOrder(req, res);
+      case 'get-plan-id':       return await handleGetPlanId(req, res);
+      case 'activate-sub':      return await handleActivateSub(req, res);
+      case 'cancel-sub':        return await handleCancelSub(req, res);
+      case 'withdraw':          return await handleWithdraw(req, res);
+      case 'admin-resolve-withdrawal': return await handleAdminResolveWithdrawal(req, res);
+      case 'lookup-recipient':  return await handleLookupRecipient(req, res);
+      case 'transfer':          return await handleTransfer(req, res);
+      case 'donate':            return await handleDonate(req, res);
+      case 'get-donations':     return await handleGetDonations(req, res);
+      case 'boost-listing':     return await handleBoostListing(req, res);
+      case 'wallet-summary':    return await handleWalletSummary(req, res);
+      // autotopup-get / autotopup-save removed — Auto Top-Up depended on the
+      // PayPal vault, which no longer exists now that deposits are disabled.
+      case 'autowithdraw-get':  return await handleAutoWithdrawGet(req, res);
+      case 'autowithdraw-save': return await handleAutoWithdrawSave(req, res);
+      case 'autosend-create':   return await handleAutoSendCreate(req, res);
+      case 'autosend-list':     return await handleAutoSendList(req, res);
+      case 'autosend-cancel':   return await handleAutoSendCancel(req, res);
+      case 'autosend-run':      return await handleAutoSendRun(req, res);
       default:
         return res.status(400).json({ error: 'Unknown action' });
     }
   } catch (err) {
-    console.error('[deal.js]', action, err.message);
+    console.error('[paypal.js]', action, err.message);
     return res.status(500).json({ error: err.message || 'Internal error' });
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// get-seller-stats  { sellerUid }  — no idToken required (public read)
+// create-order  { idToken, amount, useVault? }  →  { orderID, usedVault }
 //
-// Powers the "Deals" section of the public seller profile modal: lifetime
-// completed deals + revenue, last-7-days revenue, and a breakdown of
-// completed deals by listing category (website / app / game). Deliberately
-// aggregates server-side rather than letting the client read another user's
-// users/{uid}/deals or users/{uid}/transactions subcollections directly —
-// those are private (transactions in particular carry counterparty uids,
-// platform fee math, etc.) and are not meant to be world-readable.
+// Two paths:
+//   A) Normal (first deposit or no vault on file):
+//      Creates order with store_in_vault: "ON_SUCCESS" so PayPal silently vaults
+//      the payment method if the buyer consents. No extra friction for the buyer.
+//      The vault ID (if issued) is saved during capture-order.
 //
-// Only 'complete' deals count toward these stats — pending/accepted/
-// rejected/cancelled/refunded/disputed deals are excluded since no money
-// actually changed hands (or, for disputed, it's not yet resolved).
-//
-// → {
-//     ok: true,
-//     lifetimeDeals: number,
-//     lifetimeRevenue: number,       // sum of seller's net proceeds (post platform-fee)
-//     last7DaysRevenue: number,      // same, restricted to deals completed in the last 7 days
-//     byCategory: { website: number, app: number, game: number },  // completed deal counts
-//   }
+//   B) Vault token reuse (repeat deposits, useVault: true):
+//      If paypalVaultId is stored on the user doc, we pass it directly as
+//      payment_source.token — the buyer skips the PayPal popup entirely.
+//      Falls back to path A if the stored token is stale or invalid.
 // ─────────────────────────────────────────────────────────────────────────────
-async function handleGetSellerStats(req, res) {
+// PayPal deposits are disabled — see the top-of-file comment. Left as a
+// named stub (rather than deleting the case label) so a re-enable, or
+// swapping in the new deposit provider, is a small diff instead of
+// reconstructing routing/validation from scratch.
+async function handleCreateOrder(req, res) {
+  return res.status(410).json({
+    error: 'PayPal deposits are no longer available. Adding funds will use a new payment provider — check back soon.',
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// capture-order  { idToken, orderID }  →  { success, amount, newBalance, vaultSaved? }
+//
+// After a successful capture we check the PayPal response for a vault token.
+// PayPal includes payment_source.paypal.attributes.vault.id when it has vaulted
+// the buyer's payment method (i.e. the buyer consented during checkout).
+// We save paypalVaultId + paypalVaultEmail on the user doc so future deposits
+// can use Path B in create-order (no popup, instant charge).
+// ─────────────────────────────────────────────────────────────────────────────
+// PayPal deposits are disabled — see the top-of-file comment.
+async function handleCaptureOrder(req, res) {
+  return res.status(410).json({
+    error: 'PayPal deposits are no longer available. Adding funds will use a new payment provider — check back soon.',
+  });
+}
+
+// maybeAutoTopUp (and the PayPal vault it charged) has been removed along
+// with PayPal deposits — see the top-of-file comment. Its former call
+// sites (withdraw, transfer, donate, autosend-run, boost-listing) simply
+// no longer call it; none of them used its return value.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// maybeAutoWithdraw(db, uid)
+//
+// The credit-side mirror of maybeAutoTopUp. Called (awaited, but never
+// allowed to throw back to the caller) right after any successful credit to
+// withdrawableBalance — referral bonus (activate-sub), P2P transfer received
+// (transfer), auto send received (autosend-run), and escrow release (called
+// from /api/deal's handleEscrowRelease — see note in handleWithdraw's doc
+// comment above). Checks whether the resulting withdrawable balance is at or
+// above the user's configured threshold, and if so, automatically files a
+// payout request for the amount above their configured "keep" floor.
+//
+// This deliberately reuses the exact same mechanics as a manual withdraw
+// request (handleWithdraw): debit walletBalance/withdrawableBalance, credit
+// pendingBalance, write a `withdraw` transaction record, and write a
+// `withdrawals` collection doc with status 'pending' — so an auto-filed
+// withdrawal is indistinguishable from a manual one anywhere downstream
+// (admin payout tooling, History list, etc.) except for its `auto: true`
+// flag and `autowithdraw` transaction type.
+//
+// Settings live at users/{uid}.autoWithdraw =
+//   { enabled, threshold, keepBalance, method, paypalEmail }
+// Runs OUTSIDE the caller's transaction (own fresh read + own transaction),
+// same reasoning as maybeAutoTopUp — an auto-withdraw failure must never
+// roll back the credit that triggered it. Every attempt is logged to the
+// transactions subcollection so History shows exactly what happened.
+// ─────────────────────────────────────────────────────────────────────────────
+async function maybeAutoWithdraw(db, uid) {
+  try {
+    const userRef  = db.collection('users').doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) return;
+    const data = userSnap.data();
+
+    const cfg = data.autoWithdraw;
+    if (!cfg || !cfg.enabled) return;
+
+    const threshold   = Number(cfg.threshold || 0);
+    const keepBalance = Number(cfg.keepBalance || 0);
+    const paypalEmail = cfg.paypalEmail;
+    const method      = cfg.method === 'bank' ? 'bank' : 'paypal';
+    if (!threshold || !paypalEmail) return;
+
+    const withdrawable = Number(data.withdrawableBalance || 0);
+    if (withdrawable < threshold) return; // below threshold — nothing to do
+
+    // Debounce: don't fire again within the window of the last attempt, in
+    // case several credits land in quick succession before the first
+    // auto-withdrawal has finished writing.
+    const lastAttempt = cfg.lastAttemptAt?.toMillis?.() || 0;
+    if (Date.now() - lastAttempt < AUTOWITHDRAW_DEBOUNCE_MS) return;
+
+    await userRef.update({ 'autoWithdraw.lastAttemptAt': FieldValue.serverTimestamp() });
+
+    // Withdraw everything above the configured "keep" floor.
+    const amt = parseFloat((withdrawable - keepBalance).toFixed(2));
+    if (!amt || amt < 1) return; // not enough above the floor to bother with
+
+    const fee     = parseFloat((amt * 0.05).toFixed(2));
+    const receive = parseFloat((amt - fee).toFixed(2));
+
+    await db.runTransaction(async tx => {
+      const freshSnap = await tx.get(userRef);
+      if (!freshSnap.exists) return;
+      const freshData = freshSnap.data();
+
+      const bal            = parseFloat((freshData.walletBalance || 0).toFixed(2));
+      const freshWithdrawable = parseFloat((freshData.withdrawableBalance || 0).toFixed(2));
+
+      // Re-check against the fresh read — balance may have moved between
+      // the initial check above and this transaction acquiring its lock.
+      if (amt > freshWithdrawable || amt > bal) return;
+
+      const updatedBal         = parseFloat((bal - amt).toFixed(2));
+      const updatedWithdrawable = parseFloat((freshWithdrawable - amt).toFixed(2));
+      const pending             = parseFloat(((freshData.pendingBalance || 0) + amt).toFixed(2));
+
+      tx.update(userRef, {
+        walletBalance:       updatedBal,
+        withdrawableBalance: updatedWithdrawable,
+        pendingBalance:      pending,
+      });
+
+      tx.set(userRef.collection('transactions').doc(), {
+        type:      'autowithdraw',
+        amount:    -amt,
+        fee,
+        label:     `Auto withdrawal via ${method === 'bank' ? 'Bank Transfer' : 'PayPal'}`,
+        note:      `Withdrawable balance reached your $${threshold.toFixed(2)} threshold — automatically requested $${amt.toFixed(2)}, keeping $${keepBalance.toFixed(2)} in your wallet.`,
+        method,
+        auto:      true,
+        status:    'pending',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+
+      tx.set(db.collection('withdrawals').doc(), {
+        uid,
+        paypalEmail,
+        method,
+        amount:  amt,
+        fee,
+        receive,
+        auto:    true,
+        status:  'pending',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+
+      tx.set(userRef.collection('notifications').doc(), {
+        type:      'auto_withdrawal',
+        title:     'Auto withdrawal requested',
+        body:      `Your withdrawable balance hit your $${threshold.toFixed(2)} threshold, so we requested a $${amt.toFixed(2)} payout automatically.`,
+        read:      false,
+        createdAt: Date.now(),
+      });
+    });
+
+    console.log(`[autowithdraw] Filed $${amt} payout for uid=${uid}`);
+  } catch (err) {
+    // Never let an auto withdrawal failure surface to or block the caller's
+    // original request (transfer/autosend-run/escrow-release) — just log it.
+    console.error('[autowithdraw] unexpected error', uid, err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// get-plan-id  { idToken, plan }  →  { planId }
+// Plan IDs never go in HTML — they live in PLAN_IDS above (private repo)
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleGetPlanId(req, res) {
+  const { idToken, plan } = req.body;
+  if (!idToken)         return res.status(401).json({ error: 'Missing auth token' });
+  if (!PLAN_IDS[plan])  return res.status(400).json({ error: 'Invalid plan key' });
+
+  await verifyFirebaseToken(idToken);
+  return res.status(200).json({ planId: PLAN_IDS[plan] });
+}
+
+// ── Referral commission rates (% of plan's first payment) ────────────────────
+const REFERRAL_COMMISSION_RATE = 0.30; // 30% flat for all plans
+
+// ── Plan prices (mirror limits.js — single change point if prices change) ────
+const PLAN_PRICES = { starter: 15, growth: 30, pro: 60 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// activate-sub  { idToken, plan, subscriptionID }  →  { success }
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleActivateSub(req, res) {
+  const { idToken, plan, subscriptionID } = req.body;
+  if (!idToken)        return res.status(401).json({ error: 'Missing auth token' });
+  if (!plan)           return res.status(400).json({ error: 'Missing plan' });
+  if (!subscriptionID) return res.status(400).json({ error: 'Missing subscriptionID' });
+  if (!PLAN_IDS[plan]) return res.status(400).json({ error: 'Invalid plan key' });
+
+  // 1. Verify Firebase identity
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  // 2. Verify subscription status with PayPal — must be ACTIVE
+  const token = await getPayPalToken();
+  const subRes = await fetch(`${ppBase()}/v1/billing/subscriptions/${subscriptionID}`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+
+  if (!subRes.ok) {
+    return res.status(502).json({ error: 'Could not verify subscription with PayPal' });
+  }
+
+  const sub = await subRes.json();
+
+  if (sub.status !== 'ACTIVE') {
+    return res.status(400).json({ error: `Subscription not active (status: ${sub.status})` });
+  }
+
+  // 3. Confirm plan_id matches — blocks plan-swapping attacks
+  if (sub.plan_id !== PLAN_IDS[plan]) {
+    console.error(`Plan ID mismatch: PayPal returned ${sub.plan_id}, expected ${PLAN_IDS[plan]}`);
+    return res.status(400).json({ error: 'Plan mismatch. Contact support.' });
+  }
+
+  // 4. Write to Firestore via Admin SDK
+  const db = getAdminDb();
+  const userRef = db.collection('users').doc(uid);
+  let paidReferrerUid = null; // set inside the tx if a referral bonus is paid
+
+  await db.runTransaction(async tx => {
+    const userSnap = await tx.get(userRef);
+    if (!userSnap.exists) throw new Error('User not found');
+    const userData = userSnap.data();
+
+    // Guard: only pay referral once (on first-ever paid plan activation)
+    const alreadyPaidReferral = userData.referralBonusPaid === true;
+    const referredBy = userData.referredBy || null;
+    const planPrice  = PLAN_PRICES[plan] || 0;
+    const bonus      = parseFloat((planPrice * REFERRAL_COMMISSION_RATE).toFixed(2));
+    const oldPlan    = userData.plan || 'free';
+
+    tx.update(userRef, {
+      plan:                 plan,
+      paypalSubscriptionId: subscriptionID,
+      planActivatedAt:      FieldValue.serverTimestamp(),
+      planRenewedAt:        FieldValue.serverTimestamp(),
+      planStatus:           'active',
+    });
+
+    // Keep planIndex/{free,premium} in sync with the plan write above — see
+    // listings.js's handlePremiumSellers, which reads planIndex/premium
+    // instead of scanning the whole users collection. starter/growth/pro
+    // all share one 'premium' bucket (the strip doesn't distinguish
+    // between paid tiers), so a starter→pro upgrade, for example, is a
+    // no-op here — the uid was already in planIndex/premium. Only a
+    // free→paid transition actually needs to move the uid between docs.
+    if (oldPlan === 'free') {
+      tx.set(db.collection('planIndex').doc('free'), {
+        uids: FieldValue.arrayRemove(uid),
+      }, { merge: true });
+      tx.set(db.collection('planIndex').doc('premium'), {
+        uids: FieldValue.arrayUnion(uid),
+      }, { merge: true });
+    }
+
+    // ── Pay referrer 30% of plan price (first activation only) ──
+    if (!alreadyPaidReferral && referredBy && bonus > 0) {
+      // Look up referrer by username (stored as usernameLower on signup)
+      const refSnap = await db.collection('users')
+        .where('usernameLower', '==', referredBy)
+        .limit(1)
+        .get();
+
+      if (!refSnap.empty) {
+        const refDoc  = refSnap.docs[0];
+        const refRef  = refDoc.ref;
+        const refData = refDoc.data();
+
+        // Credit referrer wallet — referral earnings are withdrawable, so
+        // both walletBalance and withdrawableBalance are credited.
+        const refBal    = parseFloat((refData.walletBalance || 0).toFixed(2));
+        const newRefBal = parseFloat((refBal + bonus).toFixed(2));
+        const refWithdrawable    = parseFloat((refData.withdrawableBalance || 0).toFixed(2));
+        const newRefWithdrawable = parseFloat((refWithdrawable + bonus).toFixed(2));
+
+        tx.update(refRef, {
+          walletBalance:       newRefBal,
+          withdrawableBalance: newRefWithdrawable,
+          referralCount:       FieldValue.increment(1),
+          referralEarned:      FieldValue.increment(bonus),
+        });
+
+        // Referrer transaction record
+        tx.set(refRef.collection('transactions').doc(), {
+          type:      'referral_bonus',
+          amount:    bonus,
+          label:     `Referral bonus · ${plan} plan (${(REFERRAL_COMMISSION_RATE * 100).toFixed(0)}%)`,
+          referredUid: uid,
+          status:    'completed',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+
+        // Notify referrer
+        tx.set(refRef.collection('notifications').doc(), {
+          type:      'referral_earned',
+          title:     'Referral bonus received! 🎉',
+          body:      `Someone you referred just subscribed to the ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan. +$${bonus.toFixed(2)} added to your wallet.`,
+          read:      false,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+
+        // Mark bonus as paid on the new subscriber's doc so we never double-pay
+        tx.update(userRef, { referralBonusPaid: true });
+
+        paidReferrerUid = refDoc.id;
+        console.log(`[referral] Paid $${bonus} to referrer uid=${refDoc.id} for new ${plan} subscriber uid=${uid}`);
+      } else {
+        console.warn(`[referral] Referrer username="${referredBy}" not found — no bonus paid`);
+      }
+    }
+  });
+
+  if (paidReferrerUid) await maybeAutoWithdraw(db, paidReferrerUid);
+
+  return res.status(200).json({ success: true, plan });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Webhook — PayPal calls this monthly for renewals, cancellations, failures
+// Register URL in PayPal Developer Dashboard: https://siterifty.com/api/paypal
+// Events to subscribe: PAYMENT.SALE.COMPLETED, BILLING.SUBSCRIPTION.*
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleWebhook(req, res) {
+  const rawBody = typeof req.body === 'string'
+    ? req.body
+    : JSON.stringify(req.body);
+
+  const valid = await verifyWebhookSignature(req.headers, rawBody);
+  if (!valid) {
+    console.warn('[webhook] Invalid PayPal signature — rejected');
+    return res.status(401).json({ error: 'Invalid webhook signature' });
+  }
+
+  const event = typeof req.body === 'string' ? JSON.parse(rawBody) : req.body;
+  const { event_type, resource } = event;
+
+  console.log('[webhook]', event_type);
+
+  const db = getAdminDb();
+
+  async function findUserBySubId(subId) {
+    const snap = await db.collection('users')
+      .where('paypalSubscriptionId', '==', subId)
+      .limit(1)
+      .get();
+    return snap.empty ? null : snap.docs[0];
+  }
+
+  switch (event_type) {
+
+    // Monthly charge succeeded — keep planRenewedAt fresh
+    case 'PAYMENT.SALE.COMPLETED': {
+      const subId = resource.billing_agreement_id;
+      if (!subId) break;
+      const userDoc = await findUserBySubId(subId);
+      if (!userDoc) break;
+      await db.collection('users').doc(userDoc.id).update({
+        planStatus:    'active',
+        planRenewedAt: FieldValue.serverTimestamp(),
+      });
+      await db.collection('users').doc(userDoc.id)
+        .collection('transactions').add({
+          type:      'plan_renewal',
+          amount:    parseFloat(resource.amount?.total || 0),
+          label:     `Plan renewal · ${resource.id}`,
+          status:    'completed',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      break;
+    }
+
+    // Cancelled or expired — drop back to free
+    case 'BILLING.SUBSCRIPTION.CANCELLED':
+    case 'BILLING.SUBSCRIPTION.EXPIRED': {
+      const userDoc = await findUserBySubId(resource.id);
+      if (!userDoc) break;
+      const uid = userDoc.id;
+      const batch = db.batch();
+      batch.update(db.collection('users').doc(uid), {
+        plan:            'free',
+        planStatus:      'cancelled',
+        planCancelledAt: FieldValue.serverTimestamp(),
+      });
+      // Keep planIndex/{free,premium} in sync — see handleActivateSub's
+      // comment on this same scheme. userDoc here already came from the
+      // findUserBySubId query above, so no extra read is needed to know
+      // this user was on a paid plan (that's the only way they'd have a
+      // paypalSubscriptionId to have matched that query in the first
+      // place).
+      batch.set(db.collection('planIndex').doc('premium'), {
+        uids: FieldValue.arrayRemove(uid),
+      }, { merge: true });
+      batch.set(db.collection('planIndex').doc('free'), {
+        uids: FieldValue.arrayUnion(uid),
+      }, { merge: true });
+      await batch.commit();
+      break;
+    }
+
+    // Payment failed — mark so UI can warn the user
+    case 'BILLING.SUBSCRIPTION.PAYMENT.FAILED': {
+      const userDoc = await findUserBySubId(resource.id);
+      if (!userDoc) break;
+      await db.collection('users').doc(userDoc.id).update({
+        planStatus: 'payment_failed',
+      });
+      break;
+    }
+
+    // Re-activated after lapse
+    case 'BILLING.SUBSCRIPTION.ACTIVATED':
+    case 'BILLING.SUBSCRIPTION.RE-ACTIVATED': {
+      const userDoc = await findUserBySubId(resource.id);
+      if (!userDoc) break;
+      await db.collection('users').doc(userDoc.id).update({
+        planStatus:    'active',
+        planRenewedAt: FieldValue.serverTimestamp(),
+      });
+      break;
+    }
+
+    default:
+      break;
+  }
+
+  // PayPal retries if it doesn't get a 200
+  return res.status(200).json({ received: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cancel-sub  { idToken }  →  { success }
+// 1. Cancels the PayPal subscription via API so billing actually stops.
+// 2. Updates Firestore via Admin SDK — frontend never touches it.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleCancelSub(req, res) {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+
+  // 1. Verify Firebase identity
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  // 2. Look up the stored PayPal subscription ID
+  const db = getAdminDb();
+  const userSnap = await db.collection('users').doc(uid).get();
+  if (!userSnap.exists) return res.status(404).json({ error: 'User not found' });
+
+  const { paypalSubscriptionId, plan } = userSnap.data();
+
+  if (!paypalSubscriptionId) {
+    return res.status(400).json({ error: 'No active subscription found' });
+  }
+  if (plan === 'free') {
+    return res.status(400).json({ error: 'Already on the free plan' });
+  }
+
+  // 3. Cancel with PayPal — this stops future billing
+  const token = await getPayPalToken();
+  const cancelRes = await fetch(
+    `${ppBase()}/v1/billing/subscriptions/${paypalSubscriptionId}/cancel`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type':  'application/json',
+      },
+      body: JSON.stringify({ reason: 'Customer requested cancellation' }),
+    }
+  );
+
+  // PayPal returns 204 No Content on success
+  if (!cancelRes.ok && cancelRes.status !== 204) {
+    const err = await cancelRes.text();
+    console.error('PayPal cancel-sub error:', cancelRes.status, err);
+    return res.status(502).json({ error: 'PayPal cancellation failed' });
+  }
+
+  // 4. Update Firestore via Admin SDK
+  const batch = db.batch();
+  batch.update(db.collection('users').doc(uid), {
+    plan:            'free',
+    planStatus:      'cancelled',
+    planCancelledAt: FieldValue.serverTimestamp(),
+  });
+  // Keep planIndex/{free,premium} in sync — see handleActivateSub's comment
+  // on this scheme. The plan==='free' check above already guarantees this
+  // uid was on a paid plan, so this is always a premium→free move, no
+  // branching needed.
+  batch.set(db.collection('planIndex').doc('premium'), {
+    uids: FieldValue.arrayRemove(uid),
+  }, { merge: true });
+  batch.set(db.collection('planIndex').doc('free'), {
+    uids: FieldValue.arrayUnion(uid),
+  }, { merge: true });
+  await batch.commit();
+
+  return res.status(200).json({ success: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// withdraw  { idToken, amount, method?, scheduledFor?, ...method-specific fields }
+//   method: 'paypal'  → paypalEmail
+//   method: 'bank'    → bankAccountName, bankAccountNumber, bankRoutingNumber, bankAccountType
+//   method: 'bitcoin' → bitcoinAddress
+//   →  { success, newBalance, newWithdrawable, fee, receive }
+//
+// Withdrawable balance is tracked SEPARATELY from walletBalance
+// (withdrawableBalance on the user doc). Only money that entered the wallet
+// from a sale/escrow-release, a P2P transfer receive, or a referral bonus is
+// withdrawable — deposited funds are spendable inside Siterifty (boosts,
+// escrow, sending to others) but can never be cashed back out, so
+// walletBalance always stays >= withdrawableBalance and this endpoint checks
+// withdrawableBalance specifically rather than the combined total.
+//
+// No payout is actually sent from here for any method, including Bitcoin —
+// this only validates the request, debits the balance, and files a pending
+// `withdrawals` doc with the payout details attached. Sending the money
+// (PayPal payout, bank ACH, or a BTC transfer) is a manual step done outside
+// this codebase; see handleAdminResolveWithdrawal for how a completed/failed
+// outcome gets marked afterward.
+//
+// `scheduledFor` (optional ISO date string) lets the user pick a future
+// payout date from the wallet UI; if omitted or in the past we process
+// against "as soon as possible" and store scheduledFor = null.
+//
+// NOTE — deal.js integration: escrow release (handleEscrowRelease in
+// /api/deal) also credits withdrawableBalance directly, outside this file.
+// To make auto withdrawal fire on that credit too, import maybeAutoWithdraw
+// from this module in deal.js and call `await maybeAutoWithdraw(db, sellerUid)`
+// right after a successful escrow release commits, the same way it's called
+// here after transfer/autosend-run/referral credits.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleWithdraw(req, res) {
+  const {
+    idToken,
+    amount,
+    method = 'paypal',
+    scheduledFor,
+    // PayPal
+    paypalEmail,
+    // Bank (US ACH)
+    bankAccountName,
+    bankAccountNumber,
+    bankRoutingNumber,
+    bankAccountType, // 'checking' | 'savings'
+    // Bitcoin — payouts are sent manually; we just need a valid-looking address.
+    bitcoinAddress,
+  } = req.body;
+
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+  if (!['paypal', 'bank', 'bitcoin'].includes(method)) {
+    return res.status(400).json({ error: 'Invalid payment method' });
+  }
+
+  // Per-method payout details — each method collects the fields that
+  // actually let a human being pay the person, not a one-size-fits-all
+  // email address.
+  let payoutDetails;
+  if (method === 'paypal') {
+    if (!paypalEmail || !paypalEmail.includes('@')) {
+      return res.status(400).json({ error: 'Enter a valid PayPal email address.' });
+    }
+    payoutDetails = { paypalEmail: paypalEmail.trim() };
+  } else if (method === 'bank') {
+    const name    = (bankAccountName || '').trim();
+    const acct    = (bankAccountNumber || '').trim();
+    const routing = (bankRoutingNumber || '').trim();
+    const type    = bankAccountType === 'savings' ? 'savings' : bankAccountType === 'checking' ? 'checking' : null;
+
+    if (!name) return res.status(400).json({ error: 'Enter the account holder name.' });
+    if (!/^\d{4,17}$/.test(acct)) return res.status(400).json({ error: 'Enter a valid account number.' });
+    if (!/^\d{9}$/.test(routing)) return res.status(400).json({ error: 'Enter a valid 9-digit routing number.' });
+    if (!type) return res.status(400).json({ error: 'Select an account type (checking or savings).' });
+
+    payoutDetails = {
+      bankAccountName:   name,
+      bankAccountNumber: acct,
+      bankRoutingNumber: routing,
+      bankAccountType:   type,
+    };
+  } else {
+    // Bitcoin — Siterifty never processes the payout itself (see
+    // handleWithdraw's top comment: payouts are always a manual step done
+    // outside this codebase); this just needs an address that's plausibly
+    // a real BTC address so it can be sent to manually. Covers legacy
+    // (1...), P2SH (3...), and bech32 (bc1...) formats without pulling in
+    // a full base58/bech32 checksum library.
+    const addr = (bitcoinAddress || '').trim();
+    const looksValid = /^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{25,59})$/.test(addr);
+    if (!looksValid) {
+      return res.status(400).json({ error: 'Enter a valid Bitcoin wallet address.' });
+    }
+    payoutDetails = { bitcoinAddress: addr };
+  }
+
+  const amt = parseFloat(amount);
+  if (!amt || amt < 1 || amt > 10000 || !isFinite(amt)) {
+    return res.status(400).json({ error: 'Amount must be between $1 and $10,000' });
+  }
+
+  // Validate the optional scheduled date — must be a real date, not in the past,
+  // and not more than 90 days out (avoid indefinite-hold scheduling abuse).
+  let scheduledTs = null;
+  if (scheduledFor) {
+    const d = new Date(scheduledFor);
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'Invalid scheduled date' });
+    const now = new Date();
+    const maxOut = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
+    if (d.getTime() < now.getTime() - 24 * 60 * 60 * 1000) {
+      return res.status(400).json({ error: 'Scheduled date cannot be in the past' });
+    }
+    if (d.getTime() > maxOut.getTime()) {
+      return res.status(400).json({ error: 'Scheduled date cannot be more than 90 days out' });
+    }
+    scheduledTs = Timestamp.fromDate(d);
+  }
+
+  // 1. Verify Firebase identity
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  const fee     = parseFloat((amt * 0.05).toFixed(2));
+  const receive = parseFloat((amt - fee).toFixed(2));
+
+  // 2. Run everything in a Firestore transaction via Admin SDK
+  const db = getAdminDb();
+  const userRef = db.collection('users').doc(uid);
+
+  // Resolved ahead of the transaction — a query-by-email has no place inside
+  // a Firestore transaction alongside doc gets/sets. Same pattern as
+  // handleTransfer/handleDonate: null means ADMIN_EMAIL is unset/
+  // unresolvable, NOT "no fee owed" — the fee is still taken from the
+  // withdrawing user's balance below either way; this only decides whether
+  // it's credited to a live admin wallet or held in the unclaimed-fees
+  // ledger until ADMIN_EMAIL is fixed.
+  const adminUid = await getPlatformFeeAdminUid(db);
+  const feeOwedButUnroutable = fee > 0 && uid !== adminUid && !adminUid;
+  const creditAdmin = fee > 0 && uid !== adminUid && !!adminUid;
+  const adminRef = creditAdmin ? db.collection('users').doc(adminUid) : null;
+  let ledgerEntry = null;
+
+  const methodLabel = method === 'bank' ? 'Bank Transfer' : method === 'bitcoin' ? 'Bitcoin' : 'PayPal';
+  const noteDetail =
+    method === 'paypal'   ? `PayPal: ${payoutDetails.paypalEmail}` :
+    method === 'bitcoin'  ? `BTC address: ${payoutDetails.bitcoinAddress}` :
+    `Bank: ${payoutDetails.bankAccountName} · ${payoutDetails.bankAccountType} · routing ${payoutDetails.bankRoutingNumber} · acct ****${payoutDetails.bankAccountNumber.slice(-4)}`;
+
+  const result = await db.runTransaction(async tx => {
+    const [snap, adminSnap] = await Promise.all([
+      tx.get(userRef),
+      adminRef ? tx.get(adminRef) : Promise.resolve(null),
+    ]);
+    if (!snap.exists) throw new Error('User document not found');
+    if (adminRef && !adminSnap.exists) throw new Error('Platform fee admin account not found');
+
+    const data = snap.data();
+    const bal      = parseFloat((data.walletBalance || 0).toFixed(2));
+    const withdrawable = parseFloat((data.withdrawableBalance || 0).toFixed(2));
+
+    // Server-side balance check — client cannot spoof this. Checked against
+    // withdrawableBalance specifically: deposited-only funds cannot be cashed out.
+    if (amt > withdrawable) {
+      throw new Error(
+        withdrawable <= 0
+          ? 'You have no withdrawable balance. Deposited funds can be spent on Siterifty but not withdrawn — only earnings from sales, transfers received, or referral bonuses qualify.'
+          : `You can only withdraw up to $${withdrawable.toFixed(2)} — the rest of your balance came from deposits, which aren't withdrawable.`
+      );
+    }
+    // Defensive: withdrawable should never exceed total, but never let the
+    // total balance go negative even if that invariant is ever violated.
+    if (amt > bal) throw new Error('Insufficient balance');
+
+    // The withdrawing user's wallet is debited the FULL amt (not just
+    // `receive`) — the 5% fee is real money leaving their balance, same as
+    // any other platform fee, and pendingBalance tracks the full hold until
+    // the downstream payout process (outside this file) actually sends
+    // `receive` to their PayPal/bank/BTC wallet. The fee itself is credited
+    // to the admin account (or ledgered) right here, at request time — it
+    // must not be left as inert metadata on the transaction/withdrawals
+    // docs with nothing ever actually collecting it.
+    const updatedBal         = parseFloat((bal - amt).toFixed(2));
+    const updatedWithdrawable = parseFloat((withdrawable - amt).toFixed(2));
+    const pending             = parseFloat(((data.pendingBalance || 0) + amt).toFixed(2));
+
+    tx.update(userRef, {
+      walletBalance:       updatedBal,
+      withdrawableBalance: updatedWithdrawable,
+      pendingBalance:      pending,
+    });
+
+    tx.set(userRef.collection('transactions').doc(), {
+      type:         'withdraw',
+      amount:       -amt,
+      fee,
+      receive,      // net amount that will actually be paid out once approved
+      label:        `Withdrawal via ${methodLabel}`,
+      note:         noteDetail + (feeOwedButUnroutable ? ' (fee pending platform reconciliation)' : ''),
+      method,
+      scheduledFor: scheduledTs,
+      status:       'pending',
+      createdAt:    FieldValue.serverTimestamp(),
+    });
+
+    tx.set(db.collection('withdrawals').doc(), {
+      uid,
+      email:  fbUser.email,
+      method,
+      ...payoutDetails,
+      amount:       amt,
+      fee,
+      receive,
+      scheduledFor: scheduledTs,
+      status:       'pending',
+      createdAt:    FieldValue.serverTimestamp(),
+    });
+
+    // Credit the platform fee to the admin account right now, same as
+    // transfer/donate/escrow-release — a fee that's computed and shown to
+    // the user but never actually collected anywhere is the exact bug this
+    // whole pass is fixing. Skipped only if the withdrawing user IS the
+    // admin account (fee <=0 already returns early via the guard above in
+    // that edge case is moot since fee is always >0 for amt>=1 at 5%).
+    if (creditAdmin) {
+      const adminBal    = parseFloat((adminSnap.data().walletBalance || 0).toFixed(2));
+      const newAdminBal = parseFloat((adminBal + fee).toFixed(2));
+      const adminWithdrawable    = parseFloat((adminSnap.data().withdrawableBalance || 0).toFixed(2));
+      const newAdminWithdrawable = parseFloat((adminWithdrawable + fee).toFixed(2));
+
+      tx.update(adminRef, { walletBalance: newAdminBal, withdrawableBalance: newAdminWithdrawable });
+
+      tx.set(adminRef.collection('transactions').doc(), {
+        type:      'platform_fee',
+        amount:    fee,
+        label:     'Platform fee · Withdrawal',
+        note:      `5% of $${amt.toLocaleString()} withdrawn by ${fbUser.email || uid}`,
+        withdrawerUid: uid,
+        status:    'completed',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } else if (feeOwedButUnroutable) {
+      ledgerEntry = {
+        amount: fee,
+        source: 'withdrawal',
+        sourceId: null,
+        payerUid: uid,
+        counterpartyUid: null,
+        note: `5% of $${amt.toLocaleString()} withdrawn by ${fbUser.email || uid} — deducted from withdrawer, held pending ADMIN_EMAIL fix`,
+      };
+    }
+
+    return { updatedBal, updatedWithdrawable };
+  });
+
+  if (ledgerEntry) {
+    await _ledgerUnclaimedFee(db, ledgerEntry);
+  }
+
+  return res.status(200).json({
+    success:         true,
+    newBalance:      result.updatedBal,
+    newWithdrawable: result.updatedWithdrawable,
+    fee,
+    receive,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// admin-resolve-withdrawal  { withdrawalId, outcome: 'completed' | 'failed' }
+// ADMIN-ONLY — gated by the admin_session cookie (verifyAdminSession), not a
+// user idToken. This never sends money itself: actual PayPal/bank payouts
+// are a manual step done outside this codebase (see handleWithdraw's doc
+// comment — "the downstream payout process (outside this file) actually
+// sends `receive`"). This action only finalizes the bookkeeping once that
+// manual step has happened (or been declined):
+//
+//   outcome: 'completed' — admin has already sent the real payout via
+//     PayPal/bank themselves. Marks the withdrawal + its transaction record
+//     completed and clears the amount out of pendingBalance (it's no longer
+//     "pending", it's done — walletBalance/withdrawableBalance were already
+//     debited at request time by handleWithdraw and stay debited).
+//
+//   outcome: 'failed' — admin is declining the payout (bad PayPal email,
+//     fraud check, etc.). Marks it failed, clears pendingBalance, AND
+//     refunds the full original amount back to walletBalance +
+//     withdrawableBalance — undoing the debit handleWithdraw made upfront.
+//     Without this refund the user's money would simply vanish.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleAdminResolveWithdrawal(req, res) {
+  const session = verifyAdminSession(req);
+  if (!session) return res.status(401).json({ error: 'Not authenticated as admin' });
+
+  const { withdrawalId, outcome } = req.body || {};
+  if (!withdrawalId) return res.status(400).json({ error: 'Missing withdrawalId' });
+  if (!['completed', 'failed'].includes(outcome)) {
+    return res.status(400).json({ error: 'outcome must be "completed" or "failed"' });
+  }
+
+  const db = getAdminDb();
+  const withdrawalRef = db.collection('withdrawals').doc(withdrawalId);
+
+  const result = await db.runTransaction(async tx => {
+    const wSnap = await tx.get(withdrawalRef);
+    if (!wSnap.exists) throw new Error('Withdrawal not found');
+    const w = wSnap.data();
+
+    if (w.status !== 'pending') {
+      throw new Error(`Cannot resolve — withdrawal status is already "${w.status}"`);
+    }
+
+    const uid = w.uid;
+    const amt = parseFloat(w.amount || 0);
+    if (!uid || !amt) throw new Error('Withdrawal record is missing uid/amount');
+
+    const userRef = db.collection('users').doc(uid);
+    const userSnap = await tx.get(userRef);
+    if (!userSnap.exists) throw new Error('User not found');
+    const userData = userSnap.data();
+
+    // Clear the hold either way — it's no longer pending once resolved.
+    const currentPending = parseFloat((userData.pendingBalance || 0).toFixed(2));
+    const newPending = Math.max(0, parseFloat((currentPending - amt).toFixed(2)));
+
+    const userUpdate = { pendingBalance: newPending };
+
+    if (outcome === 'failed') {
+      // Refund exactly what was debited at request time — the full amt
+      // (not `receive`), matching how handleWithdraw took it out.
+      const currentBal = parseFloat((userData.walletBalance || 0).toFixed(2));
+      const currentWithdrawable = parseFloat((userData.withdrawableBalance || 0).toFixed(2));
+      userUpdate.walletBalance = parseFloat((currentBal + amt).toFixed(2));
+      userUpdate.withdrawableBalance = parseFloat((currentWithdrawable + amt).toFixed(2));
+    }
+
+    tx.update(userRef, userUpdate);
+    tx.update(withdrawalRef, {
+      status: outcome,
+      resolvedAt: FieldValue.serverTimestamp(),
+      resolvedBy: session.email,
+    });
+
+    // Log a transaction record so this shows up in the user's history —
+    // separate from the original 'withdraw' debit record, same pattern as
+    // escrow_refund being its own record rather than editing the original.
+    if (outcome === 'failed') {
+      tx.set(userRef.collection('transactions').doc(), {
+        type: 'withdraw_failed',
+        amount: amt,
+        label: 'Withdrawal declined — refunded',
+        note: `Your $${amt.toFixed(2)} withdrawal request was declined and refunded to your wallet.`,
+        withdrawalId,
+        status: 'completed',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } else {
+      tx.set(userRef.collection('transactions').doc(), {
+        type: 'withdraw_completed',
+        amount: -amt,
+        label: 'Withdrawal completed',
+        note: `Your $${(w.receive ?? amt).toFixed(2)} payout was sent.`,
+        withdrawalId,
+        status: 'completed',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
+
+    return { uid, amt, refunded: outcome === 'failed' };
+  });
+
+  // Notify the user (best-effort, non-blocking of the response)
+  try {
+    await db.collection('users').doc(result.uid).collection('notifications').add({
+      type: outcome === 'failed' ? 'withdrawal_failed' : 'withdrawal_completed',
+      title: outcome === 'failed' ? 'Withdrawal declined' : 'Withdrawal completed',
+      body: outcome === 'failed'
+        ? `Your $${result.amt.toFixed(2)} withdrawal request was declined and refunded to your wallet.`
+        : `Your $${result.amt.toFixed(2)} withdrawal has been sent.`,
+      read: false,
+      createdAt: Date.now(),
+    });
+  } catch (_) {
+    // Non-fatal — the resolution itself already succeeded.
+  }
+
+  return res.status(200).json({ success: true, outcome, refunded: result.refunded });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// lookup-recipient  { idToken, email }  →  { uid, displayName, username, email, profilePic }
+//
+// Resolves a Siterifty user by email for a P2P transfer. This runs server-side
+// (with the Admin SDK) rather than letting the client query the `users`
+// collection directly by email — querying by email client-side would let
+// anyone enumerate registered accounts and pull back whatever fields
+// Firestore rules happen to expose. This endpoint returns only the minimal
+// fields the transfer UI actually needs (profilePic included so the wallet's
+// Send tab can show a real avatar instead of just initials).
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleLookupRecipient(req, res) {
+  const { idToken, email } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+
+  const cleanEmail = (email || '').trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    return res.status(400).json({ error: 'Enter a valid email address' });
+  }
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  if (cleanEmail === (fbUser.email || '').toLowerCase()) {
+    return res.status(400).json({ error: 'You cannot send money to yourself' });
+  }
+
+  const db = getAdminDb();
+  const snap = await db.collection('users')
+    .where('email', '==', cleanEmail)
+    .limit(1)
+    .get();
+
+  if (snap.empty) {
+    return res.status(404).json({ error: 'No Siterifty account found with that email' });
+  }
+
+  const foundDoc = snap.docs[0];
+  const data = foundDoc.data();
+  return res.status(200).json({
+    uid:         foundDoc.id,
+    displayName: data.displayName || '',
+    username:    data.username || '',
+    email:       data.email || cleanEmail,
+    profilePic:  data.profilePic || null,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// transfer  { idToken, recipientUid, amount, note? }  →  { success, newBalance, fee, receiveAmount }
+//
+// Server-validated P2P wallet transfer. Previously this ran as a client-side
+// Firestore transaction with no server involved at all — any tampering with
+// client JS could bypass the balance check or the fee calculation entirely.
+// Now the sender's balance, the recipient's existence, and the fee math are
+// all re-verified here with the Admin SDK inside a single transaction, the
+// same pattern as handleWithdraw above.
+//
+// ── DISABLED (2026-07-25) ────────────────────────────────────────────────────
+// User-to-user wallet transfers move real ledger balance between two
+// ordinary users with no PayPal (or other licensed) rail in the middle —
+// that's custodial money transmission, which Siterifty is not currently
+// licensed for. Wallet balance is licensed-safe ONLY as a spend-only credit
+// for boosting listings; it must never be sendable to another user or
+// cashed out until Siterifty holds (or partners for) a money transmitter
+// license. Gated at the top of the handler, not removed — all validation,
+// fee-split, and ledgering logic below is untouched and ready to re-enable
+// by deleting this early return once licensed. See TransferMethodPicker/
+// SendTab.tsx for the matching frontend placeholder.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleTransfer(req, res) {
+  return res.status(410).json({
+    error: 'Sending money to other users isn\'t available yet — Siterifty wallet balance is currently limited to boosting your own listings. This feature will return once Siterifty completes money-transmission licensing. PayPal handles the full escrow-protected marketplace transaction.',
+  });
+}
+
+// Original implementation kept below, unreachable — see the disabled-notice
+// comment above for why, and for exactly what to delete to restore it.
+async function _handleTransfer_DISABLED_pendingLicense(req, res) {
+  const { idToken, recipientUid, amount, note } = req.body;
+  if (!idToken)      return res.status(401).json({ error: 'Missing auth token' });
+  if (!recipientUid) return res.status(400).json({ error: 'Missing recipient' });
+
+  const amt = parseFloat(amount);
+  if (!amt || amt <= 0 || amt > 10000 || !isFinite(amt)) {
+    return res.status(400).json({ error: 'Amount must be between $0.01 and $10,000' });
+  }
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const senderUid = fbUser.localId;
+
+  if (senderUid === recipientUid) {
+    return res.status(400).json({ error: 'You cannot send money to yourself' });
+  }
+
+  const TRANSFER_FEE_RATE = LIMITS.wallet.transferFee;
+  // Guard against a missing/misconfigured rate silently sending 100% of the
+  // transfer fee-free. A rate must be a finite number in [0, 1) — 0 is a
+  // legitimate "no fee" config and is allowed through; anything else
+  // (undefined because LIMITS.wallet or .transferFee doesn't exist, NaN,
+  // negative, or >=1 i.e. >=100%) means the config itself is broken, and a
+  // broken config should fail loudly here rather than quietly waive the fee
+  // on every transfer until someone notices real dollars going missing.
+  if (typeof TRANSFER_FEE_RATE !== 'number' || !isFinite(TRANSFER_FEE_RATE) || TRANSFER_FEE_RATE < 0 || TRANSFER_FEE_RATE >= 1) {
+    console.error('[paypal.js] LIMITS.wallet.transferFee is missing or invalid:', TRANSFER_FEE_RATE);
+    return res.status(500).json({ error: 'Transfer fee is not configured correctly. Please try again later.' });
+  }
+  const fee        = parseFloat((amt * TRANSFER_FEE_RATE).toFixed(2));
+  const receiveAmt = parseFloat((amt - fee).toFixed(2));
+  const safeNote   = (note || '').slice(0, 200);
+
+  const db         = getAdminDb();
+  const senderRef  = db.collection('users').doc(senderUid);
+  const recipRef   = db.collection('users').doc(recipientUid);
+
+  // Resolved ahead of the transaction — a query-by-email has no place inside
+  // a Firestore transaction alongside doc gets/sets for sender/recipient.
+  // null means ADMIN_EMAIL is unset/unresolvable — NOT "no fee owed".
+  const adminUid = await getPlatformFeeAdminUid(db);
+
+  // Two DISTINCT reasons the recipient might get the full amount — these
+  // must never be conflated:
+  //  - noFeeOwed: either party IS the platform admin account, or the fee
+  //    rounds to $0. Correctly no fee to collect from anyone.
+  //  - feeOwedButUnroutable: a real fee IS owed and IS deducted from the
+  //    recipient below, same as normal — there's just nowhere live to
+  //    credit it (adminUid is null) because ADMIN_EMAIL is unset/
+  //    misconfigured. That fee goes to the unclaimed-fees ledger after
+  //    this transaction commits, not to the recipient and not into the void.
+  const noFeeOwed = fee <= 0 || senderUid === adminUid || recipientUid === adminUid;
+  const feeOwedButUnroutable = !noFeeOwed && !adminUid;
+  const applyFeeSplit = !noFeeOwed; // recipient's side pays the fee either way unless noFeeOwed
+
+  // adminRef is resolved (and read, if needed) up front alongside the
+  // sender/recipient reads — Firestore transactions require every tx.get()
+  // to run before any tx.update()/tx.set(), so this can't be fetched later,
+  // conditionally, after the writes below have already been queued.
+  const adminRef = (applyFeeSplit && adminUid) ? db.collection('users').doc(adminUid) : null;
+  let ledgerEntry = null; // set inside the transaction if we need to ledger post-commit
+
+  const result = await db.runTransaction(async tx => {
+    const [senderSnap, recipSnap, adminSnap] = await Promise.all([
+      tx.get(senderRef),
+      tx.get(recipRef),
+      adminRef ? tx.get(adminRef) : Promise.resolve(null),
+    ]);
+
+    if (!senderSnap.exists) throw new Error('Your user profile could not be found');
+    if (!recipSnap.exists)  throw new Error('Recipient account not found');
+    if (adminRef && !adminSnap.exists) throw new Error('Platform fee admin account not found');
+
+    const senderData = senderSnap.data();
+    const senderBal = parseFloat((senderData.walletBalance || 0).toFixed(2));
+    // Server-side balance check — client cannot spoof this
+    if (amt > senderBal) throw new Error('Insufficient balance');
+
+    // Sending money draws down withdrawable dollars first (capped at 0) —
+    // this is the conservative choice: it never lets someone end up with
+    // more withdrawableBalance than the money they actually earned.
+    const senderWithdrawable = parseFloat((senderData.withdrawableBalance || 0).toFixed(2));
+    const newSenderWithdrawable = parseFloat(Math.max(0, senderWithdrawable - amt).toFixed(2));
+
+    const recipData = recipSnap.data();
+    const recipBal = parseFloat((recipData.walletBalance || 0).toFixed(2));
+    const recipWithdrawable = parseFloat((recipData.withdrawableBalance || 0).toFixed(2));
+    const newSenderBal = parseFloat((senderBal - amt).toFixed(2));
+    const creditToRecip = applyFeeSplit ? receiveAmt : amt;
+    const newRecipBal  = parseFloat((recipBal + creditToRecip).toFixed(2));
+    // Money received from another user counts as withdrawable — only a
+    // straight PayPal deposit is excluded from withdrawableBalance.
+    const newRecipWithdrawable = parseFloat((recipWithdrawable + creditToRecip).toFixed(2));
+
+    tx.update(senderRef, { walletBalance: newSenderBal, withdrawableBalance: newSenderWithdrawable });
+    tx.update(recipRef,  { walletBalance: newRecipBal,  withdrawableBalance: newRecipWithdrawable });
+
+    const senderName = fbUser.displayName || fbUser.email?.split('@')[0] || 'Someone';
+    const recipName  = recipData.displayName || recipData.username || recipData.email?.split('@')[0] || 'User';
+
+    tx.set(senderRef.collection('transactions').doc(), {
+      type:      'send',
+      amount:    -amt,
+      fee:       0,
+      receiveAmount: creditToRecip, // what the recipient actually got, net of the fee they paid — shown in the sender's own wallet history so "sent $100" doesn't read as if $100 arrived
+      label:     `Sent to ${recipName}`,
+      note:      safeNote || `to ${recipData.email || recipientUid}`,
+      status:    'completed',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    // Recipient's own transaction record always shows the REAL fee they
+    // were charged, whether or not we could route it to a live admin
+    // wallet — this must never disagree with what actually landed in
+    // their balance.
+    const recipTxRecord = {
+      type:      'receive',
+      amount:    creditToRecip,
+      fee:       applyFeeSplit ? fee : 0,
+      label:     `Received from ${senderName}`,
+      status:    'completed',
+      createdAt: FieldValue.serverTimestamp(),
+    };
+    recipTxRecord.note = applyFeeSplit
+      ? (safeNote ? `"${safeNote}" · ` : '') + `${Math.round(TRANSFER_FEE_RATE * 100)}% fee (${fee.toFixed(2)}) applied`
+        + (feeOwedButUnroutable ? ' (fee pending platform reconciliation)' : '')
+      : (safeNote || '');
+    tx.set(recipRef.collection('transactions').doc(), recipTxRecord);
+
+    // Credit the platform's cut to the admin account — only when a real fee
+    // is owed AND we have somewhere live to put it. If a fee is owed but
+    // adminUid is null (feeOwedButUnroutable), the fee has still been
+    // deducted from the recipient's credit above — it's queued for the
+    // unclaimed-fees ledger after the transaction commits, not dropped here.
+    if (applyFeeSplit && adminRef) {
+      const adminBal    = parseFloat((adminSnap.data().walletBalance || 0).toFixed(2));
+      const newAdminBal = parseFloat((adminBal + fee).toFixed(2));
+      const adminWithdrawable    = parseFloat((adminSnap.data().withdrawableBalance || 0).toFixed(2));
+      const newAdminWithdrawable = parseFloat((adminWithdrawable + fee).toFixed(2));
+
+      tx.update(adminRef, { walletBalance: newAdminBal, withdrawableBalance: newAdminWithdrawable });
+
+      tx.set(adminRef.collection('transactions').doc(), {
+        type:      'platform_fee',
+        amount:    fee,
+        label:     'Platform fee · P2P transfer',
+        note:      `${Math.round(TRANSFER_FEE_RATE * 100)}% of $${amt.toLocaleString()} sent from ${senderName} to ${recipName}`,
+        senderUid,
+        recipientUid,
+        status:    'completed',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } else if (feeOwedButUnroutable) {
+      ledgerEntry = {
+        amount: fee,
+        source: 'p2p_transfer',
+        sourceId: null,
+        payerUid: recipientUid, // the fee was deducted from the recipient's credit, same party as before
+        counterpartyUid: senderUid,
+        note: `${Math.round(TRANSFER_FEE_RATE * 100)}% of $${amt.toLocaleString()} sent from ${senderName} to ${recipName} — deducted from recipient, held pending ADMIN_EMAIL fix`,
+      };
+    }
+
+    tx.set(recipRef.collection('notifications').doc(), {
+      type:      'wallet_transfer',
+      title:     'Money received',
+      body:      `${senderName} sent you $${creditToRecip.toLocaleString()}${safeNote ? ' — "' + safeNote + '"' : ''}.`,
+      read:      false,
+      createdAt: Date.now(),
+    });
+
+    return { newSenderBal, newSenderWithdrawable, recipName, creditToRecip };
+  });
+
+  if (ledgerEntry) {
+    await _ledgerUnclaimedFee(db, ledgerEntry);
+  }
+
+  // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
+  await maybeAutoWithdraw(db, recipientUid);
+
+  return res.status(200).json({
+    success:         true,
+    newBalance:      result.newSenderBal,
+    newWithdrawable: result.newSenderWithdrawable,
+    fee:             applyFeeSplit ? fee : 0,
+    receiveAmount:   result.creditToRecip,
+    recipientName:   result.recipName,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// donate  { idToken, sellerUid, amount, note? }
+//   →  { success, newBalance, newWithdrawable, fee, receiveAmount, sellerName }
+//
+// Buyer-to-seller wallet donation, shown on the seller's public profile
+// modal. Modeled directly on handleTransfer above (same server-verified
+// balance check + atomic transaction pattern) with two differences:
+//   - Fee is a fixed 30% platform cut, always applied (no plan-based
+//     tiers, no admin-account exemption skip — donations are a flat rate
+//     regardless of who's receiving them).
+//   - Every donation is additionally logged to
+//     users/{sellerUid}/donations/{autoId} — a dedicated, append-only
+//     record separate from the general transactions subcollection, which
+//     is what handleGetDonations reads to power the "total donated" +
+//     "last 10 donations" list on the donate modal. Keeping this in its
+//     own subcollection means that public read never has to filter a
+//     user's full (privacy-sensitive) transaction history down to just
+//     donations — it only ever reads donations.
+// ─────────────────────────────────────────────────────────────────────────────
+const DONATION_FEE_RATE = 0.30;
+const DONATION_MIN = 1;
+const DONATION_MAX = 2500;
+
+// ── DISABLED (2026-07-25) ─────────────────────────────────────────────────
+// Only the money-moving action is gated here — the donate overlay itself
+// (summary stats, recent donations list, get-donations) stays fully live.
+// Donating drew from the donor's wallet balance and credited the seller's
+// wallet balance directly, same as P2P transfer: custodial wallet-to-wallet
+// money movement with no PayPal (or other licensed) rail involved, which
+// Siterifty isn't currently licensed for. Once licensed, donations will
+// move to PayPal split payments (like escrow) instead of wallet balance —
+// so this returns a 410 rather than being restored to wallet debits when
+// re-enabled. Frontend: DonateOverlay.tsx's submit button is disabled with
+// a "coming soon" state; everything else on that overlay is untouched.
+// ─────────────────────────────────────────────────────────────────────────
+async function handleDonate(req, res) {
+  return res.status(410).json({
+    error: 'Donations aren\'t available right now — we\'re moving this to PayPal split payments. Check back soon.',
+  });
+}
+
+// Original implementation kept below, unreachable — see the disabled-notice
+// comment above for why, and what replaces it (PayPal split payments, not a
+// wallet-debit restore) when this comes back.
+async function _handleDonate_DISABLED_pendingPaypalSplit(req, res) {
+  const { idToken, sellerUid, amount, note } = req.body;
+  if (!idToken)   return res.status(401).json({ error: 'Missing auth token' });
+  if (!sellerUid) return res.status(400).json({ error: 'Missing seller' });
+
+  const amt = parseFloat(amount);
+  if (!amt || amt < DONATION_MIN || amt > DONATION_MAX || !isFinite(amt)) {
+    return res.status(400).json({ error: `Amount must be between $${DONATION_MIN} and $${DONATION_MAX.toLocaleString()}` });
+  }
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const donorUid = fbUser.localId;
+
+  if (donorUid === sellerUid) {
+    return res.status(400).json({ error: 'You cannot donate to yourself' });
+  }
+
+  const fee        = parseFloat((amt * DONATION_FEE_RATE).toFixed(2));
+  const receiveAmt = parseFloat((amt - fee).toFixed(2));
+  const safeNote    = (note || '').slice(0, 200);
+
+  const db        = getAdminDb();
+  const donorRef  = db.collection('users').doc(donorUid);
+  const sellerRef = db.collection('users').doc(sellerUid);
+
+  // Resolved ahead of the transaction, same reasoning as handleTransfer —
+  // a query has no place inside a transaction alongside doc gets/sets.
+  // null means ADMIN_EMAIL is unset/unresolvable.
+  const adminUid = await getPlatformFeeAdminUid(db);
+  // Unlike handleTransfer, the fee is never waived from the seller's side
+  // even if one party is the admin account — donations are a flat 30% by
+  // design, not a plan-based/exemptable fee. adminIsParty only controls
+  // whether the *admin* gets credited (crediting an account its own fee on
+  // a donation to/from itself would just be a no-op double-entry).
+  // feeOwedButUnroutable is the DISTINCT case where a real fee is owed and
+  // deducted from the seller as normal, but adminUid is null — there's
+  // nowhere live to credit it, so it goes to the unclaimed-fees ledger
+  // instead. These two must never be conflated: adminIsParty=false but
+  // adminUid=null must NOT build a doc(null) reference.
+  const adminIsParty = adminUid != null && (donorUid === adminUid || sellerUid === adminUid);
+  const feeOwedButUnroutable = !adminIsParty && !adminUid;
+  const creditAdmin = !adminIsParty && !!adminUid;
+
+  // adminRef is resolved (and read, if needed) up front alongside the
+  // donor/seller reads — Firestore transactions require every tx.get() to
+  // run before any tx.update()/tx.set(), so this can't be fetched later,
+  // conditionally, after the writes below have already been queued.
+  const adminRef = creditAdmin ? db.collection('users').doc(adminUid) : null;
+  let ledgerEntry = null; // set inside the transaction if we need to ledger post-commit
+
+  const result = await db.runTransaction(async tx => {
+    const [donorSnap, sellerSnap, adminSnap] = await Promise.all([
+      tx.get(donorRef),
+      tx.get(sellerRef),
+      adminRef ? tx.get(adminRef) : Promise.resolve(null),
+    ]);
+
+    if (!donorSnap.exists)  throw new Error('Your user profile could not be found');
+    if (!sellerSnap.exists) throw new Error('Seller account not found');
+    if (adminRef && !adminSnap.exists) throw new Error('Platform fee admin account not found');
+
+    const donorData = donorSnap.data();
+    const donorBal = parseFloat((donorData.walletBalance || 0).toFixed(2));
+    // Server-side balance check — client cannot spoof this
+    if (amt > donorBal) throw new Error('Insufficient balance');
+
+    // Donating draws down withdrawable dollars first (capped at 0), same
+    // conservative rule as handleTransfer/escrow-pay.
+    const donorWithdrawable = parseFloat((donorData.withdrawableBalance || 0).toFixed(2));
+    const newDonorWithdrawable = parseFloat(Math.max(0, donorWithdrawable - amt).toFixed(2));
+
+    const sellerData = sellerSnap.data();
+    const sellerBal = parseFloat((sellerData.walletBalance || 0).toFixed(2));
+    const sellerWithdrawable = parseFloat((sellerData.withdrawableBalance || 0).toFixed(2));
+    const newDonorBal   = parseFloat((donorBal - amt).toFixed(2));
+    const newSellerBal  = parseFloat((sellerBal + receiveAmt).toFixed(2));
+    // Donations received count as withdrawable, same as P2P transfers.
+    const newSellerWithdrawable = parseFloat((sellerWithdrawable + receiveAmt).toFixed(2));
+
+    tx.update(donorRef,  { walletBalance: newDonorBal,  withdrawableBalance: newDonorWithdrawable });
+    tx.update(sellerRef, { walletBalance: newSellerBal, withdrawableBalance: newSellerWithdrawable });
+
+    const donorName  = fbUser.displayName || donorData.username || fbUser.email?.split('@')[0] || 'Anonymous';
+    const sellerName = sellerData.displayName || sellerData.username || sellerData.email?.split('@')[0] || 'Seller';
+
+    tx.set(donorRef.collection('transactions').doc(), {
+      type:      'donate',
+      amount:    -amt,
+      fee:       0,
+      label:     `Donated to ${sellerName}`,
+      note:      safeNote,
+      sellerUid,
+      status:    'completed',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    tx.set(sellerRef.collection('transactions').doc(), {
+      type:      'donation_received',
+      amount:    receiveAmt,
+      fee,
+      label:     `Donation from ${donorName}`,
+      note:      (safeNote ? `"${safeNote}" · ` : '') + `30% fee ($${fee.toFixed(2)}) applied`,
+      donorUid,
+      status:    'completed',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    // Dedicated donations log — this is what the donate modal's "last 10
+    // donations" list and running total read from. donorName/donorPic are
+    // denormalized onto the record itself (rather than joined at read
+    // time) so the public list never has to look up the donor's user doc.
+    tx.set(sellerRef.collection('donations').doc(), {
+      donorUid,
+      donorName,
+      donorPic:  donorData.profilePic || null,
+      amount:    receiveAmt,
+      grossAmount: amt,
+      fee,
+      note:      safeNote,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    if (creditAdmin) {
+      const adminBal    = parseFloat((adminSnap.data().walletBalance || 0).toFixed(2));
+      const newAdminBal = parseFloat((adminBal + fee).toFixed(2));
+      const adminWithdrawable    = parseFloat((adminSnap.data().withdrawableBalance || 0).toFixed(2));
+      const newAdminWithdrawable = parseFloat((adminWithdrawable + fee).toFixed(2));
+
+      tx.update(adminRef, { walletBalance: newAdminBal, withdrawableBalance: newAdminWithdrawable });
+
+      tx.set(adminRef.collection('transactions').doc(), {
+        type:      'platform_fee',
+        amount:    fee,
+        label:     'Platform fee · Donation',
+        note:      `30% of $${amt.toLocaleString()} donated by ${donorName} to ${sellerName}`,
+        donorUid,
+        sellerUid,
+        status:    'completed',
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    } else if (feeOwedButUnroutable) {
+      ledgerEntry = {
+        amount: fee,
+        source: 'donation',
+        sourceId: null,
+        payerUid: sellerUid, // the fee was deducted from the seller's receipt, same party as before
+        counterpartyUid: donorUid,
+        note: `30% of $${amt.toLocaleString()} donated by ${donorName} to ${sellerName} — deducted from seller, held pending ADMIN_EMAIL fix`,
+      };
+    }
+
+    tx.set(sellerRef.collection('notifications').doc(), {
+      type:      'donation_received',
+      title:     'You received a donation! 💚',
+      body:      `${donorName} donated $${receiveAmt.toLocaleString()}${safeNote ? ' — "' + safeNote + '"' : ''}.`,
+      read:      false,
+      createdAt: Date.now(),
+    });
+
+    return { newDonorBal, newDonorWithdrawable, sellerName };
+  });
+
+  if (ledgerEntry) {
+    await _ledgerUnclaimedFee(db, ledgerEntry);
+  }
+
+  // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
+  await maybeAutoWithdraw(db, sellerUid);
+
+  return res.status(200).json({
+    success:         true,
+    newBalance:      result.newDonorBal,
+    newWithdrawable: result.newDonorWithdrawable,
+    fee,
+    receiveAmount:   receiveAmt,
+    sellerName:      result.sellerName,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// get-donations  { sellerUid }  →  { ok, totalDonated, donationCount, recent: [...] }
+//
+// Public, read-only aggregate for the donate modal — total lifetime amount
+// donated to this seller (net of the 30% fee, i.e. what they actually
+// received) and their 10 most recent donations (donor name/pic, amount,
+// timestamp). No auth required: this is meant to be visible to anyone
+// viewing the seller's profile, same visibility level as their listings
+// or follower count. Reads only the dedicated donations subcollection
+// (never the general transactions collection), which only ever contains
+// the denormalized, already-public-safe fields written by handleDonate.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleGetDonations(req, res) {
   const sellerUid = req.body?.sellerUid;
   if (!sellerUid || typeof sellerUid !== 'string') {
     return res.status(400).json({ error: 'Missing sellerUid' });
   }
 
   const db = getAdminDb();
-  const dealsSnap = await db.collection('users').doc(sellerUid).collection('deals')
-    .where('status', '==', 'complete')
-    .get();
+  const donationsRef = db.collection('users').doc(sellerUid).collection('donations');
 
-  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-  const now = Date.now();
+  const [recentSnap, allSnap] = await Promise.all([
+    donationsRef.orderBy('createdAt', 'desc').limit(10).get(),
+    // Lifetime total needs every donation, not just the last 10 — this
+    // collection is append-only and per-seller, so a full scan here is
+    // cheap even for very active sellers (thousands of donations would
+    // still be a fast, single-purpose read).
+    donationsRef.get(),
+  ]);
 
-  let lifetimeDeals = 0;
-  let lifetimeRevenue = 0;
-  let last7DaysRevenue = 0;
-  const byCategory = { website: 0, app: 0, game: 0 };
+  let totalDonated = 0;
+  allSnap.forEach(d => {
+    const amt = d.data().amount;
+    if (typeof amt === 'number') totalDonated += amt;
+  });
 
-  dealsSnap.forEach(d => {
-    const deal = d.data();
-    lifetimeDeals += 1;
-
-    const type = ['website', 'app', 'game'].includes(deal.listingType) ? deal.listingType : 'website';
-    byCategory[type] += 1;
-
-    // Prefer the actual net amount credited to the seller (escrowAmount minus
-    // platform fee) when available; fall back to listingPrice/offerPrice so
-    // older deal docs (written before this field existed) still count
-    // toward lifetime totals, just without 7-day precision if undated.
-    const amount = typeof deal.sellerNetAmount === 'number' ? deal.sellerNetAmount
-      : typeof deal.escrowAmount === 'number' ? deal.escrowAmount
-      : typeof deal.listingPrice === 'number' ? deal.listingPrice
-      : typeof deal.offerPrice === 'number' ? deal.offerPrice
-      : 0;
-    lifetimeRevenue += amount;
-
-    const completedAtMs = deal.completedAt?.toMillis ? deal.completedAt.toMillis()
-      : deal.createdAt?.toMillis ? deal.createdAt.toMillis()
-      : null;
-    if (completedAtMs && (now - completedAtMs) <= SEVEN_DAYS_MS) {
-      last7DaysRevenue += amount;
-    }
+  const recent = recentSnap.docs.map(d => {
+    const don = d.data();
+    return {
+      donorName: don.donorName || 'Anonymous',
+      donorPic:  don.donorPic || null,
+      amount:    don.amount || 0,
+      note:      don.note || '',
+      createdAt: don.createdAt?.toMillis ? don.createdAt.toMillis() : null,
+    };
   });
 
   return res.status(200).json({
     ok: true,
-    lifetimeDeals,
-    lifetimeRevenue: parseFloat(lifetimeRevenue.toFixed(2)),
-    last7DaysRevenue: parseFloat(last7DaysRevenue.toFixed(2)),
-    byCategory,
+    totalDonated: parseFloat(totalDonated.toFixed(2)),
+    donationCount: allSnap.size,
+    recent,
   });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// list-my-deals  { idToken, range?, limit? }  → { ok: true, deals, revenue, dealsCompleted }
+// wallet-summary  { idToken }
+//   →  { walletBalance, withdrawableBalance, pendingBalance,
+//         escrowHeld, escrowIncoming, escrowCount }
 //
-// Powers the Seller Dashboard's Recent Deals table + Revenue chart. Unlike
-// get-seller-stats (public aggregate for any seller's profile modal), this
-// is the CALLER'S OWN deals — auth required, not a public read — and it
-// returns individual deal records (not just totals), since the dashboard
-// needs a real per-deal list to render as table rows and a day-by-day
-// series, not just a lifetime/7-day sum.
+// Single call the wallet modal uses to paint the balance hero + escrow
+// banner accurately. escrowHeld = money THIS user has paid into escrow as a
+// buyer on deals that haven't released/refunded yet (still locked, not
+// spendable). escrowIncoming = money owed to this user as a seller on
+// funded-but-not-yet-released deals (not theirs to spend or withdraw until
+// the buyer confirms and the deal actually releases funds into
+// walletBalance/withdrawableBalance via /api/deal's escrow-release).
 //
-// `range` mirrors the dashboard's filter bar: 'today' | 'yesterday' |
-// 'this-week' | 'this-month' | 'last-90' | 'lifetime'. Filtering happens
-// server-side against createdAt so the client never has to fetch-then-trim.
-// Defaults to 'last-90' if omitted/unrecognised.
-//
-// Every status is returned (not just 'complete') — the dashboard table
-// shows pending/active/cancelled deals too, same statuses the deal chat UI
-// itself uses. Revenue/dealsCompleted totals, however, only count 'complete'
-// deals with dealOutcome:'successful', same rule as get-seller-stats, so the
-// two surfaces never disagree about what counts as "revenue."
+// Reads users/{uid}/deals — the same subcollection the chat/deal-status UI
+// already reads client-side (see chat room escrow status banner) — so the
+// numbers shown here always match what the deal screens show.
 // ─────────────────────────────────────────────────────────────────────────────
-const DEAL_LIST_RANGE_DAYS = {
-  today: 1, yesterday: 2, 'this-week': 7, 'this-month': 31, 'last-90': 90, lifetime: null,
-};
-const DEAL_LIST_MAX = 200;
+async function handleWalletSummary(req, res) {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
 
-async function handleListMyDeals(req, res, idToken) {
   const fbUser = await verifyFirebaseToken(idToken);
   const uid = fbUser.localId;
 
-  const { range, limit } = req.body || {};
-  const days = Object.prototype.hasOwnProperty.call(DEAL_LIST_RANGE_DAYS, range)
-    ? DEAL_LIST_RANGE_DAYS[range]
-    : DEAL_LIST_RANGE_DAYS['last-90'];
-  const size = Math.min(DEAL_LIST_MAX, Math.max(1, Number(limit) || DEAL_LIST_MAX));
-
   const db = getAdminDb();
-  let query = db.collection('users').doc(uid).collection('deals')
-    .orderBy('createdAt', 'desc')
-    .limit(size);
+  const userSnap = await db.collection('users').doc(uid).get();
+  if (!userSnap.exists) return res.status(404).json({ error: 'User not found' });
+  const userData = userSnap.data();
 
-  if (days != null) {
-    const cutoff = Timestamp.fromMillis(Date.now() - days * 24 * 60 * 60 * 1000);
-    query = db.collection('users').doc(uid).collection('deals')
-      .where('createdAt', '>=', cutoff)
-      .orderBy('createdAt', 'desc')
-      .limit(size);
-  }
+  // Escrow is tracked per-deal on users/{uid}/deals/{dealId}, mirroring the
+  // chatRoom doc's paymentStatus/escrowAmount fields (see index.html's chat
+  // escrow status banner for the same field names).
+  const dealsSnap = await db.collection('users').doc(uid).collection('deals').get();
 
-  const snap = await query.get();
+  let escrowHeld = 0;      // this user is the buyer, funds locked
+  let escrowIncoming = 0;  // this user is the seller, funds locked, not theirs yet
+  let escrowCount = 0;
 
-  let revenue = 0;
-  let dealsCompleted = 0;
-
-  const deals = snap.docs.map(d => {
+  // Field names verified against deal.js: escrow-pay (handleEscrowPay) mirrors
+  // paymentStatus + escrowAmount onto users/{uid}/deals/{dealId} for both the
+  // buyer and seller copy, and buyerUid/sellerUid are set once at deal
+  // creation (handleCreateDeal) and never overwritten afterward, so they're
+  // present on both mirror docs for the lifetime of the deal.
+  dealsSnap.forEach(d => {
     const deal = d.data();
-    const isSuccessfulComplete = deal.status === 'complete' && deal.dealOutcome === 'successful';
-
-    // Same amount-resolution order as get-seller-stats: prefer the actual
-    // net proceeds credited to the seller, fall back through the earlier
-    // fields for deals completed before sellerNetAmount existed.
-    const amount = typeof deal.sellerNetAmount === 'number' ? deal.sellerNetAmount
-      : typeof deal.escrowAmount === 'number' ? deal.escrowAmount
-      : typeof deal.listingPrice === 'number' ? deal.listingPrice
-      : typeof deal.offerPrice === 'number' ? deal.offerPrice
-      : 0;
-
-    if (isSuccessfulComplete) {
-      revenue += amount;
-      dealsCompleted += 1;
-    }
-
-    const createdAtMs = deal.createdAt?.toMillis ? deal.createdAt.toMillis() : null;
-    const completedAtMs = deal.completedAt?.toMillis ? deal.completedAt.toMillis() : null;
-
-    return {
-      dealId:       deal.dealId || d.id,
-      listingId:    deal.listingId || null,
-      listingTitle: deal.listingTitle || 'Untitled',
-      listingType:  deal.listingType || 'website',
-      buyerName:    deal.buyerName || 'Buyer',
-      buyerUid:     deal.buyerUid || null,
-      amount,
-      status:       deal.status || 'pending',
-      dealOutcome:  deal.dealOutcome || null,
-      createdAt:    createdAtMs,
-      completedAt:  completedAtMs,
-    };
+    if (deal.paymentStatus !== 'funded') return; // only actively-held escrow counts
+    const amt = Number(deal.escrowAmount || deal.price || 0);
+    if (!amt) return;
+    escrowCount++;
+    if (deal.buyerUid === uid) escrowHeld += amt;
+    else if (deal.sellerUid === uid) escrowIncoming += amt;
   });
 
   return res.status(200).json({
-    ok: true,
-    deals,
-    revenue: parseFloat(revenue.toFixed(2)),
-    dealsCompleted,
+    walletBalance:       Number(userData.walletBalance || 0),
+    withdrawableBalance: Number(userData.withdrawableBalance || 0),
+    pendingBalance:       Number(userData.pendingBalance || 0),
+    escrowHeld:           parseFloat(escrowHeld.toFixed(2)),
+    escrowIncoming:       parseFloat(escrowIncoming.toFixed(2)),
+    escrowCount,
   });
 }
 
 
-// Public, write-only counter bump on users/{sellerUid}.profileViewCount.
-// Fired by the frontend every time a seller's public profile is opened —
-// including by the seller viewing their own profile, since "how many times
-// was this profile opened" is the honest metric; sellers aren't excluded
-// from their own count any more than a listing owner is excluded from a
-// listing's own view count elsewhere in the app.
-//
-// Uses FieldValue.increment(), same atomic-op pattern as listings.js's
-// view/click counters — no read-modify-write race under concurrent visits.
-//
-// Abuse note: same tradeoff as listings.js's view/click counters — this is
-// an unauthenticated-by-design analytics pixel (anonymous profile visits
-// are real traffic sellers want counted), so it can't be fully bot/refresh-
-// proofed at the API layer. We guard the cheap stuff (missing/garbage
-// sellerUid, nonexistent user, tight-loop duplicate fires from the same
-// caller) via a short in-memory debounce; real bot filtering belongs in
-// front of this route (e.g. edge/WAF rate limiting), not here.
 // ─────────────────────────────────────────────────────────────────────────────
-const PROFILE_VIEW_DEBOUNCE_MS = 4000;
-const _recentProfileViews = new Map(); // key: `${sellerUid}:${viewerKey}` -> timestamp
-function _pruneRecentProfileViews() {
-  const cutoff = Date.now() - PROFILE_VIEW_DEBOUNCE_MS * 5;
-  for (const [key, ts] of _recentProfileViews) {
-    if (ts < cutoff) _recentProfileViews.delete(key);
-  }
-}
-
-async function handleRecordProfileView(req, res) {
-  const { sellerUid, idToken } = req.body || {};
-  if (!sellerUid || typeof sellerUid !== 'string') {
-    return res.status(400).json({ error: 'Missing sellerUid' });
-  }
-
-  // Verify the token only if one was sent — same pattern as get-seller-stats'
-  // sibling public endpoints elsewhere in the app (listings.js handleFeed/
-  // handleFileUrl): a stale/bad token from a logged-out browser must never
-  // hard-fail an otherwise valid anonymous hit.
-  let viewerUid = null;
-  if (idToken) {
-    try {
-      const fbUser = await verifyFirebaseToken(idToken);
-      viewerUid = fbUser.localId;
-    } catch (_) {
-      // treat as anonymous
-    }
-  }
-
-  const viewerKey = viewerUid || 'anon';
-  const dedupeKey = `${sellerUid}:${viewerKey}`;
-  const now = Date.now();
-  const lastView = _recentProfileViews.get(dedupeKey);
-  if (lastView && (now - lastView) < PROFILE_VIEW_DEBOUNCE_MS) {
-    return res.status(200).json({ ok: true, counted: false });
-  }
-  _recentProfileViews.set(dedupeKey, now);
-  if (_recentProfileViews.size > 5000) _pruneRecentProfileViews();
-
-  const db = getAdminDb();
-  const sellerRef = db.collection('users').doc(sellerUid);
-  const sellerSnap = await sellerRef.get();
-  if (!sellerSnap.exists) return res.status(404).json({ error: 'Seller not found' });
-
-  await sellerRef.update({ profileViewCount: FieldValue.increment(1) });
-
-  return res.status(200).json({ ok: true, counted: true });
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// DEAL LIFECYCLE
-// ═════════════════════════════════════════════════════════════════════════════
-
+// autowithdraw-get  { idToken }
+//   →  { enabled, threshold, keepBalance, method, paypalEmail }
 // ─────────────────────────────────────────────────────────────────────────────
-// create-deal  { idToken, listingId, message, offerPrice? }
-// → { allowed: true, dealId } | 409 if a pending deal already exists
-//
-// Server is the source of truth for: listing data (price/title/owner/image —
-// never trusted from the client), the generated dealId, and duplicate
-// prevention. Writes both the seller's and buyer's deal docs atomically.
-// ─────────────────────────────────────────────────────────────────────────────
-async function _handleCreateDealCore(req, res, idToken) {
+async function handleAutoWithdrawGet(req, res) {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+
   const fbUser = await verifyFirebaseToken(idToken);
-  const buyerUid = fbUser.localId;
-
-  const { listingId, message, offerPrice } = req.body || {};
-  if (!listingId || typeof listingId !== 'string') {
-    return res.status(400).json({ error: 'Missing listingId' });
-  }
-
-  const msg = typeof message === 'string' ? message.trim() : '';
-  if (msg.length < DEAL_MSG_MIN_LENGTH) {
-    return res.status(400).json({
-      error: `Message must be at least ${DEAL_MSG_MIN_LENGTH} characters.`,
-    });
-  }
-
-  let offer = null;
-  if (offerPrice != null) {
-    const n = Number(offerPrice);
-    if (!Number.isFinite(n) || n <= 0) {
-      return res.status(400).json({ error: 'Invalid offer price' });
-    }
-    offer = n;
-  }
+  const uid = fbUser.localId;
 
   const db = getAdminDb();
+  const snap = await db.collection('users').doc(uid).get();
+  if (!snap.exists) return res.status(404).json({ error: 'User not found' });
 
-  // Fetch listing server-side — client cannot supply or spoof these fields
-  const listingSnap = await db.collection('listings').doc(listingId).get();
-  if (!listingSnap.exists) return res.status(404).json({ error: 'Listing not found' });
-  const listing   = listingSnap.data();
-  const sellerUid = listing.ownerId;
-  if (!sellerUid) return res.status(400).json({ error: 'Listing has no owner' });
-  if (sellerUid === buyerUid) {
-    return res.status(400).json({ error: "You can't send a deal on your own listing" });
-  }
+  const data = snap.data();
+  const cfg = data.autoWithdraw || {};
 
-  // Buyer profile for display fields on the deal doc
-  const buyerSnap = await db.collection('users').doc(buyerUid).get();
-  const buyerData = buyerSnap.exists ? buyerSnap.data() : {};
-  const buyerName = buyerData.username
-    || fbUser.displayName
-    || (fbUser.email ? fbUser.email.split('@')[0] : 'Buyer');
-  const buyerPic  = buyerData.profilePic || '';
-  const buyerEmail = fbUser.email || buyerData.email || '';
-
-  // Seller email for the "you got a deal request" notification email
-  const sellerSnapForEmail = await db.collection('users').doc(sellerUid).get();
-  const sellerEmail = sellerSnapForEmail.exists ? (sellerSnapForEmail.data().email || '') : '';
-
-  const typeWord = listing.type === 'app' ? 'app' : listing.type === 'game' ? 'game' : 'website';
-  const introMsg = `Hi! I'm interested in this ${typeWord} — is it still available?`;
-  const dealId   = `${buyerUid}_${listingId}_${Date.now()}`;
-
-  const sellerDealsRef = db.collection('users').doc(sellerUid).collection('deals');
-  const sellerDealRef  = sellerDealsRef.doc(dealId);
-  const buyerDealRef   = db.collection('users').doc(buyerUid).collection('deals').doc(dealId);
-
-  try {
-    await db.runTransaction(async tx => {
-      // Duplicate-prevention: block a second pending deal from this buyer
-      // on this listing. Read happens inside the transaction so two
-      // concurrent submits can't both pass the check.
-      const dupeSnap = await tx.get(
-        sellerDealsRef
-          .where('buyerUid',   '==', buyerUid)
-          .where('listingId',  '==', listingId)
-          .where('status',     '==', 'pending')
-      );
-      if (!dupeSnap.empty) {
-        throw Object.assign(
-          new Error('You already have a pending deal on this listing.'),
-          { code: 'DUPLICATE_DEAL' }
-        );
-      }
-
-      const dealData = {
-        dealId,
-        listingId,
-        listingTitle: listing.title || 'Untitled',
-        listingType:  listing.type  || 'website',
-        listingPrice: typeof listing.financials?.price === 'number' ? listing.financials.price : null,
-        offerPrice:   offer,
-        listingImage: listing.images?.[2] || listing.imageCover || listing.images?.[0] || '',
-        listingUrl:   listing.url || '',
-        buyerUid,
-        buyerName,
-        buyerPic,
-        sellerUid,
-        introMessage: introMsg,
-        message:      msg,
-        status:       'pending',
-        createdAt:    FieldValue.serverTimestamp(),
-        read:         false,
-        agentHandled: false,
-      };
-
-      tx.set(sellerDealRef, dealData);
-      tx.set(buyerDealRef,  { ...dealData, read: true });
-    });
-  } catch (err) {
-    if (err.code === 'DUPLICATE_DEAL') {
-      return res.status(409).json({ error: err.message });
-    }
-    throw err;
-  }
-
-  // Notifications + agent ping after transaction commits — best-effort,
-  // never block the deal itself on these.
-  //
-  // Seller-facing "deals received" counter — bumped here (not inside the
-  // transaction above) because it's an analytics tally, not part of the
-  // deal's own consistency: same fire-and-forget philosophy as the
-  // notifications/email below it. Uses FieldValue.increment(), atomic
-  // under concurrent deal submissions.
-  db.collection('users').doc(sellerUid).update({ dealCount: FieldValue.increment(1) })
-    .catch(e => console.error('[deal] dealCount increment failed (non-fatal)', e.message));
-
-  const notifyBatch = db.batch();
-  notifyBatch.set(
-    db.collection('users').doc(buyerUid).collection('notifications').doc(),
-    {
-      type:  'deal_sent',
-      title: 'Deal sent',
-      body:  `You sent a deal request for "${listing.title || 'this listing'}"` +
-             (offer ? ` with an offer of $${offer.toLocaleString()}` : ''),
-      dealId, listingId, toUid: sellerUid, read: false, createdAt: Date.now(),
-    }
-  );
-  notifyBatch.set(
-    db.collection('users').doc(sellerUid).collection('notifications').doc(),
-    {
-      type:     'deal_request',
-      title:    buyerName,
-      body:     `Sent a deal request for "${listing.title || 'your listing'}"` +
-                (offer ? ` — offering $${offer.toLocaleString()}` : ''),
-      dealId, listingId, fromUid: buyerUid, fromName: buyerName, fromPic: buyerPic,
-      offerPrice: offer, read: false, createdAt: Date.now(),
-    }
-  );
-  await notifyBatch.commit().catch(e => console.error('[deal] notify error', e));
-
-  // Notifications — deal request is a "big" moment for both sides: buyer gets a
-  // confirmation, seller gets alerted they have money on the table. Both
-  // email and push are sent so a missed/undelivered email doesn't mean the
-  // notification never reaches the person.
-  const priceLine = offer ? `an offer of <strong>$${offer.toLocaleString()}</strong>` : 'a deal request';
-  const priceLinePlain = offer ? `an offer of $${offer.toLocaleString()}` : 'a deal request';
-  notifyDeal({
-    uid: buyerUid,
-    to: buyerEmail,
-    accentKey: 'info',
-    eyebrow: 'Deal sent',
-    heading: 'Your deal request is on its way',
-    bodyHtml: `You sent ${priceLine} for <strong>${listing.title || 'this listing'}</strong>. We'll email you as soon as the seller responds.`,
-    pushBody: `You sent ${priceLinePlain} for "${listing.title || 'this listing'}".`,
-    ctaLabel: 'View deal',
-    chatRoomId: null,
-  }).catch(() => {});
-  notifyDeal({
-    uid: sellerUid,
-    to: sellerEmail,
-    accentKey: 'success',
-    eyebrow: 'New deal request',
-    heading: `${buyerName} wants your listing`,
-    bodyHtml: `You received ${priceLine} for <strong>${listing.title || 'your listing'}</strong>. Accept it to open a deal chat and get paid through escrow.`,
-    pushBody: `${buyerName} sent ${priceLinePlain} for "${listing.title || 'your listing'}".`,
-    ctaLabel: 'Review request',
-    chatRoomId: null,
-  }).catch(() => {});
-
-  // ── Built-in auto-accept check (synchronous, no AI Studio involved) ──
-  // This is separate from the AI Studio "agent" system elsewhere in this
-  // file (auto-reply/price-drop/auto-relist, which require a linked API
-  // key + plan and run async via cron/fire-and-forget). This is a plain
-  // on/off switch a seller sets on their own user doc:
-  //   agentConfig.active               — master on/off (missing/false = off)
-  //   agentConfig.autoAccept.enabled   — whether offers can be auto-accepted
-  //   agentConfig.autoAccept.minPercent — minimum offer, as a % of the
-  //                                       listing's price, to accept (e.g.
-  //                                       80 = must offer >= 80% of listed
-  //                                       price). A percentage rather than a
-  //                                       flat dollar amount because one
-  //                                       seller's listings can range from a
-  //                                       $200 site to a $50k app — a single
-  //                                       fixed minPrice would either block
-  //                                       everything on the cheap listing or
-  //                                       accept lowball offers on the
-  //                                       expensive one.
-  // When on:
-  //   • A full-price request (no offer) is always auto-accepted.
-  //   • An offer >= minPercent% of the listing price is auto-accepted.
-  //   • An offer below that, or autoAccept not enabled at all, is left
-  //     pending for the seller to review manually — never silently
-  //     downgraded to the listed price.
-  let dealOutcome = { status: 'pending' };
-  try {
-    dealOutcome = await runBuiltInAutoAccept({
-      db, sellerUid, dealId, offer,
-      listingPrice: typeof listing.financials?.price === 'number' ? listing.financials.price : null,
-    });
-  } catch (err) {
-    console.error('[deal.js] auto-accept check failed for new deal', dealId, err.message);
-  }
-
-  return res.status(200).json({ allowed: true, dealId, ...dealOutcome });
-}
-
-// Synchronous built-in auto-accept — runs inline during create-deal so the
-// buyer's response can say "you're in the chat now" instead of always
-// landing on pending and finding out later. Uses the same settleDealCore
-// transaction as a manual seller accept, so chat-room creation, the agreed
-// price carried into escrow, notifications, and race-safety are identical.
-async function runBuiltInAutoAccept({ db, sellerUid, dealId, offer, listingPrice }) {
-  const sellerSnap = await db.collection('users').doc(sellerUid).get();
-  const agentConfig = sellerSnap.exists ? sellerSnap.data().agentConfig : null;
-
-  if (!agentConfig?.active) {
-    return { status: 'pending' };
-  }
-
-  const autoAccept = agentConfig.autoAccept;
-  const isFullPriceRequest = offer == null;
-
-  // Percentage-based threshold: minPercent of the listing's own price, not
-  // a flat dollar figure, so one seller's config works across listings of
-  // very different prices. If the listing has no known price, there's
-  // nothing to compute a percentage of — treat as not meeting the
-  // threshold rather than guessing.
-  let meetsMinPercent = false;
-  if (autoAccept?.enabled && offer != null && typeof listingPrice === 'number' && listingPrice > 0) {
-    const minPercent = autoAccept.minPercent ?? 100;
-    const minAmount = listingPrice * (minPercent / 100);
-    meetsMinPercent = offer >= minAmount;
-  }
-
-  if (!isFullPriceRequest && !meetsMinPercent) {
-    // Agent is on, but either offers aren't configured to auto-accept at
-    // all, or this particular offer is below the seller's minimum percent
-    // of the listing price — leave it as a normal pending deal for manual
-    // review.
-    return { status: 'pending' };
-  }
-
-  try {
-    const result = await settleDealCore({ callerUid: sellerUid, dealId, action: 'accept' });
-    return { status: 'accepted', chatRoomId: result.chatRoomId, expiresAt: result.expiresAt };
-  } catch (err) {
-    // Should be unreachable (deal was just created as pending, nothing
-    // else could have settled it yet), but never let an auto-accept race
-    // surface as a failure to the buyer — they still have a valid pending
-    // deal to fall back on.
-    console.error('[deal.js] settleDealCore failed during auto-accept', dealId, err.message);
-    return { status: 'pending' };
-  }
+  return res.status(200).json({
+    enabled:     Boolean(cfg.enabled),
+    threshold:   Number(cfg.threshold || 0),
+    keepBalance: Number(cfg.keepBalance || 0),
+    method:      cfg.method === 'bank' ? 'bank' : 'paypal',
+    paypalEmail: cfg.paypalEmail || '',
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// handleCreateDeal — thin wrapper around _handleCreateDealCore that tracks
-// the Send Deal CTA outcome onto the listing's own counters:
-//   successfulClickCount — the deal was actually created (core returned 200)
-//   failedClickCount     — Send Deal was clicked but it did NOT go through
-//                          (validation error, duplicate deal, unexpected
-//                          throw, etc.)
+// autowithdraw-save  { idToken, enabled, threshold, keepBalance, method, paypalEmail }
+//   →  { success, ...settings }
 //
-// The earliest failure (missing/invalid listingId) can't be attributed to
-// any specific listing's failedClickCount, since we don't yet know which
-// listing was involved — that one exit is not counted. Every other exit
-// point, success or failure, happens after `listingId` has been read from
-// the request body, so we always have something to increment against once
-// we get past that first check.
-//
-// We capture the core's response status via a lightweight `res` proxy
-// rather than touching every `return res.status(...)` line inside the core
-// — Express's `res.status(code)` returns `res` itself, so a later
-// `.json()` call chains onto the real, un-proxied `res` object; only the
-// `status` call itself is intercepted, purely to record what code was sent.
+// Unlike auto top-up (which needs a saved PayPal vault token to charge),
+// auto withdrawal doesn't require anything pre-saved — it just needs a
+// payout email, same as a manual withdrawal request. keepBalance defaults to
+// 0 (withdraw everything above the threshold down to zero) if omitted.
 // ─────────────────────────────────────────────────────────────────────────────
-async function _trackCreateDealClick(listingId, succeeded) {
-  if (!listingId || typeof listingId !== 'string') return; // can't attribute — no listing known yet
-  try {
-    const db = getAdminDb();
-    const field = succeeded ? 'successfulClickCount' : 'failedClickCount';
-    // Same field, incremented in two places: the specific listing (per-item
-    // stats) and stats/platformTotals (running platform-wide total — see
-    // listings.js's _bumpListingCounter for the matching impression/view
-    // side of this same doc). Fired together, not chained, so a slow/failed
-    // write to one never blocks or masks the other.
-    await Promise.all([
-      db.collection('listings').doc(listingId).update({ [field]: FieldValue.increment(1) }),
-      db.collection('stats').doc('platformTotals').set({ [field]: FieldValue.increment(1) }, { merge: true }),
-    ]);
-  } catch (err) {
-    // Never let analytics bookkeeping break or mask the real deal outcome.
-    console.error('[deal.js] _trackCreateDealClick failed (non-fatal)', listingId, succeeded, err.message);
+async function handleAutoWithdrawSave(req, res) {
+  const { idToken, enabled, threshold, keepBalance = 0, method = 'paypal', paypalEmail } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
+
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
+
+  const db = getAdminDb();
+  const userRef = db.collection('users').doc(uid);
+  const snap = await userRef.get();
+  if (!snap.exists) return res.status(404).json({ error: 'User not found' });
+
+  const wantsEnabled = Boolean(enabled);
+
+  if (wantsEnabled) {
+    if (!['paypal', 'bank'].includes(method)) {
+      return res.status(400).json({ error: 'Invalid payment method' });
+    }
+    if (!paypalEmail || !paypalEmail.includes('@')) {
+      return res.status(400).json({ error: 'A valid PayPal email is required for auto withdrawal.' });
+    }
+
+    const th   = Number(threshold);
+    const keep = Number(keepBalance);
+
+    if (!th || th < AUTOWITHDRAW_MIN_THRESHOLD || th > AUTOWITHDRAW_MAX_THRESHOLD) {
+      return res.status(400).json({ error: `Threshold must be between $${AUTOWITHDRAW_MIN_THRESHOLD} and $${AUTOWITHDRAW_MAX_THRESHOLD}.` });
+    }
+    if (keep < AUTOWITHDRAW_MIN_KEEP || keep > AUTOWITHDRAW_MAX_KEEP) {
+      return res.status(400).json({ error: `Keep-in-wallet amount must be between $${AUTOWITHDRAW_MIN_KEEP} and $${AUTOWITHDRAW_MAX_KEEP}.` });
+    }
+    if (keep >= th) {
+      return res.status(400).json({ error: 'The amount you keep must be less than your threshold, or auto withdrawal would never have anything to send.' });
+    }
+
+    await userRef.set({
+      autoWithdraw: {
+        enabled:     true,
+        threshold:   parseFloat(th.toFixed(2)),
+        keepBalance: parseFloat(keep.toFixed(2)),
+        method,
+        paypalEmail,
+        updatedAt:   FieldValue.serverTimestamp(),
+      },
+    }, { merge: true });
+
+    await userRef.collection('transactions').add({
+      type:      'autowithdraw_settings',
+      amount:    0,
+      label:     'Auto withdrawal enabled',
+      note:      `Will withdraw down to $${keep.toFixed(2)} whenever your withdrawable balance reaches $${th.toFixed(2)}.`,
+      status:    'completed',
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    // A save can itself push the user over their new threshold immediately
+    // (e.g. they already have $200 withdrawable and just set a $100
+    // threshold) — check right away instead of waiting for the next credit.
+    await maybeAutoWithdraw(db, uid);
+
+    return res.status(200).json({ success: true, enabled: true, threshold: th, keepBalance: keep, method, paypalEmail });
   }
-}
 
-async function handleCreateDeal(req, res, idToken) {
-  const listingId = req.body?.listingId;
-  let capturedStatus = null;
-
-  const resProxy = new Proxy(res, {
-    get(target, prop, receiver) {
-      if (prop === 'status') {
-        return (code) => {
-          capturedStatus = code;
-          return target.status(code); // returns the real res — chaining (.json()) is untouched
-        };
-      }
-      return Reflect.get(target, prop, receiver);
+  // Disabling — always allowed, no payout-email requirement
+  await userRef.set({
+    autoWithdraw: {
+      enabled:   false,
+      updatedAt: FieldValue.serverTimestamp(),
     },
+  }, { merge: true });
+
+  await userRef.collection('transactions').add({
+    type:      'autowithdraw_settings',
+    amount:    0,
+    label:     'Auto withdrawal disabled',
+    status:    'completed',
+    createdAt: FieldValue.serverTimestamp(),
   });
 
-  try {
-    const result = await _handleCreateDealCore(req, resProxy, idToken);
-    _trackCreateDealClick(listingId, capturedStatus === 200).catch(() => {});
-    return result;
-  } catch (err) {
-    // Core threw before ever calling res.status() (e.g. verifyFirebaseToken
-    // failure, or an unexpected error deep in the transaction) — still a
-    // failed click if we know which listing it was for.
-    _trackCreateDealClick(listingId, false).catch(() => {});
-    throw err;
-  }
+  return res.status(200).json({ success: true, enabled: false });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// accept-deal  { idToken, dealId }
-// reject-deal  { idToken, dealId }
-// cancel-deal  { idToken, dealId }
+// autosend-create  { idToken, recipientUid, amount, intervalDays, note? }
+//   →  { success, schedule }
 //
-// All three are thin wrappers around settleDealHttp() -> settleDealCore()
-// Firestore transaction. The transaction re-reads both deal docs inside itself
-// to close any race with concurrent agent actions.
+// Schedules a repeating P2P transfer. First run is `intervalDays` from now
+// (not immediately) — if the user wants an immediate send too, they can use
+// the regular one-off "Send" action alongside this.
 // ─────────────────────────────────────────────────────────────────────────────
-async function handleAcceptDeal(req, res, idToken) {
-  return settleDealHttp(req, res, idToken, 'accept');
-}
-
-async function handleRejectDeal(req, res, idToken) {
-  return settleDealHttp(req, res, idToken, 'reject');
-}
-
-async function handleCancelDeal(req, res, idToken) {
-  return settleDealHttp(req, res, idToken, 'cancel');
-}
-
-// Thin HTTP wrapper: resolves callerUid from a real Firebase idToken, then
-// delegates to the shared core. Every manual (buyer/seller-initiated)
-// accept/reject/cancel goes through here.
-async function settleDealHttp(req, res, idToken, action) {
-  const fbUser    = await verifyFirebaseToken(idToken);
-  const callerUid = fbUser.localId;
-
-  const { dealId } = req.body || {};
-  if (!dealId || typeof dealId !== 'string') {
-    return res.status(400).json({ error: 'Missing dealId' });
-  }
-
-  try {
-    const result = await settleDealCore({ callerUid, dealId, action });
-    if (action === 'accept') {
-      return res.status(200).json({ allowed: true, chatRoomId: result.chatRoomId, expiresAt: result.expiresAt });
-    }
-    return res.status(200).json({ allowed: true });
-  } catch (err) {
-    if (err.code === 'NOT_FOUND')       return res.status(404).json({ error: err.message });
-    if (err.code === 'FORBIDDEN')       return res.status(403).json({ error: err.message });
-    if (err.code === 'ALREADY_SETTLED') return res.status(409).json({ error: err.message, status: err.status });
-    throw err;
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// settleDealCore — the ONE real accept/reject/cancel implementation.
-// Auth-agnostic: takes an already-resolved callerUid rather than an idToken,
-// so it can be driven either by a verified end-user token (settleDealHttp
-// above) or by the seller's AI agent acting on the seller's own behalf
-// (called directly by the agent module below). Same transaction, same
-// race-safe re-read, same chat-room creation, same notifications/emails —
-// there is exactly one accept/reject/cancel code path in the whole app.
-//
-// Returns a plain result object (never writes to res) so callers — HTTP or
-// internal — can each shape their own response.
-// Throws Error with .code set to 'NOT_FOUND' | 'FORBIDDEN' | 'ALREADY_SETTLED'
-// on the expected failure paths; callers translate .code to HTTP status
-// (or, for the agent, to a skip/log reason) as appropriate.
-// ─────────────────────────────────────────────────────────────────────────────
-async function settleDealCore({ callerUid, dealId, action }) {
-  const db = getAdminDb();
-  const callerCopyRef = db.collection('users').doc(callerUid).collection('deals').doc(dealId);
-
-  const result = await db.runTransaction(async tx => {
-    const callerSnap = await tx.get(callerCopyRef);
-    if (!callerSnap.exists) {
-      throw Object.assign(new Error('Deal not found'), { code: 'NOT_FOUND' });
-    }
-
-    const deal      = callerSnap.data();
-    const { sellerUid, buyerUid } = deal;
-    const isSeller  = callerUid === sellerUid;
-    const isBuyer   = callerUid === buyerUid;
-
-    if (action === 'accept' || action === 'reject') {
-      if (!isSeller) {
-        throw Object.assign(new Error('Only the seller can do this'), { code: 'FORBIDDEN' });
-      }
-    } else if (action === 'cancel') {
-      if (!isBuyer) {
-        throw Object.assign(new Error('Only the buyer can cancel'), { code: 'FORBIDDEN' });
-      }
-    }
-
-    const sellerRef = db.collection('users').doc(sellerUid).collection('deals').doc(dealId);
-    const buyerRef  = db.collection('users').doc(buyerUid).collection('deals').doc(dealId);
-
-    // Re-read BOTH copies inside the transaction — this is the race-condition
-    // fix. An agent auto-accept, a manual accept/reject, and a buyer cancel
-    // can all be in flight at once, but only the first commit wins.
-    const [sellerSnap, buyerSnap] = await Promise.all([
-      tx.get(sellerRef),
-      tx.get(buyerRef),
-    ]);
-    const sellerStatus = sellerSnap.exists ? sellerSnap.data().status : null;
-    const buyerStatus  = buyerSnap.exists  ? buyerSnap.data().status  : null;
-
-    if (sellerStatus !== 'pending' || buyerStatus !== 'pending') {
-      throw Object.assign(
-        new Error(`Deal already ${sellerStatus || buyerStatus || 'resolved'}`),
-        { code: 'ALREADY_SETTLED', status: sellerStatus || buyerStatus }
-      );
-    }
-
-    if (action === 'accept') {
-      const chatRoomId = 'deal_' + dealId;
-      const expiresAt  = Date.now() + dealExpiryMsForType(deal.listingType);
-      tx.update(sellerRef, { status: 'accepted', read: true, chatRoomId, expiresAt });
-      tx.update(buyerRef,  { status: 'accepted', chatRoomId, expiresAt });
-      return { chatRoomId, expiresAt, deal, sellerUid, buyerUid };
-    }
-
-    if (action === 'reject') {
-      tx.update(sellerRef, { status: 'rejected', read: true });
-      tx.update(buyerRef,  { status: 'rejected' });
-      return { deal, sellerUid, buyerUid };
-    }
-
-    // cancel — remove buyer copy, mark seller copy so they can see it was cancelled
-    tx.delete(buyerRef);
-    tx.update(sellerRef, { status: 'cancelled', cancelledByBuyer: true });
-    return { deal, sellerUid, buyerUid };
-  });
-
-  // Post-transaction side effects (non-critical — deal status is already durable)
-  if (action === 'accept') {
-    await createDealChatRoom(db, {
-      dealId,
-      deal:      result.deal,
-      sellerUid: result.sellerUid,
-      buyerUid:  result.buyerUid,
-      chatRoomId: result.chatRoomId,
-      expiresAt:  result.expiresAt,
-    });
-    if (result.buyerUid !== result.sellerUid) {
-      await db.collection('users').doc(result.buyerUid).collection('notifications').add({
-        type:      'deal_accepted',
-        title:     'Deal accepted',
-        body:      `Your deal for "${result.deal.listingTitle || 'this listing'}" was accepted`,
-        dealId,
-        chatRoomId: result.chatRoomId,
-        sellerUid:  result.sellerUid,
-        buyerUid:   result.buyerUid,
-        expiresAt:  result.expiresAt,
-        read:       false,
-        createdAt:  Date.now(),
-      }).catch(() => {});
-
-      const buyerSnapForEmail = await db.collection('users').doc(result.buyerUid).get();
-      const buyerEmailForNotif = buyerSnapForEmail.exists ? (buyerSnapForEmail.data().email || '') : '';
-      notifyDeal({
-        uid: result.buyerUid,
-        to: buyerEmailForNotif,
-        accentKey: 'success',
-        eyebrow: 'Deal accepted',
-        heading: 'Your deal was accepted! 🎉',
-        bodyHtml: `The seller accepted your deal for <strong>${result.deal.listingTitle || 'this listing'}</strong>. Head to the deal chat to arrange payment into escrow.`,
-        pushBody: `The seller accepted your deal for "${result.deal.listingTitle || 'this listing'}".`,
-        ctaLabel: 'Open deal chat',
-        chatRoomId: result.chatRoomId,
-      }).catch(() => {});
-    }
-
-    // Outbound webhook — fired to the SELLER's own registered endpoints
-    // (they're the one who took the accept action and cares about it
-    // downstream). Fire-and-forget, same non-blocking pattern as the
-    // notifications above — a webhook delivery issue must never affect the
-    // deal's own success response.
-    dispatchWebhook(result.sellerUid, 'deal.accepted', {
-      dealId,
-      listingId:    result.deal.listingId,
-      listingTitle: result.deal.listingTitle,
-      chatRoomId:   result.chatRoomId,
-      buyerUid:     result.buyerUid,
-      sellerUid:    result.sellerUid,
-      offerPrice:   result.deal.offerPrice,
-    }).catch(() => {});
-
-    return { chatRoomId: result.chatRoomId, expiresAt: result.expiresAt, deal: result.deal };
-  }
-
-  if (action === 'reject') {
-    if (result.buyerUid !== result.sellerUid) {
-      await db.collection('users').doc(result.buyerUid).collection('notifications').add({
-        type:      'deal_rejected',
-        title:     'Deal rejected',
-        body:      `Your deal for "${result.deal.listingTitle || 'this listing'}" was declined`,
-        dealId,
-        read:      false,
-        createdAt: Date.now(),
-      }).catch(() => {});
-
-      const buyerSnapForEmail = await db.collection('users').doc(result.buyerUid).get();
-      const buyerEmailForNotif = buyerSnapForEmail.exists ? (buyerSnapForEmail.data().email || '') : '';
-      notifyDeal({
-        uid: result.buyerUid,
-        to: buyerEmailForNotif,
-        accentKey: 'danger',
-        eyebrow: 'Deal declined',
-        heading: 'Your deal was declined',
-        bodyHtml: `The seller declined your deal for <strong>${result.deal.listingTitle || 'this listing'}</strong>. You can browse similar listings or send a new offer.`,
-        pushBody: `The seller declined your deal for "${result.deal.listingTitle || 'this listing'}".`,
-        ctaLabel: 'Browse listings',
-        chatRoomId: null,
-      }).catch(() => {});
-    }
-    dispatchWebhook(result.sellerUid, 'deal.rejected', {
-      dealId,
-      listingId:    result.deal.listingId,
-      listingTitle: result.deal.listingTitle,
-      buyerUid:     result.buyerUid,
-      sellerUid:    result.sellerUid,
-    }).catch(() => {});
-    return { deal: result.deal };
-  }
-
-  // cancel
-  dispatchWebhook(result.sellerUid, 'deal.cancelled', {
-    dealId,
-    listingId:    result.deal.listingId,
-    listingTitle: result.deal.listingTitle,
-    buyerUid:     result.buyerUid,
-    sellerUid:    result.sellerUid,
-  }).catch(() => {});
-  return { deal: result.deal };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Note: there used to be a settleDealInternal() wrapper here for a separate
-// agent.js file to import. Now that the AI agent lives in this same file
-// (see "AI AGENT" section near the bottom), its code calls settleDealCore()
-// above directly — same transaction, chat-room creation, and notification/
-// email logic as a manual accept/reject, just without a cross-file import.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ── Shared helper: create the deal chat room + thread pointers on accept ─────
-async function createDealChatRoom(db, { dealId, deal, sellerUid, buyerUid, chatRoomId, expiresAt }) {
-  const sellerSnap = await db.collection('users').doc(sellerUid).get();
-  const sellerData = sellerSnap.exists ? sellerSnap.data() : {};
-  const sellerName = sellerData.username || sellerData.displayName || 'Seller';
-  const sellerPic  = sellerData.profilePic || '';
-  const buyerName  = deal.buyerName || 'Buyer';
-  const buyerPic   = deal.buyerPic  || '';
-
-  const now      = Date.now();
-  const autoMsg  = `Your deal for "${deal.listingTitle || 'this listing'}" has been accepted! You have 7 days to resolve. Good luck! 🤝`;
-  const chatName = (deal.listingTitle || 'Untitled').slice(0, 60);
-
-  // The agreed price is the buyer's accepted offer, not the original listing
-  // price — a deal for $100 that the seller accepted at a $50 offer must
-  // carry $50 forward into escrow, not silently revert to the $100 asking
-  // price. Fall back to listingPrice only when no offer was made (i.e. the
-  // buyer accepted the listed price as-is).
-  const agreedPrice = typeof deal.offerPrice === 'number' ? deal.offerPrice
-    : (typeof deal.listingPrice === 'number' ? deal.listingPrice : null);
-
-  const batch = db.batch();
-
-  batch.set(db.collection('dealChats').doc(chatRoomId), {
-    chatName, chatRoomId, dealId,
-    listingId:    deal.listingId    || '',
-    listingTitle: deal.listingTitle || '',
-    listingImage: deal.listingImage || '',
-    listingPrice: agreedPrice,
-    sellerUid, sellerName, sellerPic,
-    buyerUid,  buyerName,  buyerPic,
-    createdAt: now, expiresAt, active: true,
-    lastMessage: autoMsg, lastAt: now,
-  });
-
-  batch.set(
-    db.collection('dealChats').doc(chatRoomId).collection('messages').doc('system_0'),
-    { uid: 'system', text: autoMsg, type: 'system', createdAt: now }
-  );
-
-  const threadBase = {
-    chatRoomId, chatName, isDealChat: true,
-    listingTitle: deal.listingTitle || '',
-    listingImage: deal.listingImage || '',
-    lastMessage: autoMsg, lastAt: now, expiresAt,
-    sellerUid, buyerUid,
-  };
-
-  batch.set(
-    db.collection('users').doc(sellerUid).collection('threads').doc(chatRoomId),
-    { ...threadBase, partnerUid: buyerUid, partnerName: buyerName, partnerPic: buyerPic, unread: false }
-  );
-  batch.set(
-    db.collection('users').doc(buyerUid).collection('threads').doc(chatRoomId),
-    { ...threadBase, partnerUid: sellerUid, partnerName: sellerName, partnerPic: sellerPic, unread: true, unreadCount: 1 }
-  );
-
-  await batch.commit();
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// ESCROW LIFECYCLE
-// ═════════════════════════════════════════════════════════════════════════════
-
-// ─────────────────────────────────────────────────────────────────────────────
-// escrow-pay  { idToken, chatRoomId, dealId, amount }
-// Buyer pays wallet → escrow. Atomically:
-//   • Debits buyer walletBalance
-//   • Sets dealChats/{chatRoomId}.paymentStatus = 'funded'
-//   • Writes escrow_hold transaction on buyer
-//   • Mirrors paymentStatus on both users' deal docs
-//   • Notifies seller
-// ─────────────────────────────────────────────────────────────────────────────
-async function handleEscrowPay(req, res, idToken) {
-  const { chatRoomId, dealId, amount } = req.body;
-  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
-  if (!dealId)     return res.status(400).json({ error: 'Missing dealId' });
+async function handleAutoSendCreate(req, res) {
+  const { idToken, recipientUid, amount, intervalDays, note } = req.body;
+  if (!idToken)      return res.status(401).json({ error: 'Missing auth token' });
+  if (!recipientUid) return res.status(400).json({ error: 'Missing recipient' });
 
   const amt = parseFloat(amount);
-  if (!amt || amt <= 0 || !isFinite(amt)) {
-    return res.status(400).json({ error: 'Invalid amount' });
+  if (!amt || amt <= 0 || amt > 10000 || !isFinite(amt)) {
+    return res.status(400).json({ error: 'Amount must be between $0.01 and $10,000' });
   }
 
-  const fbUser   = await verifyFirebaseToken(idToken);
-  const buyerUid = fbUser.localId;
-
-  const db       = getAdminDb();
-  const roomRef  = db.collection('dealChats').doc(chatRoomId);
-  const buyerRef = db.collection('users').doc(buyerUid);
-
-  await db.runTransaction(async tx => {
-    const [roomSnap, buyerSnap] = await Promise.all([tx.get(roomRef), tx.get(buyerRef)]);
-
-    if (!roomSnap.exists)  throw new Error('Deal chat not found');
-    if (!buyerSnap.exists) throw new Error('User not found');
-
-    const room = roomSnap.data();
-
-    // Security checks
-    if (room.buyerUid !== buyerUid)              throw new Error('You are not the buyer in this deal');
-    if (room.paymentStatus === 'funded')          throw new Error('This deal is already funded');
-    if (room.paymentStatus === 'complete')        throw new Error('This deal is already complete');
-    if (room.paymentStatus === 'refunded')        throw new Error('This deal has been refunded');
-    if (room.cancelled || room.active === false)  throw new Error('This deal has been cancelled');
-
-    const sellerUid = room.sellerUid;
-    if (!sellerUid) throw new Error('Seller not found on deal');
-
-    const balance = parseFloat((buyerSnap.data().walletBalance || 0).toFixed(2));
-    if (amt > balance) {
-      throw new Error(`Insufficient wallet balance ($${balance.toFixed(2)} available)`);
-    }
-
-    const newBalance = parseFloat((balance - amt).toFixed(2));
-    // Paying into escrow draws down withdrawable dollars first (capped at 0),
-    // same conservative rule used for P2P sends in paypal.js's handleTransfer
-    // — it never lets withdrawableBalance exceed money actually earned. If
-    // the deal is later refunded, _refundEscrowForRoom restores this amount.
-    const buyerWithdrawable    = parseFloat((buyerSnap.data().withdrawableBalance || 0).toFixed(2));
-    const newBuyerWithdrawable = parseFloat(Math.max(0, buyerWithdrawable - amt).toFixed(2));
-
-    // 1. Debit buyer wallet
-    tx.update(buyerRef, { walletBalance: newBalance, withdrawableBalance: newBuyerWithdrawable });
-
-    // 2. Escrow hold transaction record
-    tx.set(buyerRef.collection('transactions').doc(), {
-      type:       'escrow_hold',
-      amount:     -amt,
-      label:      `Escrow hold · ${room.listingTitle || 'Deal'}`,
-      chatRoomId,
-      dealId,
-      sellerUid,
-      status:     'held',
-      createdAt:  FieldValue.serverTimestamp(),
-    });
-
-    // 3. Update room
-    tx.update(roomRef, {
-      paymentStatus:   'funded',
-      escrowAmount:    amt,
-      escrowAt:        FieldValue.serverTimestamp(),
-      escrowBuyerUid:  buyerUid,
-      // Exact amount drawn from withdrawableBalance (may be less than `amt`
-      // if the buyer's withdrawable balance was already partly/fully 0) —
-      // stored so a later refund restores precisely this much, not `amt`
-      // blindly, which would over-credit withdrawableBalance beyond what
-      // the buyer actually had.
-      escrowWithdrawableDebit: parseFloat((buyerWithdrawable - newBuyerWithdrawable).toFixed(2)),
-    });
-
-    // 4 & 5. Mirror status on both deal docs
-    tx.update(db.collection('users').doc(sellerUid).collection('deals').doc(dealId), {
-      paymentStatus: 'funded', escrowAmount: amt,
-    });
-    tx.update(db.collection('users').doc(buyerUid).collection('deals').doc(dealId), {
-      paymentStatus: 'funded', escrowAmount: amt,
-    });
-
-    // 6. Notify seller
-    tx.set(db.collection('users').doc(sellerUid).collection('notifications').doc(), {
-      type:      'escrow_funded',
-      title:     'Payment received into escrow',
-      body:      `$${amt.toLocaleString()} is held in escrow for "${room.listingTitle || 'your deal'}". Deliver to release funds.`,
-      chatRoomId,
-      dealId,
-      read:      false,
-      createdAt: Date.now(),
-    });
-  });
-
-  // System message in chat (non-critical)
-  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
-    uid:       'system',
-    type:      'system',
-    text:      `💰 $${amt.toLocaleString()} has been placed in escrow. The seller can now deliver. Funds will be released once delivery is confirmed.`,
-    createdAt: Date.now(),
-  }).catch(() => {});
-
-  // Notify seller — money is now waiting on them to deliver
-  const roomForEmail = await roomRef.get().catch(() => null);
-  const sellerUidForEmail = roomForEmail?.data()?.sellerUid;
-  if (sellerUidForEmail) {
-    const sellerSnapForEmail = await db.collection('users').doc(sellerUidForEmail).get();
-    const sellerEmailForNotif = sellerSnapForEmail.exists ? (sellerSnapForEmail.data().email || '') : '';
-    notifyDeal({
-      uid: sellerUidForEmail,
-      to: sellerEmailForNotif,
-      accentKey: 'success',
-      eyebrow: 'Payment received',
-      heading: `$${amt.toLocaleString()} is in escrow`,
-      bodyHtml: `The buyer funded escrow for <strong>${roomForEmail.data().listingTitle || 'your deal'}</strong>. Deliver the goods to get paid — funds release once the buyer confirms.`,
-      pushBody: `$${amt.toLocaleString()} is in escrow for "${roomForEmail.data().listingTitle || 'your deal'}". Deliver to get paid.`,
-      ctaLabel: 'Deliver now',
-      chatRoomId,
-    }).catch(() => {});
+  const interval = Number(intervalDays);
+  if (!AUTOSEND_INTERVALS.includes(interval)) {
+    return res.status(400).json({ error: `Interval must be one of: ${AUTOSEND_INTERVALS.join(', ')} days` });
   }
-
-  return res.status(200).json({ success: true, escrowAmount: amt });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// escrow-deliver  { idToken, chatRoomId, dealId }
-// Seller marks as delivered. Sets paymentStatus = 'delivered'.
-// Does NOT release funds — buyer must confirm receipt.
-// ─────────────────────────────────────────────────────────────────────────────
-async function handleEscrowDeliver(req, res, idToken) {
-  const { chatRoomId, dealId } = req.body;
-  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
-
-  const fbUser    = await verifyFirebaseToken(idToken);
-  const sellerUid = fbUser.localId;
-
-  const db       = getAdminDb();
-  const roomRef  = db.collection('dealChats').doc(chatRoomId);
-  const roomSnap = await roomRef.get();
-
-  if (!roomSnap.exists)                return res.status(404).json({ error: 'Deal not found' });
-  const room = roomSnap.data();
-  if (room.sellerUid !== sellerUid)    return res.status(403).json({ error: 'Only the seller can mark delivery' });
-  if (room.paymentStatus !== 'funded') {
-    return res.status(400).json({ error: `Cannot deliver — status is ${room.paymentStatus || 'unfunded'}` });
-  }
-
-  const now = Date.now();
-  const autoReleaseAt = now + DEAL_AUTO_RELEASE_MS;
-  await roomRef.update({
-    paymentStatus: 'delivered',
-    deliveredAt: FieldValue.serverTimestamp(),
-    deliveredAtMs: now,
-    autoReleaseAt,
-  });
-
-  // Mirror on both deal docs
-  await Promise.all([sellerUid, room.buyerUid].map(uid => {
-    if (!uid || !dealId) return Promise.resolve();
-    return db.collection('users').doc(uid).collection('deals').doc(dealId)
-      .update({ paymentStatus: 'delivered', autoReleaseAt }).catch(() => {});
-  }));
-
-  // Notify buyer
-  if (room.buyerUid) {
-    await db.collection('users').doc(room.buyerUid).collection('notifications').add({
-      type:      'deal_delivered',
-      title:     'Seller marked as delivered',
-      body:      `"${room.listingTitle || 'Your deal'}" has been marked delivered. Confirm to release payment.`,
-      chatRoomId,
-      dealId,
-      read:      false,
-      createdAt: now,
-    }).catch(() => {});
-
-    const buyerSnapForEmail = await db.collection('users').doc(room.buyerUid).get();
-    const buyerEmailForNotif = buyerSnapForEmail.exists ? (buyerSnapForEmail.data().email || '') : '';
-    notifyDeal({
-      uid: room.buyerUid,
-      to: buyerEmailForNotif,
-      accentKey: 'warn',
-      eyebrow: 'Action needed',
-      heading: 'The seller marked your order delivered',
-      bodyHtml: `<strong>${room.listingTitle || 'Your deal'}</strong> has been marked as delivered. Please confirm receipt to release payment, or raise a dispute if there's an issue. You have <strong>72 hours</strong> — after that, funds release automatically.`,
-      pushBody: `"${room.listingTitle || 'Your deal'}" was marked delivered. Confirm receipt within 72 hours to release payment.`,
-      ctaLabel: 'Confirm receipt',
-      chatRoomId,
-    }).catch(() => {});
-  }
-
-  // System message
-  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
-    uid:       'system',
-    type:      'system',
-    text:      'Seller has marked this deal as delivered. Please confirm receipt to release the funds, or raise a dispute if there is an issue. You have 72 hours to verify — if there\'s no response, the funds will be released to the seller automatically. The chat stays open the whole time if you have questions.',
-    createdAt: now,
-  }).catch(() => {});
-
-  return res.status(200).json({ success: true });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// escrow-get-download-url  { idToken, chatRoomId, dealId, storagePath }
-// Mints a short-lived signed URL for a deal deliverable — BUYER ONLY. The
-// seller (whoever uploaded it) gets no download capability at all here; the
-// frontend renders a read-only badge for them, and this endpoint independently
-// enforces the same restriction server-side (never trust the client alone).
-// Only usable while the deal is still "live" (funded / delivered / disputed).
-// The moment a valid signed URL is issued to the buyer, the underlying file
-// is deleted from storage — this is a ONE-TIME download. If the delete
-// somehow fails, the buyer's link still works for its TTL, but the file
-// won't get a second one after that (see below); any issue should go through
-// a dispute rather than a repeat download.
-// ─────────────────────────────────────────────────────────────────────────────
-const DOWNLOAD_URL_TTL_SECONDS = 300; // 5 minutes
-
-async function handleEscrowGetDownloadUrl(req, res, idToken) {
-  const { chatRoomId, dealId, storagePath } = req.body;
-  if (!chatRoomId)  return res.status(400).json({ error: 'Missing chatRoomId' });
-  if (!storagePath) return res.status(400).json({ error: 'Missing storagePath' });
 
   const fbUser = await verifyFirebaseToken(idToken);
-  const uid    = fbUser.localId;
+  const senderUid = fbUser.localId;
 
-  const db       = getAdminDb();
-  const roomRef  = db.collection('dealChats').doc(chatRoomId);
-  const roomSnap = await roomRef.get();
-  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
-
-  const room = roomSnap.data();
-
-  // Buyer only — the seller (or anyone else) gets no download link, ever,
-  // regardless of what the frontend renders. This is the actual enforcement
-  // point; the read-only badge in the chat UI is just a courtesy reflection
-  // of this rule, not the thing that provides it.
-  if (room.buyerUid !== uid) {
-    return res.status(403).json({ error: 'Only the buyer can download this file.' });
-  }
-
-  // storagePath from the (now multi-account) storage.js is formatted
-  // "<accountId>@@<uploaderUid>--filename...", e.g. "3@@abc123--file-....zip".
-  // Split off the account id first so the ownership check below compares
-  // against the actual uid portion, not the whole prefixed string.
-  const pathMatch = storagePath.match(/^(\d+)@@(.+)$/);
-  if (!pathMatch) {
-    return res.status(400).json({ error: 'Malformed storagePath' });
-  }
-  const [, accountId, uidScopedName] = pathMatch;
-
-  // Defense in depth: the file must actually belong to this deal's chat room.
-  // uidScopedName is prefixed "<uploaderUid>--...", and only the seller uploads
-  // transfer deliverables, so require the path to have been uploaded by the
-  // seller on this room — prevents one deal's storagePath being reused to
-  // pull a file from an unrelated deal by guessing/reusing a path string.
-  if (!uidScopedName.startsWith(`${room.sellerUid}--`)) {
-    return res.status(403).json({ error: 'File does not belong to this deal' });
-  }
-
-  const liveStatuses = ['funded', 'delivered', 'disputed'];
-  if (!liveStatuses.includes(room.paymentStatus)) {
-    return res.status(403).json({
-      error: `Download access is no longer available — deal status is ${room.paymentStatus || 'unknown'}.`,
-    });
-  }
-
-  try {
-    const account = findAccountById(accountId);
-    const url = await supabaseCreateSignedUrl(account, uidScopedName, DOWNLOAD_URL_TTL_SECONDS);
-
-    // Delete immediately — this is a one-time download. Non-blocking from
-    // the buyer's perspective (the signed URL above is already valid and
-    // will keep working for its TTL regardless of when the delete finishes),
-    // but awaited here so a delete failure can at least be logged rather
-    // than silently lost.
-    deleteFiles(account, [uidScopedName]).catch(e =>
-      console.warn(`[deal.js] failed to auto-delete deal file ${uidScopedName} on account ${accountId} (non-fatal):`, e.message)
-    );
-
-    // Mark the message so a refresh doesn't re-offer a dead download button,
-    // and so support/disputes can see this file was already claimed.
-    // Best-effort — find the message by storagePath and flag it.
-    db.collection('dealChats').doc(chatRoomId).collection('messages')
-      .where('storagePath', '==', storagePath).limit(1).get()
-      .then(snap => { if (!snap.empty) snap.docs[0].ref.update({ downloaded: true, downloadedAt: Date.now() }).catch(() => {}); })
-      .catch(() => {});
-
-    return res.status(200).json({ url, expiresIn: DOWNLOAD_URL_TTL_SECONDS });
-  } catch (err) {
-    console.error('[deal.js] escrow-get-download-url sign error:', err.message);
-    return res.status(500).json({ error: 'Could not generate download link' });
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Core release logic — shared by the buyer-triggered handler below and the
-// automated 72h sweep. `auto: true` skips the buyer-identity check (the
-// system is acting on the buyer's behalf because they didn't respond in
-// time) and adjusts the system message + label so it's clear this happened
-// automatically rather than by explicit buyer action.
-//
-// Applies the seller's plan-based platform fee (LIMITS.saleFees) here, at
-// release time — not at escrow-pay time — since the full amount needs to sit
-// in escrow untouched while funded/delivered/disputed (a refund must return
-// exactly what the buyer paid). The fee is only actually taken once the sale
-// completes. Seller receives `amt - fee`; the fee itself is credited to the
-// platform admin account (see getPlatformFeeAdminUid) the same way any other
-// wallet credit works — walletBalance + withdrawableBalance, a transaction
-// record, everything auditable, nothing just vanishing into a ledger.
-// ─────────────────────────────────────────────────────────────────────────────
-async function _releaseEscrowForRoom(db, chatRoomId, dealId, { auto = false } = {}) {
-  const roomRef = db.collection('dealChats').doc(chatRoomId);
-
-  // Resolved ahead of the transaction — a query-by-email has no place inside
-  // a Firestore transaction alongside doc gets/sets for the buyer/seller.
-  // null means ADMIN_EMAIL is unset/unresolvable — NOT "no fee owed". The
-  // fee is still deducted from the seller either way; this only decides
-  // where it goes (live admin wallet vs the unclaimed-fees ledger).
-  const adminUid = await getPlatformFeeAdminUid(db);
-  let ledgerEntry = null; // set inside the transaction if we need to ledger post-commit
-
-  await db.runTransaction(async tx => {
-    const roomSnap = await tx.get(roomRef);
-    if (!roomSnap.exists) throw new Error('Deal not found');
-    const room = roomSnap.data();
-
-    if (!['delivered', 'funded', 'disputed'].includes(room.paymentStatus)) {
-      throw new Error(`Cannot release — status is ${room.paymentStatus}`);
-    }
-    if (room.paymentStatus === 'complete') throw new Error('Already complete');
-
-    const sellerUid = room.sellerUid;
-    const buyerUid   = room.buyerUid;
-    const amt       = parseFloat(room.escrowAmount || 0);
-    if (!amt) throw new Error('No escrow amount on file');
-
-    const sellerRef  = db.collection('users').doc(sellerUid);
-    const sellerSnap = await tx.get(sellerRef);
-    if (!sellerSnap.exists) throw new Error('Seller not found');
-
-    // ── Plan-based platform fee (LIMITS.saleFees — 20%/15%/10%/5% by plan) ──
-    const sellerPlan = sellerSnap.data().plan || 'free';
-    const feeRate     = LIMITS.saleFees[sellerPlan] ?? LIMITS.saleFees.free;
-    const platformFee = parseFloat((amt * feeRate).toFixed(2));
-    const sellerNet    = parseFloat((amt - platformFee).toFixed(2));
-
-    // Two DISTINCT reasons the seller might keep the full amount — these
-    // must never be conflated:
-    //  - noFeeOwed: the seller IS the platform admin account, or the fee
-    //    rounds to $0. Correctly no fee to collect from anyone.
-    //  - feeOwedButUnroutable: a real fee IS owed and IS deducted from the
-    //    seller below, same as normal — there's just nowhere live to credit
-    //    it (adminUid is null) because ADMIN_EMAIL is unset/misconfigured.
-    //    That fee goes to the unclaimed-fees ledger after this transaction
-    //    commits, not to the seller and not into the void.
-    const noFeeOwed = sellerUid === adminUid || platformFee <= 0;
-    const feeOwedButUnroutable = !noFeeOwed && !adminUid;
-    const applyFeeSplit = !noFeeOwed; // seller pays the fee either way unless noFeeOwed
-
-    // Firestore transactions require every tx.get() to happen before any
-    // tx.update()/tx.set(). Whether we can credit the admin live isn't known
-    // until after the room and seller reads above, so this can't be
-    // front-loaded alongside them in one Promise.all — but it still has to
-    // run here, before the first write below.
-    const adminRef  = (applyFeeSplit && adminUid) ? db.collection('users').doc(adminUid) : null;
-    const adminSnap = adminRef ? await tx.get(adminRef) : null;
-    if (adminRef && !adminSnap.exists) throw new Error('Platform fee admin account not found');
-
-    const sellerBal    = parseFloat((sellerSnap.data().walletBalance || 0).toFixed(2));
-    const creditToSeller = applyFeeSplit ? sellerNet : amt;
-    const newSellerBal = parseFloat((sellerBal + creditToSeller).toFixed(2));
-    // Sale proceeds are withdrawable (unlike a straight PayPal deposit —
-    // see paypal.js's withdrawableBalance model), so escrow release credits
-    // both fields.
-    const sellerWithdrawable    = parseFloat((sellerSnap.data().withdrawableBalance || 0).toFixed(2));
-    const newSellerWithdrawable = parseFloat((sellerWithdrawable + creditToSeller).toFixed(2));
-
-    // 1. Credit seller wallet (net of platform fee), and bump the seller's
-    // lifetime completed-deals counter. This is read directly by the
-    // marketplace frontend (mpGetSeller) to show trust badges next to the
-    // seller's name — computing it here via FieldValue.increment (inside
-    // this same transaction) means the frontend never has to query or
-    // aggregate deals itself, and the count can't drift from the actual
-    // number of completions even under concurrent payouts.
-    tx.update(sellerRef, {
-      walletBalance: newSellerBal,
-      withdrawableBalance: newSellerWithdrawable,
-      dealsCompleted: FieldValue.increment(1),
-    });
-
-    // 2. Seller transaction record — always shows the REAL fee the seller
-    // paid, whether or not we could route it to a live admin wallet. This
-    // is the seller's own auditable record and must never disagree with
-    // what actually left their payout.
-    const sellerTxRecord = {
-      type:       'escrow_release',
-      amount:     creditToSeller,
-      grossAmount: amt,
-      platformFee: applyFeeSplit ? platformFee : 0,
-      feeRate:     applyFeeSplit ? feeRate : 0,
-      plan:        sellerPlan,
-      label:      `Escrow released · ${room.listingTitle || 'Deal'}`,
-      chatRoomId,
-      dealId,
-      buyerUid,
-      auto,
-      status:     'completed',
-      createdAt:  FieldValue.serverTimestamp(),
-    };
-    if (applyFeeSplit) {
-      sellerTxRecord.note = `$${amt.toLocaleString()} sale − ${(feeRate * 100).toFixed(feeRate * 100 % 1 === 0 ? 0 : 1)}% platform fee ($${platformFee.toFixed(2)}) = $${sellerNet.toFixed(2)}`
-        + (feeOwedButUnroutable ? ' (fee pending platform reconciliation)' : '');
-    }
-    tx.set(sellerRef.collection('transactions').doc(), sellerTxRecord);
-
-    // 2b. Credit the platform fee to the admin account — only when a real
-    // fee is owed AND we have somewhere live to put it. If a fee is owed
-    // but adminUid is null (feeOwedButUnroutable), the fee has still been
-    // deducted from the seller above — it's queued for the unclaimed-fees
-    // ledger after the transaction commits (see ledgerEntry below), not
-    // dropped here.
-    if (applyFeeSplit && adminRef) {
-      const adminBal    = parseFloat((adminSnap.data().walletBalance || 0).toFixed(2));
-      const newAdminBal = parseFloat((adminBal + platformFee).toFixed(2));
-      const adminWithdrawable    = parseFloat((adminSnap.data().withdrawableBalance || 0).toFixed(2));
-      const newAdminWithdrawable = parseFloat((adminWithdrawable + platformFee).toFixed(2));
-
-      tx.update(adminRef, { walletBalance: newAdminBal, withdrawableBalance: newAdminWithdrawable });
-
-      tx.set(adminRef.collection('transactions').doc(), {
-        type:        'platform_fee',
-        amount:      platformFee,
-        label:       `Platform fee · ${room.listingTitle || 'Deal'}`,
-        note:        `${(feeRate * 100).toFixed(feeRate * 100 % 1 === 0 ? 0 : 1)}% of $${amt.toLocaleString()} (seller plan: ${sellerPlan})`,
-        chatRoomId,
-        dealId,
-        sellerUid,
-        buyerUid,
-        status:      'completed',
-        createdAt:   FieldValue.serverTimestamp(),
-      });
-    } else if (feeOwedButUnroutable) {
-      ledgerEntry = {
-        amount: platformFee,
-        source: 'escrow_release',
-        sourceId: dealId || chatRoomId,
-        payerUid: sellerUid,
-        counterpartyUid: buyerUid,
-        note: `${(feeRate * 100).toFixed(feeRate * 100 % 1 === 0 ? 0 : 1)}% of $${amt.toLocaleString()} (seller plan: ${sellerPlan}) — deducted from seller, held pending ADMIN_EMAIL fix`,
-      };
-    }
-
-    // 3. Buyer transaction record (closes the hold)
-    const buyerRef = db.collection('users').doc(buyerUid);
-    tx.set(buyerRef.collection('transactions').doc(), {
-      type:       'escrow_released',
-      amount:     0,
-      label:      `Escrow released to seller · ${room.listingTitle || 'Deal'}`,
-      chatRoomId,
-      dealId,
-      sellerUid,
-      auto,
-      status:     'completed',
-      createdAt:  FieldValue.serverTimestamp(),
-    });
-
-    // 4. Close the chat room — outcome is "Deal Successful"
-    tx.update(roomRef, {
-      paymentStatus: 'complete',
-      dealOutcome:   'successful',
-      completedAt:   FieldValue.serverTimestamp(),
-      autoCompleted: auto,
-      active:        false,
-    });
-
-    // 5. Mirror on both deal docs. The seller's copy additionally records
-    // completedAt + sellerNetAmount (the actual post-platform-fee credit) —
-    // these two fields are what get-seller-stats reads to compute lifetime/
-    // last-7-days revenue and category breakdowns for the public seller
-    // profile modal, so they need to live on the deal doc itself rather
-    // than only on the (differently-scoped) dealChats room doc.
-    if (dealId) {
-      tx.update(db.collection('users').doc(sellerUid).collection('deals').doc(dealId), {
-        paymentStatus: 'complete', status: 'complete', dealOutcome: 'successful',
-        completedAt: FieldValue.serverTimestamp(),
-        sellerNetAmount: creditToSeller,
-      });
-      tx.update(buyerRef.collection('deals').doc(dealId), {
-        paymentStatus: 'complete', status: 'complete', dealOutcome: 'successful',
-        completedAt: FieldValue.serverTimestamp(),
-      });
-    }
-
-    // 6. Notify seller
-    tx.set(sellerRef.collection('notifications').doc(), {
-      type:      'escrow_released',
-      title:     'Payment released!',
-      body:      auto
-        ? `$${creditToSeller.toLocaleString()} has been automatically released to your wallet for "${room.listingTitle || 'your deal'}" after the 72-hour verification window passed.${applyFeeSplit ? ` (${(feeRate * 100).toFixed(feeRate * 100 % 1 === 0 ? 0 : 1)}% platform fee already deducted.)` : ''}`
-        : `$${creditToSeller.toLocaleString()} has been added to your wallet for "${room.listingTitle || 'your deal'}'.${applyFeeSplit ? ` (${(feeRate * 100).toFixed(feeRate * 100 % 1 === 0 ? 0 : 1)}% platform fee already deducted.)` : ''}`,
-      chatRoomId,
-      dealId,
-      read:      false,
-      createdAt: Date.now(),
-    });
-
-    // 7. If auto-released, let the buyer know too — they didn't take the action themselves
-    if (auto) {
-      tx.set(buyerRef.collection('notifications').doc(), {
-        type:      'escrow_auto_released',
-        title:     'Deal auto-completed',
-        body:      `The 72-hour verification window for "${room.listingTitle || 'this deal'}" passed, so the funds were automatically released to the seller.`,
-        chatRoomId,
-        dealId,
-        read:      false,
-        createdAt: Date.now(),
-      });
-    }
-  });
-
-  // Ledger the deducted-but-unroutable platform fee (if any) now that the
-  // money-moving transaction above has actually committed — the fee was
-  // already taken from the seller inside that transaction; this just
-  // records where it's sitting until ADMIN_EMAIL is fixed and it can be
-  // swept into the real admin wallet.
-  if (ledgerEntry) {
-    await _ledgerUnclaimedFee(db, ledgerEntry);
-  }
-
-  // System message (outside transaction — non-critical)
-  const roomSnap2 = await roomRef.get().catch(() => null);
-  const amt2      = roomSnap2?.data()?.escrowAmount || '';
-  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
-    uid:       'system',
-    type:      'system',
-    text:      auto
-      ? `⏱ The 72-hour verification window passed without a response, so this deal auto-completed. $${amt2 ? Number(amt2).toLocaleString() : ''} has been released to the seller. Deal Successful!`
-      : `Deal complete! $${amt2 ? Number(amt2).toLocaleString() : ''} has been released to the seller. Thank you for using Siterifty!`,
-    createdAt: Date.now(),
-  }).catch(() => {});
-
-  // Notifications — payment landing is the single biggest "big moment" in the
-  // whole deal lifecycle, so both sides get one, on both channels. Re-reads
-  // are cheap and keep this fully outside (and never blocking) the
-  // money-moving transaction.
-  const roomData = roomSnap2?.data();
-  if (roomData) {
-    const listingTitle = roomData.listingTitle || 'your deal';
-    const amtStr = amt2 ? Number(amt2).toLocaleString() : '';
-
-    if (roomData.sellerUid) {
-      const sellerSnapForEmail = await db.collection('users').doc(roomData.sellerUid).get();
-      const sellerEmailForNotif = sellerSnapForEmail.exists ? (sellerSnapForEmail.data().email || '') : '';
-      notifyDeal({
-        uid: roomData.sellerUid,
-        to: sellerEmailForNotif,
-        accentKey: 'success',
-        eyebrow: 'Payment released',
-        heading: `You've been paid for "${listingTitle}"`,
-        bodyHtml: auto
-          ? `The 72-hour verification window passed, so <strong>$${amtStr}</strong> was automatically released to your wallet.`
-          : `The buyer confirmed receipt — <strong>$${amtStr}</strong> has been added to your wallet.`,
-        pushBody: auto
-          ? `$${amtStr} was auto-released to your wallet for "${listingTitle}".`
-          : `$${amtStr} was released to your wallet for "${listingTitle}".`,
-        ctaLabel: 'View wallet',
-        chatRoomId,
-      }).catch(() => {});
-    }
-
-    // Buyer only gets a notification here if this was an auto-release — if
-    // they clicked "release" themselves, they don't need to be told what
-    // they just did.
-    if (auto && roomData.buyerUid) {
-      const buyerSnapForEmail = await db.collection('users').doc(roomData.buyerUid).get();
-      const buyerEmailForNotif = buyerSnapForEmail.exists ? (buyerSnapForEmail.data().email || '') : '';
-      notifyDeal({
-        uid: roomData.buyerUid,
-        to: buyerEmailForNotif,
-        accentKey: 'info',
-        eyebrow: 'Deal auto-completed',
-        heading: `"${listingTitle}" is complete`,
-        bodyHtml: `The 72-hour verification window passed without a response, so funds were automatically released to the seller.`,
-        pushBody: `"${listingTitle}" auto-completed — funds were released to the seller.`,
-        ctaLabel: 'View deal',
-        chatRoomId,
-      }).catch(() => {});
-    }
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// escrow-release  { idToken, chatRoomId, dealId }
-// Buyer confirms delivery → funds released to seller.
-// Atomically: credits seller wallet, closes deal, writes transaction records.
-// ─────────────────────────────────────────────────────────────────────────────
-async function handleEscrowRelease(req, res, idToken) {
-  const { chatRoomId, dealId } = req.body;
-  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
-
-  const fbUser   = await verifyFirebaseToken(idToken);
-  const buyerUid = fbUser.localId;
-
-  const db      = getAdminDb();
-  const roomRef = db.collection('dealChats').doc(chatRoomId);
-  const roomSnap = await roomRef.get();
-  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
-  if (roomSnap.data().buyerUid !== buyerUid) {
-    return res.status(403).json({ error: 'Only the buyer can release funds' });
-  }
-
-  await _releaseEscrowForRoom(db, chatRoomId, dealId, { auto: false });
-
-  return res.status(200).json({ success: true });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Core refund logic — shared by the participant-triggered handler below and
-// the automated 14-day-hard-cap sweep for deals that were funded but never
-// delivered in time. `auto: true` skips the participant-identity check and
-// adjusts messaging to make clear this happened automatically.
-// ─────────────────────────────────────────────────────────────────────────────
-async function _refundEscrowForRoom(db, chatRoomId, dealId, { auto = false } = {}) {
-  const roomRef = db.collection('dealChats').doc(chatRoomId);
-
-  await db.runTransaction(async tx => {
-    const roomSnap = await tx.get(roomRef);
-    if (!roomSnap.exists) throw new Error('Deal not found');
-    const room = roomSnap.data();
-
-    if (!['funded', 'delivered', 'disputed'].includes(room.paymentStatus)) {
-      throw new Error(`Cannot refund — status is ${room.paymentStatus || 'unfunded'}`);
-    }
-    if (room.paymentStatus === 'complete') throw new Error('Deal already complete');
-
-    const buyerUid = room.buyerUid;
-    const amt      = parseFloat(room.escrowAmount || 0);
-    if (!amt) throw new Error('No escrow amount on file');
-
-    const buyerRef  = db.collection('users').doc(buyerUid);
-    const buyerSnap = await tx.get(buyerRef);
-    if (!buyerSnap.exists) throw new Error('Buyer not found');
-
-    const buyerBal    = parseFloat((buyerSnap.data().walletBalance || 0).toFixed(2));
-    const newBuyerBal = parseFloat((buyerBal + amt).toFixed(2));
-    // Restore exactly what escrow-pay drew from withdrawableBalance (see
-    // escrowWithdrawableDebit on the room) — not the full `amt`, since some
-    // of that money may have come from non-withdrawable (deposited) funds.
-    const withdrawableDebit = parseFloat((room.escrowWithdrawableDebit || 0).toFixed(2));
-    const buyerWithdrawable    = parseFloat((buyerSnap.data().withdrawableBalance || 0).toFixed(2));
-    const newBuyerWithdrawable = parseFloat((buyerWithdrawable + withdrawableDebit).toFixed(2));
-
-    // 1. Refund buyer wallet
-    tx.update(buyerRef, { walletBalance: newBuyerBal, withdrawableBalance: newBuyerWithdrawable });
-
-    // 2. Buyer transaction record
-    tx.set(buyerRef.collection('transactions').doc(), {
-      type:       'escrow_refund',
-      amount:     amt,
-      label:      `Escrow refunded · ${room.listingTitle || 'Deal'}`,
-      chatRoomId,
-      dealId,
-      sellerUid:  room.sellerUid,
-      auto,
-      status:     'completed',
-      createdAt:  FieldValue.serverTimestamp(),
-    });
-
-    // 3. Close room — outcome is "Deal Closed"
-    tx.update(roomRef, {
-      paymentStatus: 'refunded',
-      dealOutcome:   'closed',
-      refundedAt:    FieldValue.serverTimestamp(),
-      autoCancelled: auto,
-      active:        false,
-      cancelled:     true,
-    });
-
-    // 4. Mirror on both deal docs
-    if (dealId) {
-      tx.update(db.collection('users').doc(room.sellerUid).collection('deals').doc(dealId), {
-        paymentStatus: 'refunded', status: 'cancelled', dealOutcome: 'closed',
-      });
-      tx.update(buyerRef.collection('deals').doc(dealId), {
-        paymentStatus: 'refunded', status: 'cancelled', dealOutcome: 'closed',
-      });
-    }
-
-    // 5. Notify buyer — funds back in wallet
-    tx.set(buyerRef.collection('notifications').doc(), {
-      type:      'escrow_refunded',
-      title:     auto ? 'Deal closed — refunded' : 'Escrow refunded',
-      body:      auto
-        ? `The 14-day deadline for "${room.listingTitle || 'this deal'}" passed without delivery, so $${amt.toLocaleString()} was automatically returned to your wallet.`
-        : `$${amt.toLocaleString()} has been returned to your wallet for "${room.listingTitle || 'this deal'}".`,
-      chatRoomId,
-      dealId,
-      read:      false,
-      createdAt: Date.now(),
-    });
-
-    // 6. Notify seller — deal is now closed
-    tx.set(db.collection('users').doc(room.sellerUid).collection('notifications').doc(), {
-      type:      'escrow_refunded',
-      title:     'Deal closed',
-      body:      auto
-        ? `The 14-day deadline for "${room.listingTitle || 'this deal'}" passed without delivery. The deal has closed and escrow was refunded to the buyer.`
-        : `The escrow for "${room.listingTitle || 'this deal'}" was refunded to the buyer. This deal is now closed.`,
-      chatRoomId,
-      dealId,
-      read:      false,
-      createdAt: Date.now(),
-    });
-  });
-
-  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
-    uid:       'system',
-    type:      'system',
-    text:      auto
-      ? '⏱ The 14-day deadline passed without the deal being delivered. Deal Closed — the escrow has been refunded to the buyer.'
-      : 'The escrow has been refunded to the buyer. This deal is now closed.',
-    createdAt: Date.now(),
-  }).catch(() => {});
-
-  // Notifications — refund is money moving, so both sides get told, on both channels.
-  const roomSnapForEmail = await roomRef.get().catch(() => null);
-  const roomForEmail = roomSnapForEmail?.data();
-  if (roomForEmail) {
-    const listingTitle = roomForEmail.listingTitle || 'this deal';
-    const amtStr = roomForEmail.escrowAmount ? Number(roomForEmail.escrowAmount).toLocaleString() : '';
-
-    if (roomForEmail.buyerUid) {
-      const buyerSnapForEmail = await db.collection('users').doc(roomForEmail.buyerUid).get();
-      const buyerEmailForNotif = buyerSnapForEmail.exists ? (buyerSnapForEmail.data().email || '') : '';
-      notifyDeal({
-        uid: roomForEmail.buyerUid,
-        to: buyerEmailForNotif,
-        accentKey: 'info',
-        eyebrow: auto ? 'Deal closed' : 'Refund issued',
-        heading: `$${amtStr} refunded to your wallet`,
-        bodyHtml: auto
-          ? `The 14-day delivery deadline for <strong>${listingTitle}</strong> passed, so your payment was automatically returned to your wallet.`
-          : `Your escrow payment for <strong>${listingTitle}</strong> has been returned to your wallet.`,
-        pushBody: `$${amtStr} was refunded to your wallet for "${listingTitle}".`,
-        ctaLabel: 'View wallet',
-        chatRoomId,
-      }).catch(() => {});
-    }
-    if (roomForEmail.sellerUid) {
-      const sellerSnapForEmail = await db.collection('users').doc(roomForEmail.sellerUid).get();
-      const sellerEmailForNotif = sellerSnapForEmail.exists ? (sellerSnapForEmail.data().email || '') : '';
-      notifyDeal({
-        uid: roomForEmail.sellerUid,
-        to: sellerEmailForNotif,
-        accentKey: 'danger',
-        eyebrow: 'Deal closed',
-        heading: `"${listingTitle}" was refunded to the buyer`,
-        bodyHtml: auto
-          ? `The 14-day delivery deadline passed without delivery, so this deal was automatically closed and escrow refunded to the buyer.`
-          : `This deal has been closed and the escrow payment refunded to the buyer.`,
-        pushBody: `"${listingTitle}" was closed — escrow was refunded to the buyer.`,
-        ctaLabel: 'View deal',
-        chatRoomId,
-      }).catch(() => {});
-    }
-  }
-}
-
-// Cancels a deal that expired before any money was ever put into escrow
-// (paymentStatus is still unfunded/null) — no wallet transaction needed,
-// just close the room and mark both sides' deal docs as closed.
-async function _cancelUnfundedExpiredRoom(db, chatRoomId, dealId, room) {
-  const roomRef = db.collection('dealChats').doc(chatRoomId);
-  await roomRef.update({
-    paymentStatus: room.paymentStatus || 'unfunded',
-    dealOutcome:   'closed',
-    autoCancelled: true,
-    active:        false,
-    cancelled:     true,
-    closedAt:      FieldValue.serverTimestamp(),
-  });
-  if (dealId) {
-    await Promise.all([room.sellerUid, room.buyerUid].map(uid => {
-      if (!uid) return Promise.resolve();
-      return db.collection('users').doc(uid).collection('deals').doc(dealId)
-        .update({ status: 'cancelled', dealOutcome: 'closed' }).catch(() => {});
-    }));
-  }
-  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
-    uid:       'system',
-    type:      'system',
-    text:      '⏱ The delivery deadline passed without payment being finalized. Deal Closed.',
-    createdAt: Date.now(),
-  }).catch(() => {});
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// escrow-refund  { idToken, chatRoomId, dealId }
-// Either party triggers a refund. Returns escrow to buyer wallet.
-// Valid from: funded, delivered, or disputed status.
-// ─────────────────────────────────────────────────────────────────────────────
-async function handleEscrowRefund(req, res, idToken) {
-  const { chatRoomId, dealId } = req.body;
-  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
-
-  const fbUser = await verifyFirebaseToken(idToken);
-  const uid    = fbUser.localId;
-
-  const db      = getAdminDb();
-  const roomRef = db.collection('dealChats').doc(chatRoomId);
-  const roomSnap = await roomRef.get();
-  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
-  const room = roomSnap.data();
-  if (room.sellerUid !== uid && room.buyerUid !== uid) {
-    return res.status(403).json({ error: 'Not a participant in this deal' });
-  }
-
-  await _refundEscrowForRoom(db, chatRoomId, dealId, { auto: false });
-
-  return res.status(200).json({ success: true });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// escrow-dispute  { idToken, chatRoomId, dealId, reason }
-// Either party raises a dispute on a funded/delivered deal.
-// Freezes the escrow and creates a record in /disputes for admin review.
-// ─────────────────────────────────────────────────────────────────────────────
-async function handleEscrowDispute(req, res, idToken) {
-  const { chatRoomId, dealId, reason } = req.body;
-  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
-
-  const fbUser      = await verifyFirebaseToken(idToken);
-  const disputerUid = fbUser.localId;
-
-  const db       = getAdminDb();
-  const roomRef  = db.collection('dealChats').doc(chatRoomId);
-  const roomSnap = await roomRef.get();
-
-  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
-  const room = roomSnap.data();
-
-  if (room.sellerUid !== disputerUid && room.buyerUid !== disputerUid) {
-    return res.status(403).json({ error: 'Not a participant in this deal' });
-  }
-  if (!['funded', 'delivered'].includes(room.paymentStatus)) {
-    return res.status(400).json({
-      error: `Cannot dispute — status is ${room.paymentStatus || 'unfunded'}`,
-    });
-  }
-
-  const now            = Date.now();
-  const sanitizedReason = (reason || '').slice(0, 500);
-
-  await roomRef.update({
-    paymentStatus: 'disputed',
-    disputedAt:    FieldValue.serverTimestamp(),
-    disputedBy:    disputerUid,
-    disputeReason: sanitizedReason,
-  });
-
-  // Mirror on both deal docs
-  await Promise.all([room.sellerUid, room.buyerUid].map(uid => {
-    if (!uid || !dealId) return Promise.resolve();
-    return db.collection('users').doc(uid).collection('deals').doc(dealId)
-      .update({ paymentStatus: 'disputed' }).catch(() => {});
-  }));
-
-  // Write dispute record for admin review
-  const disputeRef = await db.collection('disputes').add({
-    chatRoomId,
-    dealId:       dealId || null,
-    sellerUid:    room.sellerUid,
-    buyerUid:     room.buyerUid,
-    disputedBy:   disputerUid,
-    escrowAmount: room.escrowAmount || 0,
-    listingTitle: room.listingTitle || '',
-    reason:       sanitizedReason,
-    status:       'open',
-    createdAt:    FieldValue.serverTimestamp(),
-  });
-
-  // Kick off AI triage (aistudio.js handleTriage) — gives this dispute an
-  // aiVerdict/aiConfidence/aiReasoning pass, and auto-applies high-confidence
-  // low-risk outcomes. Money/ban verdicts get a 48h reversible window rather
-  // than being silently final — see AUTO_APPLY_MONEY_ACTIONS in aistudio.js.
-  // Fire-and-forget: never block the dispute filing on the AI call.
-  triggerAiTriage({
-    kind: 'dispute',
-    id: disputeRef.id,
-    evidence: {
-      chatRoomId,
-      dealId: dealId || null,
-      sellerUid: room.sellerUid,
-      buyerUid: room.buyerUid,
-      disputedBy: disputerUid,
-      escrowAmount: room.escrowAmount || 0,
-      listingTitle: room.listingTitle || '',
-      reason: sanitizedReason,
-      paymentStatus: room.paymentStatus,
-    },
-  });
-
-  // Notify the other party
-  const otherUid = disputerUid === room.sellerUid ? room.buyerUid : room.sellerUid;
-  if (otherUid) {
-    await db.collection('users').doc(otherUid).collection('notifications').add({
-      type:      'deal_disputed',
-      title:     'A dispute has been raised',
-      body:      `A dispute was opened on "${room.listingTitle || 'your deal'}". Our team will review within 24–48 hours.`,
-      chatRoomId,
-      dealId,
-      read:      false,
-      createdAt: now,
-    }).catch(() => {});
-
-    const otherSnapForEmail = await db.collection('users').doc(otherUid).get();
-    const otherEmailForNotif = otherSnapForEmail.exists ? (otherSnapForEmail.data().email || '') : '';
-    notifyDeal({
-      uid: otherUid,
-      to: otherEmailForNotif,
-      accentKey: 'danger',
-      eyebrow: 'Dispute raised',
-      heading: 'A dispute was opened on your deal',
-      bodyHtml: `A dispute was opened on <strong>${room.listingTitle || 'your deal'}</strong> and escrow funds are now frozen. Our team will review within <strong>24–48 hours</strong>.`,
-      pushBody: `A dispute was opened on "${room.listingTitle || 'your deal'}". Funds are frozen pending review.`,
-      ctaLabel: 'View deal',
-      chatRoomId,
-    }).catch(() => {});
-  }
-
-  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
-    uid:       'system',
-    type:      'system',
-    text:      'A dispute has been raised on this deal. Funds are frozen. The Siterifty team will review and resolve within 24–48 hours.',
-    createdAt: now,
-  }).catch(() => {});
-
-  return res.status(200).json({ success: true });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// admin-resolve-dispute  { disputeId, outcome: 'release' | 'refund' }
-// ADMIN-ONLY — gated by the admin_session cookie (verifyAdminSession), not a
-// user idToken. Resolves an open dispute one of two ways:
-//   outcome: 'release' — pay the seller (same transaction _releaseEscrowForRoom
-//     already runs for a normal delivery confirmation — fee split, seller
-//     wallet credit, dealsCompleted increment, etc). Requires the escrow
-//     status check inside _releaseEscrowForRoom to accept 'disputed', which
-//     it now does.
-//   outcome: 'refund' — return the funds to the buyer (same transaction
-//     _refundEscrowForRoom already runs for a participant-cancelled refund).
-// Either way, marks the /disputes doc resolved and notifies both parties
-// with the outcome so nobody is left wondering what happened to their money.
-// ─────────────────────────────────────────────────────────────────────────────
-async function handleAdminResolveDispute(req, res) {
-  const session = verifyAdminSession(req);
-  if (!session) return res.status(401).json({ error: 'Not authenticated as admin' });
-
-  const { disputeId, outcome } = req.body || {};
-  if (!disputeId) return res.status(400).json({ error: 'Missing disputeId' });
-  if (!['release', 'refund'].includes(outcome)) {
-    return res.status(400).json({ error: 'outcome must be "release" or "refund"' });
+  if (senderUid === recipientUid) {
+    return res.status(400).json({ error: 'You cannot auto-send money to yourself' });
   }
 
   const db = getAdminDb();
-  const disputeRef = db.collection('disputes').doc(disputeId);
-  const disputeSnap = await disputeRef.get();
-  if (!disputeSnap.exists) return res.status(404).json({ error: 'Dispute not found' });
-  const dispute = disputeSnap.data();
 
-  if (dispute.status === 'resolved') {
-    return res.status(400).json({ error: 'This dispute has already been resolved' });
-  }
-  if (!dispute.chatRoomId) return res.status(400).json({ error: 'Dispute is missing chatRoomId' });
+  // Confirm the recipient actually exists before scheduling anything
+  const recipSnap = await db.collection('users').doc(recipientUid).get();
+  if (!recipSnap.exists) return res.status(404).json({ error: 'Recipient account not found' });
+  const recipData = recipSnap.data();
+  const recipName = recipData.displayName || recipData.username || recipData.email?.split('@')[0] || 'User';
 
-  if (outcome === 'release') {
-    await _releaseEscrowForRoom(db, dispute.chatRoomId, dispute.dealId || null, { auto: false });
-  } else {
-    await _refundEscrowForRoom(db, dispute.chatRoomId, dispute.dealId || null, { auto: false });
-  }
+  const safeNote = (note || '').slice(0, 200);
+  const nextRunAt = Timestamp.fromMillis(Date.now() + interval * 24 * 60 * 60 * 1000);
 
-  await disputeRef.update({
-    status: 'resolved',
-    outcome,
-    resolvedAt: FieldValue.serverTimestamp(),
-    resolvedBy: session.email,
-  });
-
-  // Notify both parties with the outcome.
-  const now = Date.now();
-  const winnerUid = outcome === 'release' ? dispute.sellerUid : dispute.buyerUid;
-  const loserUid  = outcome === 'release' ? dispute.buyerUid  : dispute.sellerUid;
-  const dealLabel = dispute.listingTitle || 'your deal';
-
-  await Promise.all([
-    winnerUid ? db.collection('users').doc(winnerUid).collection('notifications').add({
-      type: 'dispute_resolved',
-      title: 'Dispute resolved in your favor',
-      body: outcome === 'release'
-        ? `The dispute on "${dealLabel}" was resolved — funds have been released to you.`
-        : `The dispute on "${dealLabel}" was resolved — you've been refunded.`,
-      chatRoomId: dispute.chatRoomId,
-      dealId: dispute.dealId || null,
-      read: false,
-      createdAt: now,
-    }).catch(() => {}) : Promise.resolve(),
-    loserUid ? db.collection('users').doc(loserUid).collection('notifications').add({
-      type: 'dispute_resolved',
-      title: 'Dispute resolved',
-      body: outcome === 'release'
-        ? `The dispute on "${dealLabel}" was resolved in the seller's favor — funds have been released to them.`
-        : `The dispute on "${dealLabel}" was resolved in the buyer's favor — they've been refunded.`,
-      chatRoomId: dispute.chatRoomId,
-      dealId: dispute.dealId || null,
-      read: false,
-      createdAt: now,
-    }).catch(() => {}) : Promise.resolve(),
-    db.collection('dealChats').doc(dispute.chatRoomId).collection('messages').add({
-      uid: 'system',
-      type: 'system',
-      text: outcome === 'release'
-        ? 'This dispute has been resolved by the Siterifty team — funds have been released to the seller.'
-        : 'This dispute has been resolved by the Siterifty team — funds have been refunded to the buyer.',
-      createdAt: now,
-    }).catch(() => {}),
-  ]);
-
-  return res.status(200).json({ success: true, outcome });
-}
-//   • paymentStatus === 'delivered' and now > autoReleaseAt (72h post-delivery)
-//       → auto-release escrow to seller. Outcome: "Deal Successful".
-//       The chat is NOT locked before this — the buyer can keep asking
-//       questions right up until the window closes.
-//   • paymentStatus is 'unfunded'/'funded' (never delivered) and
-//     now > expiresAt (per-listing-type deadline, capped at 14 days)
-//       → auto-refund (if funded) or auto-cancel (if never funded).
-//       Outcome: "Deal Closed".
-//   • paymentStatus === 'disputed' is NEVER touched — always needs a human.
-//   • paymentStatus === 'complete' / 'refunded' / already closed → skipped.
-//
-// Call modes:
-//   - { chatRoomId: 'deal_xyz' } — resolve just one room. Used by the client
-//     as a lazy fallback (checked whenever a deal chat is opened) so deals
-//     still resolve correctly even before a cron job is wired up.
-//   - {} (no chatRoomId) — sweep ALL active dealChats. Intended to be called
-//     by a scheduled job (e.g. Vercel Cron hitting this endpoint every
-//     15–30 minutes) — see vercel.json `crons` config to wire this up:
-//       { "path": "/api/deal?action=sweep-expired-deals", "schedule": "*/15 * * * *" }
-//     A GET request from Vercel Cron is also accepted for this one action
-//     (see handler() below) since cron jobs can't easily send a POST body.
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared resolution logic for a single dealChats room — used by both the
-// cron-driven full sweep and the client-triggered single-room check.
-async function _resolveExpiredRoomIfDue(db, id, room, now) {
-  if (!room || room.active === false || !room.paymentStatus) return { outcome: 'skipped' };
-  if (room.paymentStatus === 'disputed') return { outcome: 'skipped' };
-  if (['complete', 'refunded'].includes(room.paymentStatus)) return { outcome: 'skipped' };
-
-  // 1. Post-delivery 72h buyer-verify window
-  if (room.paymentStatus === 'delivered') {
-    const deadline = room.autoReleaseAt || null;
-    if (deadline && now > deadline) {
-      await _releaseEscrowForRoom(db, id, room.dealId || null, { auto: true });
-      return { outcome: 'released' };
-    }
-    return { outcome: 'skipped' };
-  }
-
-  // 2. Pre-delivery hard deadline (per listing type, capped at 14 days)
-  if (['unfunded', 'funded'].includes(room.paymentStatus)) {
-    const deadline = room.expiresAt || null;
-    if (deadline && now > deadline) {
-      if (room.paymentStatus === 'funded' && parseFloat(room.escrowAmount || 0) > 0) {
-        await _refundEscrowForRoom(db, id, room.dealId || null, { auto: true });
-        return { outcome: 'refunded' };
-      }
-      await _cancelUnfundedExpiredRoom(db, id, room.dealId || null, room);
-      return { outcome: 'cancelled' };
-    }
-    return { outcome: 'skipped' };
-  }
-
-  return { outcome: 'skipped' };
-}
-
-async function handleSweepExpiredDeals(req, res) {
-  const db = getAdminDb();
-  const chatRoomId = req.body?.chatRoomId || req.query?.chatRoomId || null;
-  const now = Date.now();
-  const results = { released: [], refunded: [], cancelled: [], skipped: 0, errors: [] };
-
-  async function resolveOne(id, room) {
-    try {
-      const { outcome } = await _resolveExpiredRoomIfDue(db, id, room, now);
-      if (outcome === 'released')  results.released.push(id);
-      else if (outcome === 'refunded')  results.refunded.push(id);
-      else if (outcome === 'cancelled') results.cancelled.push(id);
-      else results.skipped++;
-    } catch (err) {
-      results.errors.push({ chatRoomId: id, error: err.message });
-    }
-  }
-
-  if (chatRoomId) {
-    const snap = await db.collection('dealChats').doc(chatRoomId).get();
-    if (!snap.exists) return res.status(404).json({ error: 'Deal not found' });
-    await resolveOne(chatRoomId, snap.data());
-  } else {
-    // Full sweep — only scans rooms still marked active to keep this cheap.
-    const snap = await db.collection('dealChats').where('active', '==', true).get();
-    await Promise.all(snap.docs.map(d => resolveOne(d.id, d.data())));
-  }
-
-  return res.status(200).json({ success: true, ...results });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// invite-github-collaborator  { idToken, chatRoomId, dealId, buyerGithubUsername }
-//
-// Seller-only. If the listing attached to this deal has a GitHub repo
-// (listing.attachedRepo), uses the SELLER's stored GitHub access token
-// (users/{sellerUid}.githubAccessToken) to add the buyer as a collaborator
-// on that repo. This is a manual, seller-triggered action — nothing runs
-// automatically on payment/delivery; the seller must click "Add buyer" in
-// the deal's repo card, same spirit as every other transfer method here.
-//
-// Buyers don't authenticate with GitHub through Siterifty, so we can't look
-// up their username from their Firebase account — they type their own
-// GitHub username once in the deal UI, which is passed in as
-// buyerGithubUsername and stored on the room for future status checks.
-// ─────────────────────────────────────────────────────────────────────────────
-async function handleInviteGithubCollaborator(req, res, idToken) {
-  const { chatRoomId, dealId, buyerGithubUsername } = req.body || {};
-  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
-  if (!buyerGithubUsername || !String(buyerGithubUsername).trim()) {
-    return res.status(400).json({ error: 'Missing buyerGithubUsername' });
-  }
-
-  const fbUser    = await verifyFirebaseToken(idToken);
-  const sellerUid = fbUser.localId;
-
-  const db      = getAdminDb();
-  const roomRef = db.collection('dealChats').doc(chatRoomId);
-  const roomSnap = await roomRef.get();
-  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
-  const room = roomSnap.data();
-
-  if (room.sellerUid !== sellerUid) {
-    return res.status(403).json({ error: 'Only the seller can invite a collaborator' });
-  }
-  if (!['funded', 'delivered'].includes(room.paymentStatus)) {
-    return res.status(400).json({ error: `Cannot invite collaborator — deal status is ${room.paymentStatus || 'unfunded'}` });
-  }
-
-  // Look up the listing's attached repo
-  const listingId = room.listingId || null;
-  if (!listingId) return res.status(400).json({ error: 'No listing attached to this deal' });
-  const listingSnap = await db.collection('listings').doc(listingId).get();
-  if (!listingSnap.exists) return res.status(404).json({ error: 'Listing not found' });
-  const listing = listingSnap.data();
-  const repo = listing.attachedRepo || null;
-  if (!repo || !repo.fullName) {
-    return res.status(400).json({ error: 'This listing has no GitHub repository attached' });
-  }
-
-  // Seller's GitHub token
-  const sellerSnap = await db.collection('users').doc(sellerUid).get();
-  const sellerData = sellerSnap.exists ? sellerSnap.data() : {};
-  const githubAccessToken = sellerData.githubAccessToken;
-  if (!githubAccessToken) {
-    return res.status(400).json({ error: 'not_connected', reason: 'Seller has not connected GitHub' });
-  }
-
-  const cleanUsername = String(buyerGithubUsername).trim().replace(/^@/, '');
-
-  const ghRes = await fetch(
-    `https://api.github.com/repos/${repo.fullName}/collaborators/${encodeURIComponent(cleanUsername)}`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${githubAccessToken}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ permission: 'pull' }), // read access is enough to review/clone before full handover
-    }
-  );
-
-  if (ghRes.status === 401) {
-    return res.status(400).json({ error: 'not_connected', reason: 'token_revoked' });
-  }
-  if (ghRes.status === 404) {
-    return res.status(404).json({ error: 'github_user_not_found', message: `No GitHub user found with username "${cleanUsername}".` });
-  }
-  if (![201, 204].includes(ghRes.status)) {
-    let detail = '';
-    try { detail = (await ghRes.json())?.message || ''; } catch (e) {}
-    return res.status(500).json({ error: 'github_api_error', message: detail || `GitHub API returned ${ghRes.status}` });
-  }
-
-  // 201 = invitation created (private repo, awaiting acceptance)
-  // 204 = user already had access, or was added directly (rare/public repos)
-  const invitePending = ghRes.status === 201;
-  const now = Date.now();
-
-  const collabState = {
-    githubCollaboratorUsername: cleanUsername,
-    githubCollaboratorStatus: invitePending ? 'invited' : 'added',
-    githubCollaboratorInvitedAt: now,
+  const scheduleRef = db.collection('users').doc(senderUid).collection('autosends').doc();
+  const schedule = {
+    id:            scheduleRef.id,
+    recipientUid,
+    recipientName: recipName,
+    recipientEmail: recipData.email || '',
+    amount:        amt,
+    intervalDays:  interval,
+    note:          safeNote,
+    status:        'active',
+    nextRunAt,
+    lastRunAt:     null,
+    runCount:      0,
+    failCount:     0,
+    createdAt:     FieldValue.serverTimestamp(),
   };
-  await roomRef.update(collabState);
+  await scheduleRef.set(schedule);
 
-  await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
-    uid:       'system',
-    type:      'system',
-    text:      invitePending
-      ? `The seller invited GitHub user "${cleanUsername}" to "${repo.fullName}". Check your GitHub notifications to accept.`
-      : `The seller added GitHub user "${cleanUsername}" to "${repo.fullName}".`,
-    createdAt: now,
-  }).catch(() => {});
-
-  if (room.buyerUid) {
-    await db.collection('users').doc(room.buyerUid).collection('notifications').add({
-      type:      'github_collaborator_invited',
-      title:     'GitHub repo access shared',
-      body:      `The seller shared access to "${repo.fullName}". Check your GitHub notifications to accept.`,
-      chatRoomId,
-      dealId,
-      read:      false,
-      createdAt: now,
-    }).catch(() => {});
-  }
-
-  return res.status(200).json({
-    success: true,
-    status: collabState.githubCollaboratorStatus,
-    repoFullName: repo.fullName,
-    repoHtmlUrl: repo.htmlUrl,
+  await db.collection('users').doc(senderUid).collection('transactions').add({
+    type:      'autosend_settings',
+    amount:    0,
+    label:     `Auto send scheduled · every ${interval} day${interval !== 1 ? 's' : ''}`,
+    note:      `$${amt.toFixed(2)} to ${recipName} every ${interval} days until cancelled.`,
+    status:    'completed',
+    createdAt: FieldValue.serverTimestamp(),
   });
+
+  return res.status(200).json({ success: true, schedule: { ...schedule, createdAt: Date.now() } });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// github-collaborator-status  { idToken, chatRoomId }
-// Either participant in the deal can check the current repo-sharing state.
+// autosend-list  { idToken }  →  { schedules: [...] }
 // ─────────────────────────────────────────────────────────────────────────────
-async function handleGithubCollaboratorStatus(req, res, idToken) {
-  const { chatRoomId } = req.body || {};
-  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
+async function handleAutoSendList(req, res) {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(401).json({ error: 'Missing auth token' });
 
   const fbUser = await verifyFirebaseToken(idToken);
-  const uid    = fbUser.localId;
+  const uid = fbUser.localId;
 
-  const db      = getAdminDb();
-  const roomSnap = await db.collection('dealChats').doc(chatRoomId).get();
-  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
-  const room = roomSnap.data();
-
-  if (room.sellerUid !== uid && room.buyerUid !== uid) {
-    return res.status(403).json({ error: 'Not a participant in this deal' });
-  }
-
-  let repo = null;
-  if (room.listingId) {
-    const listingSnap = await db.collection('listings').doc(room.listingId).get();
-    if (listingSnap.exists) repo = listingSnap.data().attachedRepo || null;
-  }
-
-  return res.status(200).json({
-    success: true,
-    repo,
-    isSeller: room.sellerUid === uid,
-    status: room.githubCollaboratorStatus || 'none',
-    githubCollaboratorUsername: room.githubCollaboratorUsername || null,
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// check-deal-expiry  { idToken, chatRoomId }
-// Client-safe fallback: any participant in the room can trigger a
-// check-and-resolve of their own deal if its deadline has passed. Silently
-// no-ops if the deadline hasn't been reached yet — safe to call on every
-// deal chat open.
-// ─────────────────────────────────────────────────────────────────────────────
-async function handleCheckDealExpiry(req, res, idToken) {
-  const { chatRoomId } = req.body;
-  if (!chatRoomId) return res.status(400).json({ error: 'Missing chatRoomId' });
-
-  const fbUser = await verifyFirebaseToken(idToken);
-  const uid    = fbUser.localId;
-
-  const db      = getAdminDb();
-  const roomRef = db.collection('dealChats').doc(chatRoomId);
-  const roomSnap = await roomRef.get();
-  if (!roomSnap.exists) return res.status(404).json({ error: 'Deal not found' });
-  const room = roomSnap.data();
-
-  if (room.sellerUid !== uid && room.buyerUid !== uid) {
-    return res.status(403).json({ error: 'Not a participant in this deal' });
-  }
-
-  const { outcome } = await _resolveExpiredRoomIfDue(db, chatRoomId, room, Date.now());
-  return res.status(200).json({ success: true, outcome });
-}
-
-// ═════════════════════════════════════════════════════════════════════════
-// AI AGENT — folded in from the former standalone /api/agent.js, purely to
-// stay under the hobby-plan serverless function count (each separate file
-// under /api counts as its own function/endpoint slot). This section owns:
-// plan eligibility, daily request quota, scheduling (cron sweep + per-deal
-// trigger), and price-drop/auto-relist automations.
-//
-// It does NOT reimplement accept/reject — that's settleDealCore above,
-// the exact same transaction + chat-room + email/notification path a
-// manual seller accept/reject goes through in this file. And it does NOT
-// keep its own AI client — every model call here goes through aistudio.js's
-// 'agent-deal-decision' / 'agent-auto-reply' actions via the shared
-// AISTUDIO_INTERNAL_TOKEN, the same way aistudio.js's own internal actions
-// (triage, feedback-dedupe) authenticate each other.
-//
-// Routes handled by the main `handler` above:
-//   GET  /api/deal?action=agent-sweep            (Vercel Cron, every minute;
-//                                                  reuses CRON_SECRET)
-//   GET  /api/deal?action=agent-limits&uid=...    (public, read-only)
-//   POST /api/deal  { action:'agent-check-key-limit', idToken }
-//   POST /api/deal  { action:'agent-create-key', idToken, label }
-//
-// runAgentForSeller(sellerUid, dealId) is called directly (in-process, no
-// HTTP hop) right after a deal is created, above.
-//
-// The "counter-offer" feature the old agent.js had has been removed: this
-// file has no counterOffer field or negotiation mechanism anywhere in the
-// real deal lifecycle, so it was writing to a field nothing else ever read.
-// If negotiation becomes a real feature here, the agent can re-gain a
-// "counter" action at that point, not before.
-// ═════════════════════════════════════════════════════════════════════════
-
-const AGENT_PLAN_LIMITS = {
-  free:    { rpd: 5,    maxKeys: 1  },
-  starter: { rpd: 75,   maxKeys: 3  },
-  growth:  { rpd: 350,  maxKeys: 5  },
-  pro:     { rpd: 1000, maxKeys: 10 },
-};
-const AGENT_ALLOWED_PLANS = ['free', 'starter', 'growth', 'pro'];
-
-function agentTodayUTC() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-// ── AI Studio client — every model call the agent needs goes through
-// aistudio.js's shared router/fallback-chain/usage-tracking, authenticated
-// as a server-to-server internal call. ──────────────────────────────────────
-async function callAiStudio(action, payload) {
-  if (!process.env.AISTUDIO_INTERNAL_TOKEN) {
-    console.warn(`[deal.js/agent] AISTUDIO_INTERNAL_TOKEN not set — skipping ${action}`);
-    return null;
-  }
-  try {
-    const res = await fetch(`${SITE_ORIGIN}/api/aistudio`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-internal-token': process.env.AISTUDIO_INTERNAL_TOKEN,
-      },
-      body: JSON.stringify({ action, ...payload }),
-    });
-    if (!res.ok) {
-      console.error(`[deal.js/agent] aistudio ${action} returned ${res.status}`);
-      return null;
-    }
-    return await res.json();
-  } catch (err) {
-    console.error(`[deal.js/agent] aistudio ${action} call failed:`, err.message);
-    return null;
-  }
-}
-
-/**
- * Atomically check + increment the daily usage counter.
- * Never throws — on any Firestore error it allows the action to avoid
- * blocking users over an infra hiccup.
- */
-async function agentCheckAndIncrementQuota(db, uid, plan) {
-  const limits = AGENT_PLAN_LIMITS[plan] ?? AGENT_PLAN_LIMITS.free;
-  const rpd    = limits.rpd;
-  const today  = agentTodayUTC();
-  const metaRef = db.collection('users').doc(uid).collection('agentMeta').doc('daily');
-
-  try {
-    let allowed = false;
-    let finalCount = 0;
-    await db.runTransaction(async tx => {
-      const snap = await tx.get(metaRef);
-      const data = snap.exists ? snap.data() : {};
-      const count = (data.date === today) ? (data.count || 0) : 0;
-      if (count >= rpd) { allowed = false; finalCount = count; return; }
-      allowed = true;
-      finalCount = count + 1;
-      tx.set(metaRef, { date: today, count: finalCount, plan, updatedAt: FieldValue.serverTimestamp() }, { merge: false });
-    });
-    return { allowed, used: finalCount, limit: rpd, plan };
-  } catch (err) {
-    console.warn('[deal.js/agent] quota check error (allowing):', err.message);
-    return { allowed: true, used: 0, limit: rpd, plan };
-  }
-}
-
-async function agentVerifyEligible(db, uid, agentConfig) {
-  const userSnap = await db.collection('users').doc(uid).get();
-  if (!userSnap.exists) return { ok: false, reason: 'User not found' };
-
-  const userData = userSnap.data();
-  const plan     = userData.plan || 'free';
-  if (!AGENT_ALLOWED_PLANS.includes(plan)) {
-    return { ok: false, reason: `Unknown plan: ${plan}` };
-  }
-
-  const keyId = agentConfig?.keyId;
-  if (!keyId) return { ok: false, reason: 'No API key linked to agent' };
-
-  const keySnap = await db.collection('apiKeys').doc(keyId).get();
-  if (!keySnap.exists) return { ok: false, reason: 'Linked API key not found' };
-
-  const keyData = keySnap.data();
-  if (keyData.ownerUid !== uid) return { ok: false, reason: 'API key does not belong to this user' };
-  if (keyData.active === false) return { ok: false, reason: 'Linked API key has been revoked' };
-
-  return { ok: true, plan, keyId };
-}
-
-async function agentProcessUser(db, uid, agentConfig, results) {
-  const eligibility = await agentVerifyEligible(db, uid, agentConfig);
-  if (!eligibility.ok) {
-    results.skipped.push({ uid, reason: eligibility.reason });
-    await db.collection('users').doc(uid).collection('agentLog').add({
-      type: 'skipped',
-      msg:  `Agent did not run: ${eligibility.reason}.`,
-      ts:   FieldValue.serverTimestamp(),
-    }).catch(() => {});
-    if (eligibility.reason.includes('API key')) {
-      await db.collection('users').doc(uid).update({ 'agentConfig.active': false }).catch(() => {});
-      await db.collection('users').doc(uid).collection('agentLog').add({
-        type: 'deactivated',
-        msg:  `Agent auto-deactivated: ${eligibility.reason}`,
-        ts:   FieldValue.serverTimestamp(),
-      }).catch(() => {});
-    }
-    return;
-  }
-
-  const quota = await agentCheckAndIncrementQuota(db, uid, eligibility.plan);
-  if (!quota.allowed) {
-    results.skipped.push({ uid, reason: `Daily limit reached (${quota.used}/${quota.limit} requests used · ${eligibility.plan} plan)` });
-    const today   = agentTodayUTC();
-    const metaRef = db.collection('users').doc(uid).collection('agentMeta').doc('daily');
-    const meta    = (await metaRef.get()).data() || {};
-    if (meta.lastQuotaLogDate !== today) {
-      await metaRef.set({ lastQuotaLogDate: today }, { merge: true }).catch(() => {});
-      await db.collection('users').doc(uid).collection('agentLog').add({
-        type: 'quota_hit',
-        msg:  `Daily request limit reached (${quota.limit} RPD on ${eligibility.plan} plan). Resets tomorrow UTC.`,
-        ts:   FieldValue.serverTimestamp(),
-      }).catch(() => {});
-    }
-    return;
-  }
-
-  try {
-    await agentHandlePendingDeals(db, uid, agentConfig, results);
-    if (agentConfig.autoReply?.enabled)  await agentHandleUnrepliedMessages(db, uid, agentConfig, results);
-    if (agentConfig.priceDrop?.enabled)  await agentHandlePriceDrop(db, uid, agentConfig, results);
-    if (agentConfig.autoRelist?.enabled) await agentHandleAutoRelist(db, uid, agentConfig, results);
-  } catch (err) {
-    results.errors.push({ uid, error: err.message });
-    await db.collection('users').doc(uid).collection('agentLog').add({
-      type: 'error',
-      msg:  `Agent run failed: ${err.message}`,
-      ts:   FieldValue.serverTimestamp(),
-    }).catch(() => {});
-  }
-}
-
-// Called directly (in-process) right after create-deal, above — lets the
-// seller's agent look at the new deal immediately instead of waiting for
-// the next cron tick.
-export async function runAgentForSeller(sellerUid, dealId) {
   const db = getAdminDb();
-  const sellerSnap = await db.collection('users').doc(sellerUid).get();
-  if (!sellerSnap.exists) return;
-  const agentConfig = sellerSnap.data().agentConfig;
-  if (!agentConfig?.active) return;
-  const results = { processed: [], errors: [], skipped: [] };
-  await agentProcessUser(db, sellerUid, agentConfig, results);
-  return results;
-}
-
-// ── A. Pending deals — decide via aistudio.js, settle via settleDealCore ────
-async function agentHandlePendingDeals(db, uid, agentConfig, results) {
-  const snap = await db.collection('users').doc(uid)
-    .collection('deals')
-    .where('status', '==', 'pending')
-    .where('agentHandled', '==', false)
+  const snap = await db.collection('users').doc(uid).collection('autosends')
     .orderBy('createdAt', 'desc')
-    .limit(10)
     .get();
-  if (snap.empty) return;
 
-  for (const docSnap of snap.docs) {
-    const dealId = docSnap.id;
-    const deal   = docSnap.data();
-    if (deal.buyerUid === uid) continue;
-
-    try {
-      const decision = await agentDecideDeal(deal, agentConfig);
-
-      if (decision.action === 'hold') {
-        await db.collection('users').doc(uid).collection('agentLog').add({
-          type: 'hold',
-          msg:  `Agent left deal from ${deal.buyerName || 'buyer'} for "${deal.listingTitle}" pending for your review: ${decision.reason || 'not confident enough to decide automatically'}.`,
-          ts:   FieldValue.serverTimestamp(),
-        });
-        results.processed.push({ uid, dealId, action: 'hold' });
-        continue;
-      }
-
-      let settleResult;
-      try {
-        settleResult = await settleDealCore({ callerUid: uid, dealId, action: decision.action });
-      } catch (err) {
-        if (err.code === 'ALREADY_SETTLED') {
-          results.skipped.push({ uid, dealId, reason: `Deal already ${err.status || 'resolved'} before agent could act` });
-          continue;
-        }
-        throw err;
-      }
-
-      await db.collection('users').doc(uid).collection('deals').doc(dealId)
-        .update({ agentHandled: true, agentAction: decision.action }).catch(() => {});
-
-      await db.collection('users').doc(uid).collection('agentLog').add({
-        type: decision.action === 'accept' ? 'auto_accept' : 'auto_reject',
-        msg:  decision.action === 'accept'
-          ? `Agent auto-accepted deal from ${deal.buyerName || 'buyer'} for "${deal.listingTitle}".`
-          : `Agent auto-rejected deal from ${deal.buyerName || 'buyer'} for "${deal.listingTitle}". Reason: ${decision.reason || 'below floor'}.`,
-        ts: FieldValue.serverTimestamp(),
-      });
-
-      results.processed.push({ uid, dealId, action: decision.action, chatRoomId: settleResult?.chatRoomId });
-    } catch (err) {
-      results.errors.push({ uid, dealId, error: err.message });
-      await db.collection('users').doc(uid).collection('agentLog').add({
-        type: 'error',
-        msg:  `Agent failed to process deal for "${deal.listingTitle || 'a listing'}": ${err.message}`,
-        ts:   FieldValue.serverTimestamp(),
-      }).catch(() => {});
-    }
-  }
-}
-
-async function agentDecideDeal(deal, agentConfig) {
-  const { autoAccept, autoReject } = agentConfig;
-  const offerPrice  = deal.offerPrice   ?? deal.listingPrice ?? 0;
-  const listedPrice = deal.listingPrice ?? 0;
-
-  // minPercent is a percentage of the listing's own price (e.g. 80 = must
-  // offer >= 80% of listed price), not a flat dollar figure — a single
-  // seller's listings can range from a $200 site to a $50k app, so a fixed
-  // minPrice would either block everything on the cheap listing or accept
-  // lowball offers on the expensive one.
-  const minPercent = autoAccept?.minPercent ?? 100;
-  const minAcceptAmount = listedPrice > 0 ? listedPrice * (minPercent / 100) : null;
-
-  if (autoAccept?.enabled && minAcceptAmount != null && offerPrice >= minAcceptAmount) {
-    return { action: 'accept', reason: 'Meets minimum offer percentage' };
-  }
-  if (autoReject?.enabled && offerPrice < (autoReject.floor ?? 0)) {
-    return { action: 'reject', reason: 'Below floor price' };
-  }
-
-  const aiResult = await callAiStudio('agent-deal-decision', {
-    listingTitle: deal.listingTitle,
-    listingPrice: listedPrice,
-    offerPrice,
-    buyerMessage: deal.message || deal.introMessage || '',
-    autoAcceptMinPercent: autoAccept?.minPercent ?? null,
-    autoRejectFloor: autoReject?.floor ?? null,
+  const schedules = snap.docs.map(d => {
+    const s = d.data();
+    return {
+      id:             d.id,
+      recipientUid:   s.recipientUid,
+      recipientName:  s.recipientName,
+      recipientEmail: s.recipientEmail,
+      amount:         s.amount,
+      intervalDays:   s.intervalDays,
+      note:           s.note || '',
+      status:         s.status,
+      nextRunAt:      s.nextRunAt?.toMillis?.() || null,
+      lastRunAt:      s.lastRunAt?.toMillis?.() || null,
+      runCount:       s.runCount || 0,
+      failCount:      s.failCount || 0,
+    };
   });
 
-  if (!aiResult || !aiResult.action) {
-    return { action: 'hold', reason: 'AI Studio unavailable — left for manual review' };
-  }
-  return { action: aiResult.action, reason: aiResult.reason };
+  return res.status(200).json({ schedules });
 }
 
-// ── B. Auto-reply ────────────────────────────────────────────────────────
-async function agentHandleUnrepliedMessages(db, uid, agentConfig, results) {
-  const threadsSnap = await db.collection('users').doc(uid)
-    .collection('threads')
-    .where('isDealChat', '==', true)
-    .where('sellerUid',  '==', uid)
-    .where('unread',     '==', true)
-    .limit(5)
-    .get();
-  if (threadsSnap.empty) return;
+// ─────────────────────────────────────────────────────────────────────────────
+// autosend-cancel  { idToken, scheduleId }  →  { success }
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleAutoSendCancel(req, res) {
+  const { idToken, scheduleId } = req.body;
+  if (!idToken)     return res.status(401).json({ error: 'Missing auth token' });
+  if (!scheduleId)  return res.status(400).json({ error: 'Missing scheduleId' });
 
-  for (const threadDoc of threadsSnap.docs) {
-    const { chatRoomId, listingTitle, expiresAt } = threadDoc.data();
-    if (!chatRoomId) continue;
-    if (expiresAt && Date.now() > expiresAt) continue;
+  const fbUser = await verifyFirebaseToken(idToken);
+  const uid = fbUser.localId;
 
-    try {
-      const msgsSnap = await db.collection('dealChats').doc(chatRoomId)
-        .collection('messages').orderBy('createdAt', 'desc').limit(5).get();
-      if (msgsSnap.empty) continue;
-
-      const msgs     = msgsSnap.docs.map(d => d.data());
-      const buyerMsg = msgs.find(m => m.uid !== uid && m.uid !== 'system' && !m.isAgent && m.type === 'text');
-      if (!buyerMsg) continue;
-
-      const sellerMsg = msgs.find(m => m.uid === uid);
-      if (sellerMsg && (sellerMsg.createdAt || 0) >= (buyerMsg.createdAt || 0)) continue;
-
-      const tone = agentConfig.autoReply?.tone || 'professional';
-      const aiResult = await callAiStudio('agent-auto-reply', { listingTitle, buyerMessage: buyerMsg.text, tone });
-      if (!aiResult?.reply) continue;
-
-      const now = Date.now();
-      await db.collection('dealChats').doc(chatRoomId).collection('messages').add({
-        uid, senderName: 'Agent (Auto-Reply)', text: aiResult.reply,
-        type: 'text', isAgent: true, createdAt: now,
-      });
-      await db.collection('users').doc(uid).collection('threads').doc(chatRoomId)
-        .update({ unread: false, lastMessage: aiResult.reply, lastAt: now });
-      await db.collection('users').doc(uid).collection('agentLog').add({
-        type: 'auto_reply',
-        msg:  `Agent auto-replied in deal chat for "${listingTitle}".`,
-        ts:   FieldValue.serverTimestamp(),
-      });
-
-      results.processed.push({ uid, chatRoomId, action: 'auto_reply' });
-    } catch (err) {
-      results.errors.push({ uid, chatRoomId: threadDoc.id, error: err.message });
-    }
-  }
-}
-
-// ── C. Price drop ────────────────────────────────────────────────────────
-async function agentHandlePriceDrop(db, uid, agentConfig, results) {
-  const pct      = agentConfig.priceDrop?.pct  || 10;
-  const days     = agentConfig.priceDrop?.days || 7;
-  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
-
-  const snap = await db.collection('listings')
-    .where('ownerId', '==', uid)
-    .where('status',  '==', 'active')
-    .get();
-
-  for (const docSnap of snap.docs) {
-    const listing   = docSnap.data();
-    const createdAt = listing.createdAt?.toMillis?.() ?? listing.createdAt ?? Date.now();
-    const price     = listing.financials?.price ?? listing.price ?? null;
-    if (price == null || createdAt > cutoffMs) continue;
-    if (listing.lastPriceDropAt && listing.lastPriceDropAt > cutoffMs) continue;
-
-    const newPrice = Math.max(1, Math.round(price * (1 - pct / 100)));
-    await db.collection('listings').doc(docSnap.id).update({
-      'financials.price': newPrice,
-      price:              newPrice,
-      lastPriceDropAt:    Date.now(),
-    });
-    await db.collection('users').doc(uid).collection('agentLog').add({
-      type: 'price_drop',
-      msg:  `Agent dropped "${listing.title}" $${price} → $${newPrice} (${pct}% after ${days} days).`,
-      ts:   FieldValue.serverTimestamp(),
-    });
-    results.processed.push({ uid, listingId: docSnap.id, action: 'price_drop', from: price, to: newPrice });
-  }
-}
-
-// ── D. Auto-relist ───────────────────────────────────────────────────────
-async function agentHandleAutoRelist(db, uid, agentConfig, results) {
-  const maxCount = agentConfig.autoRelist?.maxCount || 3;
-
-  const snap = await db.collection('listings')
-    .where('ownerId', '==', uid)
-    .where('status',  '==', 'inactive')
-    .get();
-
-  for (const docSnap of snap.docs) {
-    const listing     = docSnap.data();
-    const relistCount = listing.relistCount || 0;
-    if (relistCount >= maxCount) continue;
-
-    await db.collection('listings').doc(docSnap.id).update({
-      status:      'active',
-      relistCount: relistCount + 1,
-      relistedAt:  Date.now(),
-    });
-    await db.collection('users').doc(uid).collection('agentLog').add({
-      type: 'relist',
-      msg:  `Agent re-listed "${listing.title}" (${relistCount + 1}/${maxCount} relists used).`,
-      ts:   FieldValue.serverTimestamp(),
-    });
-    results.processed.push({ uid, listingId: docSnap.id, action: 'relist', count: relistCount + 1 });
-  }
-}
-
-// ── Route handlers, wired into the main `handler` switch above ──────────
-
-// GET /api/deal?action=agent-sweep — Vercel Cron, every minute. Reuses
-// CRON_SECRET (same secret as sweep-expired-deals) rather than introducing
-// a second cron secret for what is, from an auth standpoint, an identical
-// "trusted scheduler" situation.
-async function handleAgentSweep(req, res) {
   const db = getAdminDb();
-  const results = { processed: [], errors: [], skipped: [] };
+  const ref = db.collection('users').doc(uid).collection('autosends').doc(scheduleId);
+  const snap = await ref.get();
+  if (!snap.exists) return res.status(404).json({ error: 'Schedule not found' });
 
-  const usersSnap = await db.collection('users').where('agentConfig.active', '==', true).get();
-  if (usersSnap.empty) return res.status(200).json({ msg: 'No active agents' });
+  await ref.update({ status: 'cancelled', cancelledAt: FieldValue.serverTimestamp() });
 
-  await Promise.all(usersSnap.docs.map(async userDoc => {
-    const uid         = userDoc.id;
-    const agentConfig = userDoc.data().agentConfig;
-    if (!agentConfig?.active) return;
-    await agentProcessUser(db, uid, agentConfig, results);
-  }));
+  const s = snap.data();
+  await db.collection('users').doc(uid).collection('transactions').add({
+    type:      'autosend_settings',
+    amount:    0,
+    label:     'Auto send cancelled',
+    note:      `Stopped recurring $${Number(s.amount || 0).toFixed(2)} to ${s.recipientName || 'recipient'}.`,
+    status:    'completed',
+    createdAt: FieldValue.serverTimestamp(),
+  });
 
-  return res.status(200).json(results);
+  return res.status(200).json({ success: true });
 }
 
-// GET /api/deal?action=agent-limits&uid=... — public, read-only. Populates
-// the plan/usage cards in the frontend without hardcoding limits there.
-async function handleAgentLimits(req, res) {
-  const { uid } = req.query || {};
-  if (!uid) return res.status(400).json({ error: 'Missing uid' });
+// ─────────────────────────────────────────────────────────────────────────────
+// autosend-run  { cronSecret }  →  { processed, succeeded, failed }
+//
+// Cron entry point — no idToken (this isn't called by a logged-in browser).
+// Protect it with AUTOSEND_CRON_SECRET in env and point your scheduler here.
+// Scans every user doc that has at least one active autosend schedule due
+// (nextRunAt <= now) via a collection-group query, and processes each one:
+//   - re-verifies the recipient still exists
+//   - re-checks the sender's live balance (never trusts cached data)
+//   - on success: debits sender, credits recipient (95% after 5% fee, same
+//     as one-off Send), advances nextRunAt by intervalDays, logs a normal
+//     'send'/'receive' transaction pair on both sides
+//   - on failure (insufficient balance, recipient gone, etc.): does NOT
+//     advance nextRunAt (retries next sweep), increments failCount, and logs
+//     a 'failed' transaction on the sender's side so History shows exactly
+//     what happened and why
+//   - after 5 consecutive failures, auto-pauses the schedule (status:
+//     'paused') so a permanently-broken schedule doesn't spam failed
+//     attempts forever; the user can review and cancel/fix it from Send tab
+// ─────────────────────────────────────────────────────────────────────────────
+const AUTOSEND_MAX_CONSECUTIVE_FAILS = 5;
+const TRANSFER_FEE_RATE_AUTOSEND = 0.05;
 
-  const db       = getAdminDb();
-  const userSnap = await db.collection('users').doc(uid).get();
-  if (!userSnap.exists) return res.status(404).json({ error: 'User not found' });
+async function handleAutoSendRun(req, res) {
+  const { cronSecret } = req.body || {};
+  if (AUTOSEND_CRON_SECRET && cronSecret !== AUTOSEND_CRON_SECRET) {
+    return res.status(401).json({ error: 'Invalid cron secret' });
+  }
 
-  const plan  = userSnap.data().plan || 'free';
-  const today = agentTodayUTC();
+  const db = getAdminDb();
+  const now = Date.now();
 
-  let usedToday = 0;
-  try {
-    const metaSnap = await db.collection('users').doc(uid).collection('agentMeta').doc('daily').get();
-    if (metaSnap.exists && metaSnap.data().date === today) usedToday = metaSnap.data().count || 0;
-  } catch {}
+  // Collection-group query across every user's autosends subcollection
+  const dueSnap = await db.collectionGroup('autosends')
+    .where('status', '==', 'active')
+    .where('nextRunAt', '<=', Timestamp.fromMillis(now))
+    .limit(200) // safety cap per sweep
+    .get();
 
-  let keyCount = 0;
-  try {
-    const keyIds = userSnap.data().apiKeyIds || [];
-    if (keyIds.length) {
-      const snaps = await Promise.all(keyIds.map(id => db.collection('apiKeys').doc(id).get()));
-      keyCount = snaps.filter(s => s.exists && s.data().active).length;
+  let processed = 0, succeeded = 0, failed = 0;
+
+  for (const scheduleDoc of dueSnap.docs) {
+    processed++;
+    const schedule = scheduleDoc.data();
+    const senderRef = scheduleDoc.ref.parent.parent; // users/{senderUid}
+    const senderUid = senderRef.id;
+    const scheduleRef = scheduleDoc.ref;
+
+    try {
+      const result = await db.runTransaction(async tx => {
+        const [senderSnap, recipSnap] = await Promise.all([
+          tx.get(senderRef),
+          tx.get(db.collection('users').doc(schedule.recipientUid)),
+        ]);
+
+        if (!senderSnap.exists) throw { code: 'sender_missing', message: 'Sender account not found' };
+        if (!recipSnap.exists)  throw { code: 'recipient_missing', message: 'Recipient account no longer exists' };
+
+        const senderData = senderSnap.data();
+        const senderBal = parseFloat((senderData.walletBalance || 0).toFixed(2));
+        const amt = Number(schedule.amount);
+
+        if (amt > senderBal) {
+          throw {
+            code: 'insufficient_balance',
+            message: `Insufficient balance — needed $${amt.toFixed(2)}, had $${senderBal.toFixed(2)}`,
+          };
+        }
+
+        const fee        = parseFloat((amt * TRANSFER_FEE_RATE_AUTOSEND).toFixed(2));
+        const receiveAmt = parseFloat((amt - fee).toFixed(2));
+
+        const senderWithdrawable = parseFloat((senderData.withdrawableBalance || 0).toFixed(2));
+        const newSenderWithdrawable = parseFloat(Math.max(0, senderWithdrawable - amt).toFixed(2));
+        const newSenderBal = parseFloat((senderBal - amt).toFixed(2));
+
+        const recipData = recipSnap.data();
+        const recipBal = parseFloat((recipData.walletBalance || 0).toFixed(2));
+        const recipWithdrawable = parseFloat((recipData.withdrawableBalance || 0).toFixed(2));
+        const newRecipBal = parseFloat((recipBal + receiveAmt).toFixed(2));
+        const newRecipWithdrawable = parseFloat((recipWithdrawable + receiveAmt).toFixed(2));
+
+        tx.update(senderRef, { walletBalance: newSenderBal, withdrawableBalance: newSenderWithdrawable });
+        tx.update(recipSnap.ref, { walletBalance: newRecipBal, withdrawableBalance: newRecipWithdrawable });
+
+        const nextRunAt = Timestamp.fromMillis(now + schedule.intervalDays * 24 * 60 * 60 * 1000);
+        tx.update(scheduleRef, {
+          nextRunAt,
+          lastRunAt: FieldValue.serverTimestamp(),
+          runCount:  FieldValue.increment(1),
+          failCount: 0, // reset consecutive-failure counter on success
+        });
+
+        tx.set(senderRef.collection('transactions').doc(), {
+          type:      'autosend',
+          amount:    -amt,
+          fee,
+          label:     `Auto send to ${schedule.recipientName || 'recipient'}`,
+          note:      (schedule.note ? `"${schedule.note}" · ` : '') + `Repeats every ${schedule.intervalDays} days`,
+          scheduleId: scheduleRef.id,
+          status:    'completed',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+
+        tx.set(recipSnap.ref.collection('transactions').doc(), {
+          type:      'receive',
+          amount:    receiveAmt,
+          fee,
+          label:     `Received from ${senderData.displayName || senderData.username || 'auto send'}`,
+          note:      `Recurring payment · ${Math.round(TRANSFER_FEE_RATE_AUTOSEND * 100)}% fee (${fee.toFixed(2)}) applied`,
+          status:    'completed',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+
+        tx.set(recipSnap.ref.collection('notifications').doc(), {
+          type:      'wallet_transfer',
+          title:     'Money received',
+          body:      `You received a recurring payment of $${receiveAmt.toLocaleString()}.`,
+          read:      false,
+          createdAt: Date.now(),
+        });
+
+        return { newSenderBal };
+      });
+
+      succeeded++;
+      // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
+      await maybeAutoWithdraw(db, schedule.recipientUid);
+      console.log(`[autosend] OK schedule=${scheduleRef.id} sender=${senderUid} newBal=${result.newSenderBal}`);
+
+    } catch (err) {
+      failed++;
+      const code = err?.code || 'unknown_error';
+      const message = err?.message || err?.toString?.() || 'Unknown error';
+      console.warn(`[autosend] FAILED schedule=${scheduleRef.id} sender=${senderUid} code=${code}: ${message}`);
+
+      // Log the failed attempt on the sender's history — do NOT advance
+      // nextRunAt, so the next sweep retries automatically.
+      await senderRef.collection('transactions').add({
+        type:       'autosend_failed',
+        amount:     0,
+        label:      'Auto send failed',
+        note:       message,
+        failReason: code,
+        scheduleId: scheduleRef.id,
+        status:     'failed',
+        createdAt:  FieldValue.serverTimestamp(),
+      });
+
+      const newFailCount = (schedule.failCount || 0) + 1;
+      const updates = { failCount: newFailCount, lastAttemptAt: FieldValue.serverTimestamp() };
+
+      // Auto-pause after too many consecutive failures so a dead schedule
+      // (recipient deleted, permanently broke) doesn't retry forever.
+      if (newFailCount >= AUTOSEND_MAX_CONSECUTIVE_FAILS) {
+        updates.status = 'paused';
+        await senderRef.collection('transactions').add({
+          type:      'autosend_settings',
+          amount:    0,
+          label:     'Auto send paused',
+          note:      `Paused after ${newFailCount} failed attempts in a row. Review and resume from the Send tab.`,
+          status:    'completed',
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      } else {
+        // Retry sooner rather than waiting a full interval again — try
+        // again on the next sweep by leaving nextRunAt in the past (no-op),
+        // it's already <= now so it'll be picked up next run automatically.
+      }
+
+      await scheduleRef.update(updates).catch(e => console.error('[autosend] failed to update failCount', e));
     }
-  } catch {}
+  }
 
-  const planLimits = AGENT_PLAN_LIMITS[plan] ?? AGENT_PLAN_LIMITS.free;
-  return res.status(200).json({
-    plan, rpd: planLimits.rpd, maxKeys: planLimits.maxKeys, usedToday, keyCount,
-    allPlans: AGENT_PLAN_LIMITS,
-  });
+  return res.status(200).json({ processed, succeeded, failed });
 }
 
-// POST /api/deal  { action:'agent-check-key-limit', idToken }
-async function handleAgentCheckKeyLimit(req, res, idToken) {
+// Debits the caller's wallet, sets listings/{listingId}.boostedUntil for
+// legacy/reference purposes, and — the part that actually drives visible
+// placement — writes a denormalized ad record to boostedAds/{listingId}.
+// BoostedRow reads that collection live/uncached (listing.boosted-ads in
+// app/api/listings/_handler.js), never through the feed's TTL'd pool
+// cache, so the purchase is visible on the very next page load. The main
+// feed itself stays a plain seeded shuffle and does not rank by boost —
+// boosted listings only appear in the dedicated row.
+//
+// Price is looked up from BOOST_PLANS here — never trusts a client-sent price,
+// same principle as PLAN_IDS/PLAN_PRICES above. Caller must own the listing.
+// Stacking a boost onto an already-boosted listing extends from whichever is
+// later — now or the current boostedUntil — rather than overwriting it, so a
+// seller topping up mid-boost doesn't lose remaining paid time.
+// ─────────────────────────────────────────────────────────────────────────────
+async function handleBoostListing(req, res) {
+  const { idToken, listingId, days } = req.body;
+  if (!idToken)    return res.status(401).json({ error: 'Missing auth token' });
+  if (!listingId)  return res.status(400).json({ error: 'Missing listingId' });
+
+  const d = Number(days);
+  const price = BOOST_PLANS[d];
+  if (!price) {
+    return res.status(400).json({ error: 'Invalid boost duration' });
+  }
+
+  // 1. Verify Firebase identity
   const fbUser = await verifyFirebaseToken(idToken);
-  const uid    = fbUser.localId;
-  const db     = getAdminDb();
+  const uid = fbUser.localId;
 
-  const userSnap = await db.collection('users').doc(uid).get();
-  if (!userSnap.exists) return res.status(404).json({ error: 'User not found' });
+  // 2. Run everything in a single Firestore transaction via Admin SDK —
+  //    balance check, listing ownership check, wallet debit, and the
+  //    boostedUntil write all succeed or fail together.
+  const db         = getAdminDb();
+  const userRef    = db.collection('users').doc(uid);
+  const listingRef = db.collection('listings').doc(listingId);
 
-  const plan   = userSnap.data().plan || 'free';
-  const keyIds = userSnap.data().apiKeyIds || [];
-  const limits = AGENT_PLAN_LIMITS[plan] ?? AGENT_PLAN_LIMITS.free;
+  const result = await db.runTransaction(async tx => {
+    const [userSnap, listingSnap] = await Promise.all([
+      tx.get(userRef),
+      tx.get(listingRef),
+    ]);
 
-  let activeCount = 0;
-  if (keyIds.length) {
-    const snaps = await Promise.all(keyIds.map(id => db.collection('apiKeys').doc(id).get()));
-    activeCount = snaps.filter(s => s.exists && s.data().active).length;
-  }
+    if (!userSnap.exists)    throw new Error('User document not found');
+    if (!listingSnap.exists) throw new Error('Listing not found');
 
-  return res.status(200).json({ allowed: activeCount < limits.maxKeys, activeCount, maxKeys: limits.maxKeys, plan });
-}
+    const listingData = listingSnap.data();
+    if (listingData.ownerId !== uid) {
+      throw new Error('You can only boost your own listings');
+    }
 
-// POST /api/deal  { action:'agent-create-key', idToken, label }
-function agentRandomKeySuffix() {
-  return Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
-}
+    const bal = parseFloat((userSnap.data().walletBalance || 0).toFixed(2));
+    // Server-side balance check — client cannot spoof this
+    if (price > bal) throw new Error('Insufficient balance');
 
-async function agentGenerateUniqueKey(db, uname) {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const ts      = Date.now().toString(36);
-    const fullKey = `srf_${uname}_${ts}_${agentRandomKeySuffix()}`;
-    const dupe    = await db.collection('apiKeys').where('key', '==', fullKey).limit(1).get();
-    if (dupe.empty) return fullKey;
-  }
-  throw new Error('Could not generate a unique API key, please try again');
-}
+    const updatedBal = parseFloat((bal - price).toFixed(2));
 
-async function handleAgentCreateKey(req, res, idToken) {
-  const { label } = req.body || {};
-  const fbUser = await verifyFirebaseToken(idToken);
-  const uid    = fbUser.localId;
-  const db     = getAdminDb();
+    // Extend from the later of "now" or the current boostedUntil, so a
+    // top-up on an already-boosted listing adds time instead of wasting it.
+    const now = Date.now();
+    const currentUntilMs = listingData.boostedUntil?.toMillis?.() || 0;
+    const baseMs   = Math.max(now, currentUntilMs);
+    const newUntil = baseMs + d * 24 * 60 * 60 * 1000;
+    const newUntilTs = Timestamp.fromMillis(newUntil);
 
-  const userSnap = await db.collection('users').doc(uid).get();
-  if (!userSnap.exists) return res.status(404).json({ error: 'User not found' });
-  const userData = userSnap.data();
+    tx.update(userRef, { walletBalance: updatedBal });
+    tx.update(listingRef, {
+      boostedUntil:   newUntilTs,
+      lastBoostedAt:  FieldValue.serverTimestamp(),
+      lastBoostDays:  d,
+    });
 
-  const plan   = userData.plan || 'free';
-  const keyIds = userData.apiKeyIds || [];
-  const limits = AGENT_PLAN_LIMITS[plan] ?? AGENT_PLAN_LIMITS.free;
+    // Write the paid ad slot itself — a fully self-contained, denormalized
+    // doc in its own `boostedAds` collection, NOT just a flag on the
+    // listings doc. This is what BoostedRow actually reads, and it reads it
+    // live/uncached (see listing.boosted-ads in app/api/listings/
+    // _handler.js) — deliberately independent of the feed's 1-hour TTL
+    // pool cache, so a boost the seller just paid real money for is
+    // visible on the very next page load, not up to an hour later.
+    // Same-transaction write means "payment succeeded" and "ad is live"
+    // can never drift apart — they commit together or not at all.
+    tx.set(db.collection('boostedAds').doc(listingId), {
+      listingId,
+      type:         listingData.type || 'website',
+      ownerId:      listingData.ownerId || null,
+      title:        listingData.title || 'Untitled',
+      tagline:      listingData.tagline || null,
+      url:          listingData.url || null,
+      images:       Array.isArray(listingData.images) ? listingData.images.slice(0, 6) : [],
+      imageCover:   listingData.imageCover || (listingData.images && listingData.images[0]) || null,
+      appIcon:      listingData.appIcon || null,
+      category:     listingData.category || null,
+      gameType:     listingData.gameType || null,
+      financials:   listingData.financials || null,
+      settings:     listingData.settings || null,
+      verified:     !!listingData.verified,
+      boostedUntil: newUntilTs,
+    });
 
-  let activeCount = 0;
-  if (keyIds.length) {
-    const snaps = await Promise.all(keyIds.map(id => db.collection('apiKeys').doc(id).get()));
-    activeCount = snaps.filter(s => s.exists && s.data().active).length;
-  }
-  if (activeCount >= limits.maxKeys) {
-    return res.status(403).json({ error: 'Key limit reached', activeCount, maxKeys: limits.maxKeys, plan });
-  }
+    tx.set(userRef.collection('transactions').doc(), {
+      type:       'boost',
+      amount:     -price,
+      label:      `Boosted listing · ${d} day${d !== 1 ? 's' : ''}`,
+      listingId,
+      status:     'completed',
+      createdAt:  FieldValue.serverTimestamp(),
+    });
 
-  const uname   = (userData.username || 'user').replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 8) || 'user';
-  const fullKey = await agentGenerateUniqueKey(db, uname);
-  const prefix  = fullKey.slice(0, 16) + '…';
-  const keyName = (label || 'My Key').toString().slice(0, 60);
-
-  const keyRef = await db.collection('apiKeys').add({
-    ownerUid: uid, ownerUsername: uname, key: fullKey, prefix, label: keyName,
-    active: true, createdAt: FieldValue.serverTimestamp(),
-    capabilities: ['auto_accept_deals', 'group_management', 'message_moderate'],
+    return { updatedBal, newUntil };
   });
-  await db.collection('users').doc(uid).update({ apiKeyIds: FieldValue.arrayUnion(keyRef.id) });
+
+  // maybeAutoTopUp removed — PayPal deposits/vault no longer exist.
 
   return res.status(200).json({
-    id: keyRef.id, label: keyName, prefix,
-    created: new Date().toISOString().slice(0, 10), active: true,
+    success:      true,
+    newBalance:   result.updatedBal,
+    boostedUntil: result.newUntil,
+    days: d,
+    price,
   });
 }
+
+// ── Setup notes for Auto Send cron ──────────────────────────────────────────
+// 1. Set AUTOSEND_CRON_SECRET in your environment.
+// 2. Point a scheduler (Vercel Cron, cron-job.org, GitHub Actions cron, etc.)
+//    at this endpoint on whatever cadence you like — hourly is plenty, since
+//    a schedule only fires once its nextRunAt is actually due:
+//      POST /api/paypal
+//      Content-Type: application/json
+//      { "action": "autosend-run", "cronSecret": "<AUTOSEND_CRON_SECRET>" }
+// 3. Firestore requires a composite index for the collection-group query
+//    used in handleAutoSendRun (status ASC, nextRunAt ASC) on the
+//    `autosends` collection group. Firestore's error message on first run
+//    will include a direct link to create it — click it once and you're set.
+
+// ── Setup notes for Auto Withdrawal ─────────────────────────────────────────
+// 1. (Recommended) Add an `autoWithdraw` block to LIMITS in limits.js, e.g.:
+//      autoWithdraw: { minThreshold: 10, maxThreshold: 10000, minKeepBalance: 0, maxKeepBalance: 10000 }
+//    mirroring the autoTopUp block already there. This file falls back to
+//    the same defaults if that block is missing, so nothing breaks either way.
+// 2. In deal.js, after a successful escrow release credits the seller's
+//    withdrawableBalance, import and call maybeAutoWithdraw (named export
+//    below) with the seller's uid:
+//      import { maybeAutoWithdraw } from './paypal.js';
+//      await maybeAutoWithdraw(db, sellerUid);
+//    This is the only credit path not already wired up from within this file.
+// 3. Pending auto-filed withdrawals land in the same `withdrawals` collection
+//    as manual ones (flagged auto: true) — no changes needed to whatever
+//    admin process currently pays those out.
 
 export const config = {
-  api: { bodyParser: { sizeLimit: '16kb' } },
+  api: { bodyParser: { sizeLimit: '1mb' } },
 };
+
+export { maybeAutoWithdraw };
+
