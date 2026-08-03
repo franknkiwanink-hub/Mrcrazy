@@ -535,3 +535,67 @@
 
 .buyer-mode  .dcp-ann-cta:hover { filter: brightness(1.1); }
 
+/* ═══════════════════════════════════════
+   BID MODAL — mirrors #spDonateOverlay's structure/spacing exactly
+   (see app/styles/seller-profile.css) so this feels like the same
+   family of overlay rather than a one-off design.
+   ═══════════════════════════════════════ */
+#srfBidOverlay {
+               display: none; position: fixed; inset: 0; z-index: 10200;
+               background: rgba(0,0,0,.82); backdrop-filter: blur(12px);
+               -webkit-backdrop-filter: blur(12px);
+               align-items: center; justify-content: center; padding: 1rem;
+               font-family: inherit;
+               }
+
+#srfBidOverlay.active { display: flex; }
+
+#srfBidBox {
+               background: #0c0c14; border: 1px solid rgba(255,255,255,.09);
+               border-radius: 22px; width: min(400px, 92vw); max-height: 88vh; overflow: hidden;
+               position: relative;
+               display: flex; flex-direction: column;
+               box-shadow: 0 32px 80px rgba(0,0,0,.8);
+               }
+
+#srfBidStickyHeader { position: relative; flex-shrink: 0; padding: 24px 22px 0; }
+
+#srfBidScroll { overflow-y: auto; padding: 0 22px 22px; }
+
+#srfBidClose {
+               position: absolute; top: .85rem; right: .85rem; z-index: 1;
+               width: 30px; height: 30px; border-radius: 50%;
+               background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09); color: rgba(255,255,255,.5);
+               display: flex; align-items: center; justify-content: center; cursor: pointer;
+               transition: background .16s, color .16s;
+               }
+
+#srfBidClose:hover { background: rgba(255,255,255,.1); color: #fff; }
+
+#srfBidClose svg { width: 14px; height: 14px; }
+
+#srfBidHeader { margin-bottom: 18px; padding-right: 1.6rem; }
+
+#srfBidTitle { font-size: 1.05rem; font-weight: 800; color: #f5f5fa; letter-spacing: -.01em; line-height: 1.25; }
+
+#srfBidSubtitle { font-size: .76rem; color: rgba(255,255,255,.4); margin-top: 2px; }
+#srfBidSubtitle[data-phase="live"] { color: #f87171; }
+#srfBidSubtitle[data-phase="upcoming"] { color: #38bdf8; }
+
+#srfBidSummary {
+               display: flex; align-items: stretch; gap: 0;
+               background: rgba(56,189,248,0.05); border: 1px solid rgba(56,189,248,0.15);
+               border-radius: 14px; padding: 14px 0; margin-bottom: 18px;
+               }
+
+#srfBidSubmitBtn {
+               width: 100%; margin-top: 14px;
+               background: #a3e635; border: none; border-radius: 100px;
+               padding: 14px 20px; font-size: 14px; font-weight: 800;
+               color: #000; cursor: pointer; font-family: inherit;
+               transition: filter 0.15s, transform 0.12s;
+               }
+#srfBidSubmitBtn:hover:not(:disabled) { filter: brightness(1.08); }
+#srfBidSubmitBtn:active:not(:disabled) { transform: scale(0.97); }
+#srfBidSubmitBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+
