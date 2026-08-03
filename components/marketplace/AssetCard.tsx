@@ -7,6 +7,7 @@ import { useCurrency } from "@/lib/CurrencyContext";
 import SellerStrip from "./SellerStrip";
 import SaveButton from "./SaveButton";
 import VerifiedBadge from "./VerifiedBadge";
+import AuctionBadge from "./AuctionBadge";
 import AssetIframe from "../listing/AssetIframe";
 
 export default function AssetCard({
@@ -23,6 +24,11 @@ export default function AssetCard({
   const { formatPriceShort } = useCurrency();
   const price = formatPriceShort(fin.price);
   const priceTooltip = typeof fin.price === "number" ? `$${fin.price.toLocaleString()} USD` : undefined;
+  const isAuction = listing.saleType === "auction" && !!listing.auction;
+  const auctionHigh = isAuction
+    ? (typeof listing.auction!.currentBid === "number" ? listing.auction!.currentBid : listing.auction!.startPrice)
+    : null;
+  const auctionPriceStr = auctionHigh !== null ? formatPriceShort(auctionHigh) : price;
   const sellerHandle = listing.ownerEmail?.split("@")[0] || "Anonymous";
 
   const category = listing.category || listing.settings?.category || "3D Asset";
@@ -50,6 +56,7 @@ export default function AssetCard({
 
   return (
     <div ref={cardRef} className={className} data-type="3d" onClick={() => onOpen(listing)}>
+      {isAuction && <AuctionBadge auction={listing.auction!} />}
       <div className="sr-3d-media">
         {listing.embedUrl ? (
           // Decorative in the grid — pointer-events: none via
@@ -89,7 +96,9 @@ export default function AssetCard({
           <h3 className="sr-3d-title">{title}</h3>
           <VerifiedBadge listing={listing} />
         </div>
-        <span className="sr-3d-price" title={priceTooltip}>{price}</span>
+        <span className="sr-3d-price" title={isAuction ? undefined : priceTooltip}>
+          {isAuction ? auctionPriceStr : price}
+        </span>
       </div>
       <div className="sr-3d-stats">
         <div className="sr-stat">
@@ -116,7 +125,7 @@ export default function AssetCard({
               onOpen(listing);
             }}
           >
-            Preview &amp; buy
+            {isAuction ? (listing.auction!.status === "ended" ? "View result" : "Place bid") : "Preview & buy"}
           </button>
         </div>
       </div>
