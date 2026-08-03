@@ -7,6 +7,7 @@ import { useCurrency } from "@/lib/CurrencyContext";
 import SellerStrip from "./SellerStrip";
 import SaveButton from "./SaveButton";
 import VerifiedBadge from "./VerifiedBadge";
+import AuctionBadge from "./AuctionBadge";
 
 export default function GameCard({
   listing,
@@ -22,6 +23,11 @@ export default function GameCard({
   const { formatPriceShort, formatFinCompact } = useCurrency();
   const price = formatPriceShort(fin.price);
   const priceTooltip = typeof fin.price === "number" ? `$${fin.price.toLocaleString()} USD` : undefined;
+  const isAuction = listing.saleType === "auction" && !!listing.auction;
+  const auctionHigh = isAuction
+    ? (typeof listing.auction!.currentBid === "number" ? listing.auction!.currentBid : listing.auction!.startPrice)
+    : null;
+  const auctionPriceStr = auctionHigh !== null ? formatPriceShort(auctionHigh) : price;
   const sellerHandle = listing.ownerEmail?.split("@")[0] || "Anonymous";
 
   const banner =
@@ -62,6 +68,7 @@ export default function GameCard({
       data-type="game"
       onClick={() => onOpen(listing)}
     >
+      {isAuction && <AuctionBadge auction={listing.auction!} />}
       <div className="sr-game-media">
         <img
           src={banner}
@@ -99,7 +106,9 @@ export default function GameCard({
           <h3 className="sr-game-title">{title}</h3>
           <VerifiedBadge listing={listing} />
         </div>
-        <span className="sr-game-price" title={priceTooltip}>{price}</span>
+        <span className="sr-game-price" title={isAuction ? undefined : priceTooltip}>
+          {isAuction ? auctionPriceStr : price}
+        </span>
       </div>
       <div className="sr-game-stats">
         <div className="sr-stat">
@@ -130,7 +139,7 @@ export default function GameCard({
               onOpen(listing);
             }}
           >
-            Play &amp; buy
+            {isAuction ? (listing.auction!.status === "ended" ? "View result" : "Place bid") : "Play & buy"}
           </button>
         </div>
       </div>
