@@ -122,6 +122,10 @@ export default function AssetListingForm({ onBack }: { onBack?: () => void } = {
   const [format, setFormat] = useState("");
   const [license, setLicense] = useState("");
   const [price, setPrice] = useState("");
+  const [saleType, setSaleType] = useState<"fixed" | "auction">("fixed");
+  const [auctionStartPrice, setAuctionStartPrice] = useState("");
+  const [auctionStartTime, setAuctionStartTime] = useState("");
+  const [auctionEndTime, setAuctionEndTime] = useState("");
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -247,7 +251,22 @@ export default function AssetListingForm({ onBack }: { onBack?: () => void } = {
       setErrors({ settings: "Please select a Category, Format, and License." });
       return;
     }
-    if (!price.trim()) {
+    if (saleType === "auction") {
+      if (!auctionStartPrice.trim() || !auctionStartTime || !auctionEndTime) {
+        setErrors({ fin: "Please fill in Starting Price, Start Time, and End Time for your auction." });
+        return;
+      }
+      const startMs = new Date(auctionStartTime).getTime();
+      const endMs = new Date(auctionEndTime).getTime();
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+        setErrors({ fin: "Auction end time must be after the start time." });
+        return;
+      }
+      if (endMs - startMs < 60 * 60 * 1000) {
+        setErrors({ fin: "Auctions must run for at least 1 hour." });
+        return;
+      }
+    } else if (!price.trim()) {
       setErrors({ fin: "Please enter a price." });
       return;
     }
@@ -268,7 +287,19 @@ export default function AssetListingForm({ onBack }: { onBack?: () => void } = {
         category,
         settings: { category, format, license },
         embedCode: embedValue.trim(),
-        financials: { price: parseFloat(price), revenue: 0, expenses: 0 },
+        financials: {
+          price: saleType === "auction" ? parseFloat(auctionStartPrice) : parseFloat(price),
+          revenue: 0,
+          expenses: 0,
+        },
+        saleType,
+        auction: saleType === "auction"
+          ? {
+              startPrice: parseFloat(auctionStartPrice),
+              startTime: new Date(auctionStartTime).toISOString(),
+              endTime: new Date(auctionEndTime).toISOString(),
+            }
+          : undefined,
         attachedRepo: null,
       });
 
@@ -442,14 +473,66 @@ export default function AssetListingForm({ onBack }: { onBack?: () => void } = {
               </Field>
             </div>
 
-            <span style={sectionLabelStyle}>Price</span>
+            <span style={sectionLabelStyle}>Sale Type</span>
             {errors.fin && <ErrorBox>{errors.fin}</ErrorBox>}
-            <Field label="Asking Price (USD)">
-              <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="49" style={inputStyle} />
-            </Field>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", margin: "-8px 0 20px" }}>
-              A one-time price for the asset — no revenue/expenses to report, since this isn't a running business.
+            <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+              <button
+                type="button"
+                onClick={() => setSaleType("fixed")}
+                style={{
+                  flex: 1, padding: "12px 14px", borderRadius: 10, cursor: "pointer",
+                  fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                  border: `1px solid ${saleType === "fixed" ? ACCENT : "rgba(255,255,255,0.1)"}`,
+                  background: saleType === "fixed" ? `${ACCENT}1a` : "rgba(255,255,255,0.03)",
+                  color: saleType === "fixed" ? ACCENT : "rgba(255,255,255,0.6)",
+                }}
+              >
+                Fixed Price
+              </button>
+              <button
+                type="button"
+                onClick={() => setSaleType("auction")}
+                style={{
+                  flex: 1, padding: "12px 14px", borderRadius: 10, cursor: "pointer",
+                  fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                  border: `1px solid ${saleType === "auction" ? ACCENT : "rgba(255,255,255,0.1)"}`,
+                  background: saleType === "auction" ? `${ACCENT}1a` : "rgba(255,255,255,0.03)",
+                  color: saleType === "auction" ? ACCENT : "rgba(255,255,255,0.6)",
+                }}
+              >
+                Auction
+              </button>
             </div>
+
+            {saleType === "auction" ? (
+              <>
+                <span style={sectionLabelStyle}>Auction Details</span>
+                <Field label="Starting Price (USD)">
+                  <input type="number" min="0" value={auctionStartPrice} onChange={(e) => setAuctionStartPrice(e.target.value)} placeholder="49" style={inputStyle} />
+                </Field>
+                <div className="sr-lf-row-2">
+                  <Field label="Start Time">
+                    <input type="datetime-local" value={auctionStartTime} onChange={(e) => setAuctionStartTime(e.target.value)} style={inputStyle} />
+                  </Field>
+                  <Field label="End Time">
+                    <input type="datetime-local" value={auctionEndTime} onChange={(e) => setAuctionEndTime(e.target.value)} style={inputStyle} />
+                  </Field>
+                </div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", margin: "-8px 0 20px" }}>
+                  Buyers must bid at least 10% above the current highest bid (or starting price for the first bid). Runs 1 hour–30 days. Best paired with an Exclusive license.
+                </div>
+              </>
+            ) : (
+              <>
+                <span style={sectionLabelStyle}>Price</span>
+                <Field label="Asking Price (USD)">
+                  <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="49" style={inputStyle} />
+                </Field>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", margin: "-8px 0 20px" }}>
+                  A one-time price for the asset — no revenue/expenses to report, since this isn't a running business.
+                </div>
+              </>
+            )}
 
             {submitError && <ErrorBox>{submitError}</ErrorBox>}
 
