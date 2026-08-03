@@ -102,6 +102,10 @@ interface Draft {
   expenses?: string;
   transferMethods?: string[];
   monthlyVisits?: string;
+  saleType?: "fixed" | "auction";
+  auctionStartPrice?: string;
+  auctionStartTime?: string;
+  auctionEndTime?: string;
 }
 
 const IMGUR_CLIENT_ID = "891e5bb4aa94282";
@@ -194,6 +198,14 @@ export default function WebsiteListingForm({ onBack }: { onBack?: () => void } =
   const [price, setPrice] = useState("");
   const [revenue, setRevenue] = useState("");
   const [expenses, setExpenses] = useState("");
+  // Fixed-price vs auction — mirrors SaleType in lib/listings.ts. Auction
+  // fields only matter/validate when saleType === "auction"; "price" above
+  // remains the source of truth for fixed-price listings exactly as
+  // before, untouched by any of this.
+  const [saleType, setSaleType] = useState<"fixed" | "auction">("fixed");
+  const [auctionStartPrice, setAuctionStartPrice] = useState("");
+  const [auctionStartTime, setAuctionStartTime] = useState("");
+  const [auctionEndTime, setAuctionEndTime] = useState("");
   // Proof of the claimed monthly revenue — required whenever revenue > 0.
   const [revenueProof, setRevenueProof] = useState<ProofImage[]>([]);
   // Optional traffic claim + its supporting analytics screenshots —
@@ -252,6 +264,10 @@ export default function WebsiteListingForm({ onBack }: { onBack?: () => void } =
         if (d.expenses) setExpenses(d.expenses);
         if (d.transferMethods?.length) setTransferMethods(d.transferMethods);
         if (d.monthlyVisits) setMonthlyVisits(d.monthlyVisits);
+        if (d.saleType) setSaleType(d.saleType);
+        if (d.auctionStartPrice) setAuctionStartPrice(d.auctionStartPrice);
+        if (d.auctionStartTime) setAuctionStartTime(d.auctionStartTime);
+        if (d.auctionEndTime) setAuctionEndTime(d.auctionEndTime);
         if (d.step && d.step > 1) setStep(d.step);
       } catch {
         // ignore corrupt draft
@@ -266,6 +282,7 @@ export default function WebsiteListingForm({ onBack }: { onBack?: () => void } =
       const d: Draft = {
         step: nextStep, url, title, desc, frontend, backend, database, monetization,
         location, reason, category, age, structure, price, revenue, expenses, transferMethods, monthlyVisits,
+        saleType, auctionStartPrice, auctionStartTime, auctionEndTime,
       };
       localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
     } catch {
@@ -457,7 +474,26 @@ export default function WebsiteListingForm({ onBack }: { onBack?: () => void } =
       setErrors({ img: "Please upload all 4 images (2 portrait + 2 landscape)." });
       return;
     }
-    if (!price.trim() || !revenue.trim() || !expenses.trim()) {
+    if (saleType === "auction") {
+      if (!auctionStartPrice.trim() || !auctionStartTime || !auctionEndTime) {
+        setErrors({ fin: "Please fill in Starting Price, Start Time, and End Time for your auction." });
+        return;
+      }
+      const startMs = new Date(auctionStartTime).getTime();
+      const endMs = new Date(auctionEndTime).getTime();
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+        setErrors({ fin: "Auction end time must be after the start time." });
+        return;
+      }
+      if (endMs - startMs < 60 * 60 * 1000) {
+        setErrors({ fin: "Auctions must run for at least 1 hour." });
+        return;
+      }
+      if (!revenue.trim() || !expenses.trim()) {
+        setErrors({ fin: "Please fill in Monthly Revenue and Monthly Expenses." });
+        return;
+      }
+    } else if (!price.trim() || !revenue.trim() || !expenses.trim()) {
       setErrors({ fin: "Please fill in Price, Monthly Revenue, and Monthly Expenses." });
       return;
     }
@@ -517,11 +553,19 @@ export default function WebsiteListingForm({ onBack }: { onBack?: () => void } =
         tech: { frontend, backend, database, monetization },
         settings: { category, age, location: location || "", structure, reason: reason || "" },
         financials: {
-          price: parseFloat(price),
+          price: saleType === "auction" ? parseFloat(auctionStartPrice) : parseFloat(price),
           revenue: parseFloat(revenue),
           expenses: parseFloat(expenses),
           revenueProofUrls,
         },
+        saleType,
+        auction: saleType === "auction"
+          ? {
+              startPrice: parseFloat(auctionStartPrice),
+              startTime: new Date(auctionStartTime).toISOString(),
+              endTime: new Date(auctionEndTime).toISOString(),
+            }
+          : undefined,
         traffic: monthlyVisits.trim()
           ? { monthlyVisits: parseFloat(monthlyVisits) || 0, proofUrls: trafficProofUrls }
           : undefined,
@@ -781,13 +825,81 @@ export default function WebsiteListingForm({ onBack }: { onBack?: () => void } =
         {step === 3 && (
           <div>
             {errors.fin && <ErrorBox>{errors.fin}</ErrorBox>}
-            <div className="sr-lf-fin-card">
+
+            <div style={{ marginBottom: 18 }}>
+              <span style={sectionLabelStyle}>Sale Type</span>
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setSaleType("fixed")}
+                  style={{
+                    flex: 1, padding: "12px 14px", borderRadius: 10, cursor: "pointer",
+                    fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                    border: `1px solid ${saleType === "fixed" ? ACCENT : "rgba(255,255,255,0.1)"}`,
+                    background: saleType === "fixed" ? `${ACCENT}1a` : "rgba(255,255,255,0.03)",
+                    color: saleType === "fixed" ? ACCENT : "rgba(255,255,255,0.6)",
+                  }}
+                >
+                  Fixed Price
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSaleType("auction")}
+                  style={{
+                    flex: 1, padding: "12px 14px", borderRadius: 10, cursor: "pointer",
+                    fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                    border: `1px solid ${saleType === "auction" ? ACCENT : "rgba(255,255,255,0.1)"}`,
+                    background: saleType === "auction" ? `${ACCENT}1a` : "rgba(255,255,255,0.03)",
+                    color: saleType === "auction" ? ACCENT : "rgba(255,255,255,0.6)",
+                  }}
+                >
+                  Auction
+                </button>
+              </div>
+            </div>
+
+            {saleType === "auction" ? (
+              <div className="sr-lf-fin-card">
+                <div className="sr-lf-row-3">
+                  <Field label="Starting Price (USD)">
+                    <div className="sr-lf-money">
+                      <input
+                        type="number" min="0" value={auctionStartPrice}
+                        onChange={(e) => setAuctionStartPrice(e.target.value)}
+                        placeholder="10" style={inputStyle}
+                      />
+                    </div>
+                  </Field>
+                  <Field label="Start Time">
+                    <input
+                      type="datetime-local" value={auctionStartTime}
+                      onChange={(e) => setAuctionStartTime(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </Field>
+                  <Field label="End Time">
+                    <input
+                      type="datetime-local" value={auctionEndTime}
+                      onChange={(e) => setAuctionEndTime(e.target.value)}
+                      style={inputStyle}
+                    />
+                  </Field>
+                </div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2 }}>
+                  Buyers must bid at least 10% above the current highest bid (or the starting price for the first bid). Auctions run 1 hour–30 days. Once a bid comes in, the price and dates below lock in.
+                </div>
+              </div>
+            ) : null}
+
+            <div className="sr-lf-fin-card" style={{ marginTop: saleType === "auction" ? 16 : 0 }}>
               <div className="sr-lf-row-3">
-                <Field label="Asking Price (USD)">
-                  <div className="sr-lf-money">
-                    <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="5000" style={inputStyle} />
-                  </div>
-                </Field>
+                {saleType === "fixed" && (
+                  <Field label="Asking Price (USD)">
+                    <div className="sr-lf-money">
+                      <input type="number" min="0" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="5000" style={inputStyle} />
+                    </div>
+                  </Field>
+                )}
                 <Field label="Monthly Revenue (USD)">
                   <div className="sr-lf-money">
                     <input type="number" min="0" value={revenue} onChange={(e) => setRevenue(e.target.value)} placeholder="500" style={inputStyle} />
