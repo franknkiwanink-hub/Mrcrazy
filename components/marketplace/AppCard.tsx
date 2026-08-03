@@ -7,6 +7,7 @@ import { useCurrency } from "@/lib/CurrencyContext";
 import SellerStrip from "./SellerStrip";
 import SaveButton from "./SaveButton";
 import VerifiedBadge from "./VerifiedBadge";
+import AuctionBadge from "./AuctionBadge";
 
 export default function AppCard({
   listing,
@@ -22,6 +23,11 @@ export default function AppCard({
   const { formatPriceShort, formatFinCompact } = useCurrency();
   const price = formatPriceShort(fin.price);
   const priceTooltip = typeof fin.price === "number" ? `$${fin.price.toLocaleString()} USD` : undefined;
+  const isAuction = listing.saleType === "auction" && !!listing.auction;
+  const auctionHigh = isAuction
+    ? (typeof listing.auction!.currentBid === "number" ? listing.auction!.currentBid : listing.auction!.startPrice)
+    : null;
+  const auctionPriceStr = auctionHigh !== null ? formatPriceShort(auctionHigh) : price;
   const sellerHandle = listing.ownerEmail?.split("@")[0] || "Anonymous";
 
   const iconSrc =
@@ -64,6 +70,7 @@ export default function AppCard({
       data-type="app"
       onClick={() => onOpen(listing)}
     >
+      {isAuction && <AuctionBadge auction={listing.auction!} />}
       <div className="sr-app-head">
         <div className="sr-app-icon">
           <img
@@ -109,7 +116,9 @@ export default function AppCard({
             </p>
           ) : null}
         </div>
-        <div className="sr-app-price" title={priceTooltip}>{price}</div>
+        <div className="sr-app-price" title={isAuction ? undefined : priceTooltip}>
+          {isAuction ? auctionPriceStr : price}
+        </div>
       </div>
       <div className="sr-app-stats">
         <div className="sr-stat">
@@ -155,7 +164,7 @@ export default function AppCard({
               onOpen(listing);
             }}
           >
-            View app
+            {isAuction ? (listing.auction!.status === "ended" ? "View result" : "Place bid") : "View app"}
           </button>
         </div>
       </div>
